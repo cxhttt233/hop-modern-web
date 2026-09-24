@@ -87,3 +87,130 @@ export const tableInputConfigSchema: HopConfigSchema = {
     },
   ],
 };
+
+/** Keys follow SelectValuesMeta -> SelectOptions @HopMetadataProperty nesting. */
+export const selectValuesConfigSchema: HopConfigSchema = {
+  pluginId: "SelectValues",
+  pluginType: "transform",
+  title: "Select Values",
+  tier: "T1",
+  fields: [
+    {
+      key: "fields.field",
+      label: "Select & alter fields",
+      control: "EditableTable",
+      valueType: "object[]",
+      columns: [
+        { key: "name", label: "Field", valueType: "string" },
+        { key: "rename", label: "Rename to", valueType: "string" },
+        { key: "length", label: "Length", valueType: "integer" },
+        { key: "precision", label: "Precision", valueType: "integer" },
+      ],
+    },
+    {
+      key: "fields.select_unspecified",
+      label: "Include unspecified fields",
+      control: "VariableInput",
+      valueType: "boolean",
+    },
+    {
+      key: "fields.remove",
+      label: "Remove fields",
+      control: "EditableTable",
+      valueType: "object[]",
+      columns: [{ key: "name", label: "Field", valueType: "string" }],
+    },
+    {
+      key: "fields.meta",
+      label: "Metadata changes",
+      control: "EditableTable",
+      valueType: "object[]",
+      columns: [
+        { key: "name", label: "Field", valueType: "string" },
+        { key: "rename", label: "Rename to", valueType: "string" },
+        { key: "type", label: "Type", valueType: "string" },
+        { key: "length", label: "Length", valueType: "integer" },
+        { key: "precision", label: "Precision", valueType: "integer" },
+        { key: "conversion_mask", label: "Format", valueType: "string" },
+        { key: "date_format_locale", label: "Date locale", valueType: "string" },
+        { key: "date_format_timezone", label: "Date time zone", valueType: "string" },
+        { key: "decimal_symbol", label: "Decimal symbol", valueType: "string" },
+        { key: "grouping_symbol", label: "Grouping symbol", valueType: "string" },
+        { key: "currency_symbol", label: "Currency symbol", valueType: "string" },
+        { key: "encoding", label: "Encoding", valueType: "string" },
+      ],
+    },
+  ],
+};
+
+/** Keys mirror SortRowsMeta and SortRowsField @HopMetadataProperty keys. */
+export const sortRowsConfigSchema: HopConfigSchema = {
+  pluginId: "SortRows",
+  pluginType: "transform",
+  title: "Sort Rows",
+  tier: "T1",
+  fields: [
+    {
+      key: "fields.field",
+      label: "Sort fields",
+      control: "EditableTable",
+      valueType: "object[]",
+      columns: [
+        { key: "name", label: "Field", valueType: "string" },
+        { key: "ascending", label: "Ascending", valueType: "boolean" },
+        { key: "case_sensitive", label: "Case sensitive", valueType: "boolean" },
+        { key: "collator_enabled", label: "Use collator", valueType: "boolean" },
+        { key: "collator_strength", label: "Collator strength", valueType: "integer" },
+        { key: "presorted", label: "Presorted", valueType: "boolean" },
+      ],
+    },
+    {
+      key: "directory",
+      label: "Temporary directory",
+      control: "VfsPicker",
+      valueType: "string",
+      vfsMode: "directory",
+      variable: true,
+    },
+    {
+      key: "sort_prefix",
+      label: "Temporary file prefix",
+      control: "VariableInput",
+      valueType: "string",
+      variable: true,
+    },
+    {
+      key: "sort_size",
+      label: "Sort size",
+      control: "VariableInput",
+      valueType: "string",
+      variable: true,
+    },
+    {
+      key: "free_memory",
+      label: "Free memory threshold",
+      control: "VariableInput",
+      valueType: "string",
+      variable: true,
+    },
+    {
+      key: "unique_rows",
+      label: "Only pass unique rows",
+      control: "VariableInput",
+      valueType: "boolean",
+    },
+    {
+      key: "compress",
+      label: "Compress temporary files",
+      control: "VariableInput",
+      valueType: "boolean",
+    },
+    {
+      key: "compress_variables",
+      label: "Compression variable",
+      control: "VariableInput",
+      valueType: "string",
+      variable: true,
+    },
+  ],
+};
