@@ -1,0 +1,10 @@
+{
+  "name": "hop-modern-web",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": ["app", "contracts"],
+  "scripts": {
+    "build": "npm run build -w @hop-modern/contracts && npm run build -w @hop-modern/app",
+    "typecheck": "npm run typecheck -w @hop-modern/contracts && npm run typecheck -w @hop-modern/app"
+  }
+}
