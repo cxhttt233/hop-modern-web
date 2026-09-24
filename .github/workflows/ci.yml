@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: cxhttt233/hop
-          ref: f7c2694a0b66a151eb244a7e9c11beff46b18421
+          ref: 844a794da83e695f68af69a75bbb71c7d23cf15b
           path: hop
       - uses: actions/setup-java@v6
         with:
