@@ -37,7 +37,7 @@ jobs:
           cache: maven
       - name: Install pinned Hop core
         working-directory: hop
-        run: ./mvnw -q -pl core -am -DskipTests install
+        run: ./mvnw -q -pl lib,core -am -DskipTests install
       - name: Test standalone server
         working-directory: modern/server
         run: mvn -q test
