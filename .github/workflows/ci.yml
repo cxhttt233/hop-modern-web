@@ -8,8 +8,8 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
       - name: Install frontend dependencies
@@ -22,15 +22,15 @@ jobs:
   server:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: modern
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: cxhttt233/hop
           ref: f7c2694a0b66a151eb244a7e9c11beff46b18421
           path: hop
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
