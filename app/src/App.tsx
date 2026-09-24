@@ -91,7 +91,7 @@ export function App() {
           <TableInputConfigPanel
             transformName={String(configured.data.label)}
             value={tableInputConfigs[configured.id] ?? { connection: "", sql: "" }}
-            connections={connections.map((connection) => ({ value: connection.name, label: connection.name }))}
+            connections={connections.map((connection) => ({ id: connection.name, name: connection.name }))}
             onClose={() => setConfigId(undefined)}
             onEditConnection={setMetadataName}
             onApply={(value) => {
