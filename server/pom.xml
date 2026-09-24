@@ -20,6 +20,11 @@
       <version>${hop.version}</version>
     </dependency>
     <dependency>
+      <groupId>org.apache.hop</groupId>
+      <artifactId>hop-engine</artifactId>
+      <version>${hop.version}</version>
+    </dependency>
+    <dependency>
       <groupId>jakarta.servlet</groupId>
       <artifactId>jakarta.servlet-api</artifactId>
       <version>6.1.0</version>
