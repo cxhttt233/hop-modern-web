@@ -79,7 +79,7 @@ export function App() {
         <div className="selection-actions">
           <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
           <button type="button" onClick={() => setMetadataName(connections[0]?.name)}>Connections</button>
-          {canConfigure && <button type="button" onClick={() => setConfigId(selected.id)}>Configure</button>}
+          {canConfigure && selected && <button type="button" onClick={() => setConfigId(selected.id)}>Configure</button>}
         </div>
       </header>
       <section className="workspace">
