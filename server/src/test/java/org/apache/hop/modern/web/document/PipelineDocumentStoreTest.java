@@ -13,6 +13,7 @@ import static org.mockito.Mockito.mock;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.pipeline.PipelineMeta;
@@ -24,7 +25,7 @@ class PipelineDocumentStoreTest {
 
   @Test
   void savesAndReloadsARealHplThroughHopModel() throws Exception {
-    Variables variables = Variables.getADefaultVariableSpace();
+    IVariables variables = Variables.getADefaultVariableSpace();
     IHopMetadataProvider metadataProvider = mock(IHopMetadataProvider.class);
     PipelineDocumentStore store = new PipelineDocumentStore(metadataProvider, variables);
     Path file = tempDir.resolve("round-trip.hpl");
