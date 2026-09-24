@@ -129,3 +129,24 @@ export const databaseConnectionConfigSchema: HopConfigSchema = {
     { key: "rdbms.manualUrl", label: "JDBC URL", control: "VariableInput", valueType: "string", variable: true },
   ],
 };
+
+const configSchemas: readonly HopConfigSchema[] = [
+  tableInputConfigSchema,
+  selectValuesConfigSchema,
+  sortRowsConfigSchema,
+  databaseConnectionConfigSchema,
+];
+
+/** Resolve the declarative browser schema without coupling callers to individual schema modules. */
+export function findConfigSchema(
+  pluginType: HopConfigSchema["pluginType"],
+  pluginId: string,
+): HopConfigSchema | undefined {
+  return configSchemas.find(
+    (schema) => schema.pluginType === pluginType && schema.pluginId === pluginId,
+  );
+}
+
+export function listConfigSchemas(): readonly HopConfigSchema[] {
+  return configSchemas;
+}
