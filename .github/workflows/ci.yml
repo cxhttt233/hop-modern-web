@@ -35,9 +35,9 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: maven
-      - name: Install pinned Hop core
+      - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine -am -DskipTests install
       - name: Test standalone server
         working-directory: modern/server
         run: mvn -q test
