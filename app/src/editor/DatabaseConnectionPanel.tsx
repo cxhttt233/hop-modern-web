@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 
+/** Browser draft using DatabaseMeta/BaseDatabaseMeta transport property paths. */
 export type DatabaseConnection = {
-  id: string;
   name: string;
-  host: string;
-  database: string;
-  port: string;
-  username: string;
+  rdbms: {
+    hostname: string;
+    databaseName: string;
+    port: string;
+    username: string;
+    password?: string;
+    manualUrl?: string;
+  };
 };
 
 type Props = {
@@ -18,8 +22,17 @@ type Props = {
 export function DatabaseConnectionPanel({ value, onApply, onClose }: Props) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
-  const set = (key: keyof DatabaseConnection, next: string) =>
-    setDraft((current) => ({ ...current, [key]: next }));
+  const setName = (name: string) => setDraft((current) => ({ ...current, name }));
+  const setRdbms = (key: keyof DatabaseConnection["rdbms"], next: string) =>
+    setDraft((current) => ({ ...current, rdbms: { ...current.rdbms, [key]: next } }));
+
+  const fields: Array<[keyof DatabaseConnection["rdbms"], string]> = [
+    ["hostname", "Host name"],
+    ["databaseName", "Database name"],
+    ["port", "Port"],
+    ["username", "User name"],
+    ["manualUrl", "JDBC URL"],
+  ];
 
   return (
     <aside className="config-panel" aria-label="Database connection editor">
@@ -27,10 +40,14 @@ export function DatabaseConnectionPanel({ value, onApply, onClose }: Props) {
         <div><strong>Database Connection</strong><span>{value.name}</span></div>
         <button className="icon-button" type="button" aria-label="Close" onClick={onClose}>×</button>
       </div>
-      {(["name", "host", "database", "port", "username"] as const).map((key) => (
+      <label className="field">
+        <span>Connection name</span>
+        <input value={draft.name} onChange={(event) => setName(event.target.value)} />
+      </label>
+      {fields.map(([key, label]) => (
         <label className="field" key={key}>
-          <span>{key === "database" ? "Database" : key[0].toUpperCase() + key.slice(1)}</span>
-          <input value={draft[key]} onChange={(event) => set(key, event.target.value)} />
+          <span>{label}</span>
+          <input value={draft.rdbms[key] ?? ""} onChange={(event) => setRdbms(key, event.target.value)} />
         </label>
       ))}
       <div className="config-actions">
