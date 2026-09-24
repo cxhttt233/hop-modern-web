@@ -123,3 +123,5 @@ export interface HopMetadataSummary {
   name: string;
   metadataType: string;
 }
+
+export { tableInputConfigSchema } from "./configSchemas.js";
