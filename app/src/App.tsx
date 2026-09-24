@@ -43,7 +43,7 @@ export function App() {
   return (
     <main className="shell">
       <header>
-        <div><strong>Hop Modern Web</strong><span>{sample.name}</span></div>
+        <div><strong>Hop Modern Web</strong><span>{sample.name}</span><span className="preview-badge" title="Real server-produced Graph JSON will replace only this development data source.">Development sample</span></div>
         <div className="selection-actions">
           <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
           <button type="button" onClick={() => setMetadataName(connections[0]?.name)}>Connections</button>
@@ -51,6 +51,7 @@ export function App() {
         </div>
       </header>
       <section className="workspace">
+        <div className="preview-note">Walking skeleton · sample graph until the real document transport is integrated</div>
         <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => node.data.pluginId === "TableInput" && setConfigId(node.id)} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={false} panOnDrag zoomOnScroll zoomOnPinch>
           <MiniMap /><Controls /><Background />
         </ReactFlow>
