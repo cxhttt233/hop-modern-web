@@ -5,7 +5,10 @@
     "moduleResolution": "Bundler",
     "declaration": true,
     "outDir": "dist",
-    "strict": true
+    "strict": true,
+    "rootDir": "src"
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }
