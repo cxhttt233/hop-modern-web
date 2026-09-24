@@ -23,9 +23,9 @@ header span, header small { color: #6b7485; }
 .config-heading span { color: #7a8496; font-size: 13px; }
 .icon-button { border: 0; padding: 2px 7px; font-size: 22px; line-height: 1; }
 .field { display: grid; gap: 7px; font-size: 13px; font-weight: 600; color: #465168; }
-.field select, .field textarea { width: 100%; border: 1px solid #cfd7e6; border-radius: 7px; background: #fff; padding: 9px 10px; color: #172033; outline: none; }
-.field select:focus, .field textarea:focus { border-color: #6f8fd8; box-shadow: 0 0 0 3px rgb(111 143 216 / 14%); }
+.field select { width: 100%; border: 1px solid #cfd7e6; border-radius: 7px; background: #fff; padding: 9px 10px; color: #172033; outline: none; }
+.field select:focus { border-color: #6f8fd8; box-shadow: 0 0 0 3px rgb(111 143 216 / 14%); }
 .sql-field { min-height: 0; flex: 1; }
-.sql-field textarea { height: 100%; min-height: 220px; resize: none; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; line-height: 1.55; }
+.monaco-field { height: 100%; min-height: 220px; overflow: hidden; border: 1px solid #cfd7e6; border-radius: 7px; padding: 6px 0; background: white; }
 .config-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .config-actions .primary { border-color: #315fbd; background: #315fbd; color: white; }
