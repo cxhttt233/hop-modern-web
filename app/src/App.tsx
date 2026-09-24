@@ -78,7 +78,7 @@ export function App() {
         </form>
         <div className="selection-actions">
           <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
-          <button type="button" onClick={() => setMetadataName(connections[0]?.name)}>Connections</button>
+          <button type="button" onClick={() => setMetadataName((selected?.data.pluginId === "TableInput" && selected ? tableInputConfigs[selected.id]?.connection : undefined) ?? connections[0]?.name)}>Connections</button>
           {canConfigure && selected && <button type="button" onClick={() => setConfigId(selected.id)}>Configure</button>}
         </div>
       </header>
