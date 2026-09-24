@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { MetadataPicker, type MetadataOption } from "./MetadataPicker";
+import { MonacoEditor } from "./MonacoEditor";
 
 export interface TableInputConfig {
   connectionId: string;
@@ -42,15 +43,10 @@ export function TableInputConfigPanel({
         options={connections}
         onChange={(connectionId) => setDraft((current) => ({ ...current, connectionId }))}
       />
-      <label className="field sql-field">
+      <div className="field sql-field">
         <span>SQL</span>
-        <textarea
-          aria-label="SQL"
-          spellCheck={false}
-          value={draft.sql}
-          onChange={(event) => setDraft((current) => ({ ...current, sql: event.target.value }))}
-        />
-      </label>
+        <MonacoEditor value={draft.sql} onChange={(sql) => setDraft((current) => ({ ...current, sql }))} />
+      </div>
       <div className="config-actions">
         <button type="button" onClick={onClose}>Cancel</button>
         <button className="primary" type="button" onClick={() => onApply(draft)}>Apply</button>
