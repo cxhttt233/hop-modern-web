@@ -22,22 +22,22 @@ function graphNodes(document: HopGraphDocument): Node[] {
 }
 
 const initialConnections: DatabaseConnection[] = [
-  { id: "warehouse", name: "Warehouse", host: "db.internal", database: "warehouse", port: "5432", username: "hop" },
-  { id: "reporting", name: "Reporting", host: "reports.internal", database: "reporting", port: "5432", username: "hop" },
+  { name: "Warehouse", rdbms: { hostname: "db.internal", databaseName: "warehouse", port: "5432", username: "hop" } },
+  { name: "Reporting", rdbms: { hostname: "reports.internal", databaseName: "reporting", port: "5432", username: "hop" } },
 ];
 
 export function App() {
   const [nodes, setNodes] = useState<Node[]>(() => graphNodes(sample));
   const [selectedId, setSelectedId] = useState<string>();
   const [configId, setConfigId] = useState<string>();
-  const [metadataId, setMetadataId] = useState<string>();
+  const [metadataName, setMetadataName] = useState<string>();
   const [connections, setConnections] = useState(initialConnections);
-  const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, TableInputConfig>>({ input: { connectionId: "warehouse", sql: "SELECT *\nFROM orders" } });
+  const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, TableInputConfig>>({ input: { connection: "Warehouse", sql: "SELECT *\nFROM orders" } });
   const edges = useMemo<Edge[]>(() => sample.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })), []);
   const onNodesChange = useCallback((changes: NodeChange<Node>[]) => setNodes((current) => applyNodeChanges(changes, current)), []);
   const selected = nodes.find((node) => node.id === selectedId);
   const configured = nodes.find((node) => node.id === configId);
-  const metadata = connections.find((connection) => connection.id === metadataId);
+  const metadata = connections.find((connection) => connection.name === metadataName);
   const canConfigure = selected?.data.pluginId === "TableInput";
 
   return (
@@ -46,7 +46,7 @@ export function App() {
         <div><strong>Hop Modern Web</strong><span>{sample.name}</span></div>
         <div className="selection-actions">
           <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
-          <button type="button" onClick={() => setMetadataId(connections[0]?.id)}>Connections</button>
+          <button type="button" onClick={() => setMetadataName(connections[0]?.name)}>Connections</button>
           {canConfigure && <button type="button" onClick={() => setConfigId(selected.id)}>Configure</button>}
         </div>
       </header>
@@ -57,17 +57,17 @@ export function App() {
         {configured?.data.pluginId === "TableInput" && (
           <TableInputConfigPanel
             transformName={String(configured.data.label)}
-            value={tableInputConfigs[configured.id] ?? { connectionId: "", sql: "" }}
-            connections={connections}
+            value={tableInputConfigs[configured.id] ?? { connection: "", sql: "" }}
+            connections={connections.map((connection) => ({ value: connection.name, label: connection.name }))}
             onClose={() => setConfigId(undefined)}
-            onEditConnection={setMetadataId}
+            onEditConnection={setMetadataName}
             onApply={(value) => {
               setTableInputConfigs((current) => ({ ...current, [configured.id]: value }));
               setConfigId(undefined);
             }}
           />
         )}
-        {metadata && <DatabaseConnectionPanel value={metadata} onClose={() => setMetadataId(undefined)} onApply={(value) => { setConnections((current) => current.map((item) => item.id === value.id ? value : item)); setMetadataId(undefined); }} />}
+        {metadata && <DatabaseConnectionPanel value={metadata} onClose={() => setMetadataName(undefined)} onApply={(value) => { setConnections((current) => current.map((item) => item.name === metadata.name ? value : item)); setTableInputConfigs((current) => Object.fromEntries(Object.entries(current).map(([id, config]) => [id, config.connection === metadata.name ? { ...config, connection: value.name } : config]))); setMetadataName(undefined); }} />}
       </section>
     </main>
   );
