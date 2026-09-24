@@ -10,6 +10,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
+import { TableInputConfigPanel, type TableInputConfig } from "./editor/TableInputConfigPanel";
 
 const sample: HopGraphDocument = {
   id: "sample",
@@ -26,6 +27,11 @@ const sample: HopGraphDocument = {
   ],
 };
 
+const connections = [
+  { id: "warehouse", name: "Warehouse" },
+  { id: "reporting", name: "Reporting" },
+];
+
 function graphNodes(document: HopGraphDocument): Node[] {
   return document.nodes.map((node) => ({
     id: node.id,
@@ -37,6 +43,10 @@ function graphNodes(document: HopGraphDocument): Node[] {
 export function App() {
   const [nodes, setNodes] = useState<Node[]>(() => graphNodes(sample));
   const [selectedId, setSelectedId] = useState<string>();
+  const [configId, setConfigId] = useState<string>();
+  const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, TableInputConfig>>({
+    input: { connectionId: "warehouse", sql: "SELECT *\nFROM orders" },
+  });
   const edges = useMemo<Edge[]>(
     () => sample.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
     [],
@@ -47,6 +57,8 @@ export function App() {
   }, []);
 
   const selected = nodes.find((node) => node.id === selectedId);
+  const configured = nodes.find((node) => node.id === configId);
+  const canConfigure = selected?.data.pluginId === "TableInput";
 
   return (
     <main className="shell">
@@ -55,7 +67,14 @@ export function App() {
           <strong>Hop Modern Web</strong>
           <span>{sample.name}</span>
         </div>
-        <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
+        <div className="selection-actions">
+          <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
+          {canConfigure && (
+            <button type="button" onClick={() => setConfigId(selected.id)}>
+              Configure
+            </button>
+          )}
+        </div>
       </header>
       <section className="workspace">
         <ReactFlow
@@ -63,6 +82,7 @@ export function App() {
           edges={edges}
           onNodesChange={onNodesChange}
           onNodeClick={(_, node) => setSelectedId(node.id)}
+          onNodeDoubleClick={(_, node) => node.data.pluginId === "TableInput" && setConfigId(node.id)}
           onPaneClick={() => setSelectedId(undefined)}
           fitView
           nodesDraggable
@@ -75,6 +95,18 @@ export function App() {
           <Controls />
           <Background />
         </ReactFlow>
+        {configured?.data.pluginId === "TableInput" && (
+          <TableInputConfigPanel
+            transformName={String(configured.data.label)}
+            value={tableInputConfigs[configured.id] ?? { connectionId: "", sql: "" }}
+            connections={connections}
+            onClose={() => setConfigId(undefined)}
+            onApply={(value) => {
+              setTableInputConfigs((current) => ({ ...current, [configured.id]: value }));
+              setConfigId(undefined);
+            }}
+          />
+        )}
       </section>
     </main>
   );
