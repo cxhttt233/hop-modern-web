@@ -55,7 +55,17 @@ export function App() {
           <MiniMap /><Controls /><Background />
         </ReactFlow>
         {configured?.data.pluginId === "TableInput" && (
-          <TableInputConfigPanel transformName={String(configured.data.label)} value={tableInputConfigs[configured.id] ?? { connectionId: "", sql: "" }} connections={connections} onClose={() => setConfigId(undefined)} onApply={(value) => { setTableInputConfigs((current) => ({ ...current, [configured.id]: value })); setConfigId(undefined); }} />
+          <TableInputConfigPanel
+            transformName={String(configured.data.label)}
+            value={tableInputConfigs[configured.id] ?? { connectionId: "", sql: "" }}
+            connections={connections}
+            onClose={() => setConfigId(undefined)}
+            onEditConnection={setMetadataId}
+            onApply={(value) => {
+              setTableInputConfigs((current) => ({ ...current, [configured.id]: value }));
+              setConfigId(undefined);
+            }}
+          />
         )}
         {metadata && <DatabaseConnectionPanel value={metadata} onClose={() => setMetadataId(undefined)} onApply={(value) => { setConnections((current) => current.map((item) => item.id === value.id ? value : item)); setMetadataId(undefined); }} />}
       </section>
