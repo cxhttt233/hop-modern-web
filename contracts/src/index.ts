@@ -124,4 +124,8 @@ export interface HopMetadataSummary {
   metadataType: string;
 }
 
-export { tableInputConfigSchema } from "./configSchemas.js";
+export {
+  selectValuesConfigSchema,
+  sortRowsConfigSchema,
+  tableInputConfigSchema,
+} from "./configSchemas.js";
