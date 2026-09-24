@@ -125,6 +125,7 @@ export interface HopMetadataSummary {
 }
 
 export {
+  databaseConnectionConfigSchema,
   selectValuesConfigSchema,
   sortRowsConfigSchema,
   tableInputConfigSchema,
