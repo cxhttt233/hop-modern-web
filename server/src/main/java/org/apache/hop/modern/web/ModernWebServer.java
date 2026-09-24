@@ -27,15 +27,18 @@ public final class ModernWebServer {
 
   public static void main(String[] args) throws Exception {
     HopClientEnvironment.init();
+    HttpServer server =
+        GrizzlyHttpServerFactory.createHttpServer(DEFAULT_URI, createResourceConfig());
+    Runtime.getRuntime().addShutdownHook(new Thread(server::shutdownNow));
+    Thread.currentThread().join();
+  }
+
+  static ResourceConfig createResourceConfig() {
     IVariables variables = Variables.getADefaultVariableSpace();
     PipelineDocumentStore store =
         new PipelineDocumentStore(new MemoryMetadataProvider(), variables);
     PipelineOpenResource openResource =
         new PipelineOpenResource(store, new PipelineGraphAdapter());
-
-    ResourceConfig config = new ResourceConfig().register(openResource).register(JacksonFeature.class);
-    HttpServer server = GrizzlyHttpServerFactory.createHttpServer(DEFAULT_URI, config);
-    Runtime.getRuntime().addShutdownHook(new Thread(server::shutdownNow));
-    Thread.currentThread().join();
+    return new ResourceConfig().register(openResource).register(JacksonFeature.class);
   }
 }
