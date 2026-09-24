@@ -13,6 +13,7 @@ interface TableInputConfigPanelProps {
   connections: MetadataOption[];
   onApply: (value: TableInputConfig) => void;
   onClose: () => void;
+  onEditConnection: (connectionId: string) => void;
 }
 
 export function TableInputConfigPanel({
@@ -21,6 +22,7 @@ export function TableInputConfigPanel({
   connections,
   onApply,
   onClose,
+  onEditConnection,
 }: TableInputConfigPanelProps) {
   const [draft, setDraft] = useState(value);
 
@@ -43,6 +45,13 @@ export function TableInputConfigPanel({
         options={connections}
         onChange={(connectionId) => setDraft((current) => ({ ...current, connectionId }))}
       />
+      <button
+        type="button"
+        disabled={!draft.connectionId}
+        onClick={() => onEditConnection(draft.connectionId)}
+      >
+        Edit connection
+      </button>
       <div className="field sql-field">
         <span>SQL</span>
         <MonacoEditor value={draft.sql} onChange={(sql) => setDraft((current) => ({ ...current, sql }))} />
