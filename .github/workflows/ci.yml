@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install frontend dependencies
+        run: npm install
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build frontend
+        run: npm run build
+
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: modern
+      - uses: actions/checkout@v4
+        with:
+          repository: cxhttt233/hop
+          ref: f7c2694a0b66a151eb244a7e9c11beff46b18421
+          path: hop
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Install pinned Hop core
+        working-directory: hop
+        run: ./mvnw -q -pl core -am -DskipTests install
+      - name: Test standalone server
+        working-directory: modern/server
+        run: mvn -q test
