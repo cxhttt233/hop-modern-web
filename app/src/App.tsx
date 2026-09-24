@@ -28,6 +28,7 @@ const initialConnections: DatabaseConnection[] = [
 ];
 
 export function App() {
+  const initialPipelinePath = import.meta.env.VITE_HOP_PIPELINE_PATH?.trim() ?? "";
   const [document, setDocument] = useState<HopGraphDocument>(sample);
   const [source, setSource] = useState<GraphSource>({ kind: "sample" });
   const [nodes, setNodes] = useState<Node[]>(() => graphNodes(sample));
@@ -36,7 +37,8 @@ export function App() {
   const [metadataName, setMetadataName] = useState<string>();
   const [connections, setConnections] = useState(initialConnections);
   const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, TableInputConfig>>({ input: { connection: "Warehouse", sql: "SELECT *\nFROM orders" } });
-  const pipelinePath = import.meta.env.VITE_HOP_PIPELINE_PATH?.trim();
+  const [pipelinePath, setPipelinePath] = useState(initialPipelinePath);
+  const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
 
   useEffect(() => {
     if (!pipelinePath) return;
@@ -69,7 +71,11 @@ export function App() {
   return (
     <main className="shell">
       <header>
-        <div><strong>Hop Modern Web</strong><span>{document.name}</span><span className="preview-badge" title={isRealGraph ? source.path : "Development fallback; configure VITE_HOP_PIPELINE_PATH to open a server-visible .hpl."}>{sourceLabel}</span></div>
+        <div><strong>Hop Modern Web</strong><span>{document.name}</span><span className="preview-badge" title={isRealGraph ? source.path : "Development fallback; open a server-visible .hpl path or configure VITE_HOP_PIPELINE_PATH."}>{sourceLabel}</span></div>
+        <form className="pipeline-open" onSubmit={(event) => { event.preventDefault(); const path = pipelinePathDraft.trim(); if (path) setPipelinePath(path); }}>
+          <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="Server-visible .hpl path" />
+          <button type="submit" disabled={!pipelinePathDraft.trim() || source.kind === "loading"}>Open pipeline</button>
+        </form>
         <div className="selection-actions">
           <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
           <button type="button" onClick={() => setMetadataName(connections[0]?.name)}>Connections</button>
@@ -77,7 +83,7 @@ export function App() {
         </div>
       </header>
       <section className="workspace">
-        {source.kind !== "server" && <div className="preview-note">{source.kind === "loading" ? `Opening ${source.path}` : source.reason ? `Development sample fallback · ${source.reason}` : "Walking skeleton · set VITE_HOP_PIPELINE_PATH to load a real server-visible .hpl"}</div>}
+        {source.kind !== "server" && <div className="preview-note">{source.kind === "loading" ? `Opening ${source.path}` : source.reason ? `Development sample fallback · ${source.reason}` : "Walking skeleton · open a server-visible .hpl above or set VITE_HOP_PIPELINE_PATH"}</div>}
         <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => node.data.pluginId === "TableInput" && setConfigId(node.id)} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={false} panOnDrag zoomOnScroll zoomOnPinch>
           <MiniMap /><Controls /><Background />
         </ReactFlow>
