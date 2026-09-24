@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { MetadataPicker, type MetadataOption } from "./MetadataPicker";
 import { MonacoEditor } from "./MonacoEditor";
 
+/** Browser draft using the real TableInputMeta transport keys. */
 export interface TableInputConfig {
-  connectionId: string;
+  connection: string;
   sql: string;
 }
 
@@ -13,7 +14,7 @@ interface TableInputConfigPanelProps {
   connections: MetadataOption[];
   onApply: (value: TableInputConfig) => void;
   onClose: () => void;
-  onEditConnection: (connectionId: string) => void;
+  onEditConnection: (connectionName: string) => void;
 }
 
 export function TableInputConfigPanel({
@@ -41,14 +42,14 @@ export function TableInputConfigPanel({
       </div>
       <MetadataPicker
         label="Database connection"
-        value={draft.connectionId}
+        value={draft.connection}
         options={connections}
-        onChange={(connectionId) => setDraft((current) => ({ ...current, connectionId }))}
+        onChange={(connection) => setDraft((current) => ({ ...current, connection }))}
       />
       <button
         type="button"
-        disabled={!draft.connectionId}
-        onClick={() => onEditConnection(draft.connectionId)}
+        disabled={!draft.connection}
+        onClick={() => onEditConnection(draft.connection)}
       >
         Edit connection
       </button>
