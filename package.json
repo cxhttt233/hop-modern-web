@@ -5,6 +5,7 @@
   "workspaces": ["app", "contracts"],
   "scripts": {
     "build": "npm run build -w @hop-modern/contracts && npm run build -w @hop-modern/app",
-    "typecheck": "npm run typecheck -w @hop-modern/contracts && npm run typecheck -w @hop-modern/app"
+    "typecheck": "npm run typecheck -w @hop-modern/contracts && npm run build -w @hop-modern/contracts && npm run typecheck -w @hop-modern/app",
+    "dev": "npm run build -w @hop-modern/contracts && npm run dev -w @hop-modern/app"
   }
 }
