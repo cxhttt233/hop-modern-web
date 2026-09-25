@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pipeline>
+  <info><name>v4-table-input-proof</name><name_sync_with_filename>N</name_sync_with_filename><description>V4 authoritative Table Input config proof</description><pipeline_type>Normal</pipeline_type><pipeline_status>0</pipeline_status><parameters/></info>
+  <notepads/>
+  <order/>
+  <transform>
+    <name>table-input</name>
+    <type>TableInput</type>
+    <connection>Warehouse</connection>
+    <sql>SELECT id, name FROM customers</sql>
+    <limit>0</limit>
+    <execute_each_row>N</execute_each_row>
+    <variables_active>N</variables_active>
+    <lazy_conversion_active>N</lazy_conversion_active>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <GUI><xloc>220</xloc><yloc>180</yloc><draw>Y</draw></GUI>
+  </transform>
+  <transform_error_handling/>
+  <attributes/>
+</pipeline>
