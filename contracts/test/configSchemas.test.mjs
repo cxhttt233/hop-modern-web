@@ -1,3 +1,4 @@
+// V4 contract regression: this file intentionally validates only browser/server transport shape.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { findConfigSchema, listConfigSchemas } from "../dist/index.js";
