@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pipeline>
+  <info><name>real-graph-proof</name><name_sync_with_filename>N</name_sync_with_filename><description>V2 real graph proof</description><pipeline_type>Normal</pipeline_type><pipeline_status>0</pipeline_status><parameters/></info>
+  <notepads/>
+  <order><hop><from>source</from><to>sink</to><enabled>Y</enabled></hop></order>
+  <transform><name>source</name><type>Dummy</type><distribute>Y</distribute><copies>1</copies><partitioning><method>none</method><schema_name/></partitioning><GUI><xloc>160</xloc><yloc>160</yloc><draw>Y</draw></GUI></transform>
+  <transform><name>sink</name><type>Dummy</type><distribute>Y</distribute><copies>1</copies><partitioning><method>none</method><schema_name/></partitioning><GUI><xloc>420</xloc><yloc>160</yloc><draw>Y</draw></GUI></transform>
+  <transform_error_handling/><attributes/>
+</pipeline>
