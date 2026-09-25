@@ -95,6 +95,11 @@ jobs:
         env:
           REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
         run: node e2e/real-graph-proof.mjs
+      - name: Prove authoritative semantic transform move
+        working-directory: modern
+        env:
+          REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
+        run: node e2e/v3-semantic-move.mjs
       - name: Show runtime logs on failure
         if: failure()
         run: |
