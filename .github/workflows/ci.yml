@@ -37,7 +37,7 @@ jobs:
           cache: maven
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput -am -DskipTests install
       - name: Test standalone server
         working-directory: modern/server
         run: mvn -q test
@@ -63,7 +63,7 @@ jobs:
           node-version: 24
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput -am -DskipTests install
       - name: Build server runtime classpath
         working-directory: modern/server
         run: mvn -q -DskipTests package dependency:build-classpath -Dmdep.outputFile=classpath.txt
