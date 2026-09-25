@@ -16,10 +16,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.core.Response;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.pipeline.PipelineMeta;
+import org.apache.hop.pipeline.transform.TransformMeta;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -60,6 +62,76 @@ class PipelineOpenResourceTest {
     PipelineGraphDocument changedGraph = (PipelineGraphDocument) changed.getEntity();
     assertEquals(firstGraph.id(), changedGraph.id());
     assertNotEquals(firstGraph.revision(), changedGraph.revision());
+  }
+
+  @Test
+  void movesOpenedPipelineThroughAuthoritativeHopEditor() throws Exception {
+    IVariables variables = Variables.getADefaultVariableSpace();
+    PipelineDocumentStore store =
+        new PipelineDocumentStore(mock(IHopMetadataProvider.class), variables);
+    PipelineGraphAdapter graphAdapter = new PipelineGraphAdapter();
+    PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
+    PipelineOpenResource resource = new PipelineOpenResource(store, graphAdapter, registry);
+    Path file = tempDir.resolve("move.hpl");
+
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("move-pipeline");
+    store.save(file, pipeline);
+
+    Response opened = resource.open(new PipelineOpenResource.OpenRequest(file.toString()));
+    assertEquals(200, opened.getStatus());
+    PipelineGraphDocument openedGraph = (PipelineGraphDocument) opened.getEntity();
+    PipelineDocument authoritative = registry.get(openedGraph.id());
+    assertNotNull(authoritative);
+
+    TransformMeta transform = new TransformMeta();
+    transform.setName("first");
+    transform.setTransformPluginId("ModernWebTestTransform");
+    transform.setLocation(10, 20);
+    authoritative.pipeline().addTransform(transform);
+    authoritative.pipeline().clearUndo();
+
+    Response firstMove =
+        resource.move(
+            openedGraph.id(),
+            new PipelineOpenResource.MoveRequest(List.of("first"), 5, 6));
+    assertEquals(200, firstMove.getStatus());
+    PipelineGraphDocument firstMovedGraph = (PipelineGraphDocument) firstMove.getEntity();
+    PipelineGraphDocument.Node firstMovedNode =
+        firstMovedGraph.nodes().stream().filter(node -> node.id().equals("first")).findFirst().orElseThrow();
+    assertEquals(15, firstMovedNode.x());
+    assertEquals(26, firstMovedNode.y());
+    assertNotNull(authoritative.pipeline().previousUndo());
+
+    Response secondMove =
+        resource.move(
+            openedGraph.id(),
+            new PipelineOpenResource.MoveRequest(List.of("first"), 5, 6));
+    assertEquals(200, secondMove.getStatus());
+    PipelineGraphDocument secondMovedGraph = (PipelineGraphDocument) secondMove.getEntity();
+    PipelineGraphDocument.Node secondMovedNode =
+        secondMovedGraph.nodes().stream().filter(node -> node.id().equals("first")).findFirst().orElseThrow();
+    assertEquals(20, secondMovedNode.x());
+    assertEquals(32, secondMovedNode.y());
+    assertNotEquals(firstMovedGraph.revision(), secondMovedGraph.revision());
+
+    Response missingDocument =
+        resource.move(
+            "missing",
+            new PipelineOpenResource.MoveRequest(List.of("first"), 1, 1));
+    assertEquals(404, missingDocument.getStatus());
+    assertEquals(
+        "document_not_found",
+        ((PipelineOpenResource.ErrorResponse) missingDocument.getEntity()).code());
+
+    Response missingTransform =
+        resource.move(
+            openedGraph.id(),
+            new PipelineOpenResource.MoveRequest(List.of("missing"), 1, 1));
+    assertEquals(422, missingTransform.getStatus());
+    assertEquals(
+        "unknown_transform",
+        ((PipelineOpenResource.ErrorResponse) missingTransform.getEntity()).code());
   }
 
   @Test
