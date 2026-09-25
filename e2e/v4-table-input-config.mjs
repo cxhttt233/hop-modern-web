@@ -18,7 +18,7 @@ try {
   await page.getByRole("button", { name: "Configure" }).click();
   const initialRead = await initialReadPromise;
   const initial = await initialRead.json();
-  if (!initialRead.ok() || initial.config?.connection !== "Warehouse" || initial.config?.sql !== "SELECT id, name FROM customers") throw new Error("Initial authoritative config mismatch");
+  if (!initialRead.ok() || initial.config?.connection !== "Warehouse" || initial.config?.sql !== "SELECT id, name FROM customers") throw new Error(`Initial authoritative config mismatch: status=${initialRead.status()} body=${JSON.stringify(initial)}`);
   const panel = page.getByLabel("table-input configuration");
   const connection = panel.getByLabel("Database connection");
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
