@@ -41,3 +41,62 @@ jobs:
       - name: Test standalone server
         working-directory: modern/server
         run: mvn -q test
+
+  v2-real-graph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: modern
+      - uses: actions/checkout@v7
+        with:
+          repository: cxhttt233/hop
+          ref: 844a794da83e695f68af69a75bbb71c7d23cf15b
+          path: hop
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install pinned Hop engine
+        working-directory: hop
+        run: ./mvnw -q -pl lib,core,engine -am -DskipTests install
+      - name: Build server runtime classpath
+        working-directory: modern/server
+        run: mvn -q -DskipTests package dependency:build-classpath -Dmdep.outputFile=classpath.txt
+      - name: Install frontend and Chromium
+        working-directory: modern
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+          npm run build
+      - name: Start ModernWebServer and Vite
+        working-directory: modern
+        run: |
+          cd server
+          java -cp "target/classes:$(cat classpath.txt)" org.apache.hop.modern.web.ModernWebServer >/tmp/hop-modern-server.log 2>&1 &
+          echo $! >/tmp/hop-modern-server.pid
+          cd ..
+          npm run dev -w @hop-modern/app -- --host 127.0.0.1 >/tmp/hop-modern-vite.log 2>&1 &
+          echo $! >/tmp/hop-modern-vite.pid
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:5173 >/dev/null && curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/pipelines/open >/tmp/server-status 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:5173 >/dev/null || { cat /tmp/hop-modern-vite.log; exit 1; }
+          kill -0 "$(cat /tmp/hop-modern-server.pid)" || { cat /tmp/hop-modern-server.log; exit 1; }
+      - name: Prove real .hpl to React Flow
+        working-directory: modern
+        env:
+          REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
+        run: node e2e/real-graph-proof.mjs
+      - name: Show runtime logs on failure
+        if: failure()
+        run: |
+          cat /tmp/hop-modern-server.log || true
+          cat /tmp/hop-modern-vite.log || true
