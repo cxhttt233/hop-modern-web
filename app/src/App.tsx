@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Edge, type Node, type NodeChange } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
 import { DatabaseConnectionPanel, type DatabaseConnection } from "./editor/DatabaseConnectionPanel";
-import { openPipelineGraph, type GraphSource } from "./editor/graphProvider";
+import { movePipelineTransforms, openPipelineGraph, type GraphSource } from "./editor/graphProvider";
 import { TableInputConfigPanel, type TableInputConfig } from "./editor/TableInputConfigPanel";
 
 const sample: HopGraphDocument = {
@@ -61,6 +61,26 @@ export function App() {
 
   const edges = useMemo<Edge[]>(() => document.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })), [document]);
   const onNodesChange = useCallback((changes: NodeChange<Node>[]) => setNodes((current) => applyNodeChanges(changes, current)), []);
+  const onNodeDragStop = useCallback((_: unknown, node: Node) => {
+    if (source.kind !== "server") return;
+    const authoritative = document.nodes.find((candidate) => candidate.id === node.id && candidate.kind === "transform");
+    if (!authoritative) {
+      setNodes(graphNodes(document));
+      return;
+    }
+    const dx = Math.round(node.position.x - authoritative.x);
+    const dy = Math.round(node.position.y - authoritative.y);
+    if (dx === 0 && dy === 0) {
+      setNodes(graphNodes(document));
+      return;
+    }
+    movePipelineTransforms(document.id, [node.id], dx, dy).then((graph) => {
+      setDocument(graph);
+      setNodes(graphNodes(graph));
+    }).catch(() => {
+      setNodes(graphNodes(document));
+    });
+  }, [document, source]);
   const selected = nodes.find((node) => node.id === selectedId);
   const configured = nodes.find((node) => node.id === configId);
   const metadata = connections.find((connection) => connection.name === metadataName);
@@ -84,7 +104,7 @@ export function App() {
       </header>
       <section className="workspace">
         {source.kind !== "server" && <div className="preview-note">{source.kind === "loading" ? `Opening ${source.path}` : source.reason ? `Development sample fallback · ${source.reason}` : "Walking skeleton · open a server-visible .hpl above or set VITE_HOP_PIPELINE_PATH"}</div>}
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => node.data.pluginId === "TableInput" && setConfigId(node.id)} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={false} panOnDrag zoomOnScroll zoomOnPinch>
+        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => node.data.pluginId === "TableInput" && setConfigId(node.id)} onNodeDragStop={onNodeDragStop} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={false} panOnDrag zoomOnScroll zoomOnPinch>
           <MiniMap /><Controls /><Background />
         </ReactFlow>
         {configured?.data.pluginId === "TableInput" && (
