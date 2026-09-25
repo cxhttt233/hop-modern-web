@@ -5,5 +5,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    proxy: {
+      "/api": {
+        target: process.env.HOP_MODERN_SERVER_URL ?? "http://localhost:8080",
+        changeOrigin: true,
+      },
+    },
   },
 });

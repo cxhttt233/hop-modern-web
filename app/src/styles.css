@@ -6,15 +6,20 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
-button, select, textarea { font: inherit; }
+button, select, textarea, input { font: inherit; }
 button { cursor: pointer; }
 
 .shell { height: 100vh; display: grid; grid-template-rows: 58px 1fr; }
-header { display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: white; border-bottom: 1px solid #e5e9f0; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px; background: white; border-bottom: 1px solid #e5e9f0; }
 header div { display: flex; gap: 14px; align-items: baseline; }
 header span, header small { color: #6b7485; }
-.selection-actions button, .config-actions button, .icon-button { border: 1px solid #d6dce7; border-radius: 6px; background: white; padding: 6px 10px; color: #283247; }
+.preview-badge { border: 1px solid #d8dee9; border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 600; }
+.pipeline-open { display: flex; flex: 1; justify-content: center; gap: 8px; min-width: 180px; }
+.pipeline-open input { width: min(420px, 100%); border: 1px solid #d6dce7; border-radius: 6px; padding: 6px 9px; color: #283247; }
+.pipeline-open button, .selection-actions button, .config-actions button, .icon-button { border: 1px solid #d6dce7; border-radius: 6px; background: white; padding: 6px 10px; color: #283247; }
+.pipeline-open button:disabled { opacity: .5; cursor: not-allowed; }
 .workspace { min-height: 0; position: relative; overflow: hidden; }
+.preview-note { position: absolute; z-index: 5; top: 12px; left: 50%; transform: translateX(-50%); border: 1px solid #e0e5ed; border-radius: 7px; background: rgb(255 255 255 / 92%); padding: 6px 10px; color: #687386; font-size: 12px; pointer-events: none; }
 .react-flow__node { border: 1px solid #cfd7e6; border-radius: 8px; background: white; padding: 10px 14px; box-shadow: 0 4px 16px rgb(31 42 68 / 8%); }
 
 .config-panel { position: absolute; z-index: 10; top: 0; right: 0; width: min(460px, 100%); height: 100%; display: flex; flex-direction: column; gap: 20px; padding: 22px; background: white; border-left: 1px solid #e1e6ef; box-shadow: -12px 0 32px rgb(31 42 68 / 10%); }
@@ -23,9 +28,10 @@ header span, header small { color: #6b7485; }
 .config-heading span { color: #7a8496; font-size: 13px; }
 .icon-button { border: 0; padding: 2px 7px; font-size: 22px; line-height: 1; }
 .field { display: grid; gap: 7px; font-size: 13px; font-weight: 600; color: #465168; }
-.field select { width: 100%; border: 1px solid #cfd7e6; border-radius: 7px; background: #fff; padding: 9px 10px; color: #172033; outline: none; }
-.field select:focus { border-color: #6f8fd8; box-shadow: 0 0 0 3px rgb(111 143 216 / 14%); }
+.field select, .field input { width: 100%; border: 1px solid #cfd7e6; border-radius: 7px; background: #fff; padding: 9px 10px; color: #172033; outline: none; }
+.field select:focus, .field input:focus { border-color: #6f8fd8; box-shadow: 0 0 0 3px rgb(111 143 216 / 14%); }
 .sql-field { min-height: 0; flex: 1; }
 .monaco-field { height: 100%; min-height: 220px; overflow: hidden; border: 1px solid #cfd7e6; border-radius: 7px; padding: 6px 0; background: white; }
-.config-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.config-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; }
 .config-actions .primary { border-color: #315fbd; background: #315fbd; color: white; }
+.config-actions .primary:disabled { opacity: .5; cursor: not-allowed; }
