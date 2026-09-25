@@ -100,6 +100,11 @@ jobs:
         env:
           REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
         run: node e2e/v3-semantic-move.mjs
+      - name: Prove authoritative Table Input config
+        working-directory: modern
+        env:
+          REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/v4-table-input-proof.hpl
+        run: node e2e/v4-table-input-config.mjs
       - name: Show runtime logs on failure
         if: failure()
         run: |
