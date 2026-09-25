@@ -14,6 +14,7 @@ try {
   await page.getByRole("button", { name: "Open pipeline" }).click();
   await page.getByText("Server graph").waitFor({ state: "visible" });
   await page.getByText("real-graph-proof", { exact: true }).waitFor({ state: "visible" });
+  await page.locator(".react-flow").waitFor({ state: "visible" });
   const openRequests = requests.filter((url) => url.includes("/api/pipelines/open"));
   if (openRequests.length !== 1) throw new Error("Expected one real pipeline open request");
   const rapRequests = requests.filter((url) => {
