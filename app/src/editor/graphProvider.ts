@@ -31,3 +31,40 @@ export async function movePipelineTransforms(documentId: string, nodeIds: string
   });
   return graphResponse(response, "Transform move");
 }
+
+
+export interface TransformConfigDocument {
+  nodeId: string;
+  pluginId: string;
+  config: Record<string, unknown>;
+}
+
+async function configResponse(response: Response, action: string): Promise<TransformConfigDocument> {
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`${action} failed (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+  return (await response.json()) as TransformConfigDocument;
+}
+
+export async function readPipelineTransformConfig(documentId: string, nodeId: string): Promise<TransformConfigDocument> {
+  const response = await fetch(`/api/pipelines/${encodeURIComponent(documentId)}/config/read`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ nodeId }),
+  });
+  return configResponse(response, "Transform config read");
+}
+
+export async function writePipelineTransformConfig(
+  documentId: string,
+  nodeId: string,
+  config: Record<string, unknown>,
+): Promise<TransformConfigDocument> {
+  const response = await fetch(`/api/pipelines/${encodeURIComponent(documentId)}/config/write`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ nodeId, config }),
+  });
+  return configResponse(response, "Transform config write");
+}
