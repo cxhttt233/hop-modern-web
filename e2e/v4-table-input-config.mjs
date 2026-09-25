@@ -25,8 +25,9 @@ try {
   const editor = panel.getByLabel("sql editor");
   await editor.getByText("SELECT id, name FROM customers", { exact: false }).waitFor({ state: "visible" });
   const sql = "SELECT id, name FROM customers WHERE id > 10";
-  const monacoInput = editor.locator("textarea.inputarea");
-  await monacoInput.focus();
+  const monacoSurface = editor.locator(".monaco-editor");
+  await monacoSurface.waitFor({ state: "visible" });
+  await monacoSurface.click();
   await page.keyboard.press("Control+A");
   await page.keyboard.insertText(sql);
   const writePromise = page.waitForResponse(r => match(r, "/config/write"));
