@@ -10,7 +10,7 @@ export const tableInputConfigSchema: HopConfigSchema = {
   title: "Table Input",
   tier: "T1",
   fields: [
-    { key: "connection", label: "Connection", control: "MetadataPicker", valueType: "string", metadataType: "DatabaseMeta", storeWithName: true, required: true, variable: true },
+    { key: "connection", label: "Connection", control: "MetadataPicker", valueType: "string", metadataType: "DatabaseMeta", required: true, variable: true },
     { key: "sql", label: "SQL", control: "MonacoEditor", valueType: "string", language: "sql", variable: true },
     { key: "sql_from_file", label: "SQL from file", control: "VfsPicker", valueType: "string", vfsMode: "file", variable: true },
     { key: "limit", label: "Row limit", control: "VariableInput", valueType: "string", variable: true },
@@ -20,7 +20,7 @@ export const tableInputConfigSchema: HopConfigSchema = {
     { key: "specify_fields", label: "Specify output fields", control: "VariableInput", valueType: "boolean" },
     { key: "validate_specified_fields", label: "Validate specified fields", control: "VariableInput", valueType: "boolean" },
     {
-      key: "fields",
+      key: "fields.field",
       label: "Output fields",
       control: "EditableTable",
       valueType: "object[]",
@@ -129,3 +129,24 @@ export const databaseConnectionConfigSchema: HopConfigSchema = {
     { key: "rdbms.manualUrl", label: "JDBC URL", control: "VariableInput", valueType: "string", variable: true },
   ],
 };
+
+const configSchemas: readonly HopConfigSchema[] = [
+  tableInputConfigSchema,
+  selectValuesConfigSchema,
+  sortRowsConfigSchema,
+  databaseConnectionConfigSchema,
+];
+
+/** Resolve the declarative browser schema without coupling callers to individual schema modules. */
+export function findConfigSchema(
+  pluginType: HopConfigSchema["pluginType"],
+  pluginId: string,
+): HopConfigSchema | undefined {
+  return configSchemas.find(
+    (schema) => schema.pluginType === pluginType && schema.pluginId === pluginId,
+  );
+}
+
+export function listConfigSchemas(): readonly HopConfigSchema[] {
+  return configSchemas;
+}
