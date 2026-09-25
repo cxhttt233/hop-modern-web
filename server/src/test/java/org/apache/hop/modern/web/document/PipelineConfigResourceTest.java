@@ -13,7 +13,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.ws.rs.core.Response;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.variables.Variables;
+import org.apache.hop.modern.web.ModernWebServer;
 import org.apache.hop.metadata.serializer.json.ConfigJsonSerializer;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.pipeline.PipelineMeta;
@@ -74,6 +76,8 @@ class PipelineConfigResourceTest {
 
   @Test
   void exposesRealParsedTableInputRuntimeClassAndTransport() throws Exception {
+    HopClientEnvironment.init();
+    ModernWebServer.initializePipelinePlugins();
     MemoryMetadataProvider metadataProvider = new MemoryMetadataProvider();
     Path fixture = tempDir.resolve("real-table-input.hpl");
     Files.writeString(
