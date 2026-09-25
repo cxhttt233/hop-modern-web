@@ -11,7 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.ws.rs.core.Response;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import org.apache.hop.core.variables.Variables;
+import org.apache.hop.metadata.serializer.json.ConfigJsonSerializer;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.TransformMeta;
@@ -67,6 +70,86 @@ class PipelineConfigResourceTest {
         (PipelineConfigResource.ConfigResponse) reread.getEntity();
     assertEquals("analytics", rereadConfig.config().get("connection").asText());
     assertEquals("select * from orders", rereadConfig.config().get("sql").asText());
+  }
+
+  @Test
+  void exposesRealParsedTableInputRuntimeClassAndTransport() throws Exception {
+    MemoryMetadataProvider metadataProvider = new MemoryMetadataProvider();
+    Path fixture = tempDir.resolve("real-table-input.hpl");
+    Files.writeString(
+        fixture,
+        """
+        <pipeline>
+          <info>
+            <name>v4-table-input-proof</name>
+            <name_sync_with_filename>N</name_sync_with_filename>
+            <description/>
+            <extended_description/>
+            <pipeline_version/>
+            <pipeline_status>0</pipeline_status>
+            <created_user>-</created_user>
+            <created_date>2026/09/25 00:00:00.000</created_date>
+            <modified_user>-</modified_user>
+            <modified_date>2026/09/25 00:00:00.000</modified_date>
+          </info>
+          <notepads/>
+          <order/>
+          <transform>
+            <name>table-input</name>
+            <type>TableInput</type>
+            <description/>
+            <distribute>Y</distribute>
+            <custom_distribution/>
+            <copies>1</copies>
+            <partitioning>
+              <method>none</method>
+              <schema_name/>
+            </partitioning>
+            <connection>Warehouse</connection>
+            <sql>SELECT id, name FROM customers</sql>
+            <limit>0</limit>
+            <lookup/>
+            <execute_each_row>N</execute_each_row>
+            <variables_active>N</variables_active>
+            <lazy_conversion_active>N</lazy_conversion_active>
+            <attributes/>
+            <GUI>
+              <xloc>160</xloc>
+              <yloc>120</yloc>
+            </GUI>
+          </transform>
+          <transform_error_handling/>
+          <attributes/>
+        </pipeline>
+        """);
+
+    PipelineMeta pipeline =
+        new PipelineDocumentStore(metadataProvider, new Variables()).open(fixture);
+    TransformMeta transform = pipeline.findTransform("table-input");
+    assertTrue(transform != null, "real parse did not produce table-input TransformMeta");
+
+    Object loaded = transform.getTransform();
+    ObjectNode json = ConfigJsonSerializer.toJson(loaded, metadataProvider);
+    String evidence =
+        "loadedClass="
+            + (loaded == null ? "null" : loaded.getClass().getName())
+            + ", pluginId="
+            + transform.getTransformPluginId()
+            + ", json="
+            + json;
+
+    assertTrue(loaded instanceof TableInputMeta, evidence);
+    TableInputMeta tableInput = (TableInputMeta) loaded;
+    String getterEvidence =
+        evidence
+            + ", connection="
+            + tableInput.getConnection()
+            + ", sql="
+            + tableInput.getSql();
+    assertEquals("Warehouse", tableInput.getConnection(), getterEvidence);
+    assertEquals("SELECT id, name FROM customers", tableInput.getSql(), getterEvidence);
+    assertEquals("Warehouse", json.path("connection").asText(), getterEvidence);
+    assertEquals("SELECT id, name FROM customers", json.path("sql").asText(), getterEvidence);
   }
 
   @Test
