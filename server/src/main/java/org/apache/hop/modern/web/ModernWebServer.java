@@ -16,6 +16,7 @@ import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.modern.web.document.PipelineConfigResource;
 import org.apache.hop.modern.web.document.PipelineDocumentRegistry;
+import org.apache.hop.modern.web.document.PipelineEditResource;
 import org.apache.hop.modern.web.document.PipelineDocumentStore;
 import org.apache.hop.modern.web.document.PipelineGraphAdapter;
 import org.apache.hop.modern.web.document.PipelineOpenResource;
@@ -54,9 +55,11 @@ public final class ModernWebServer {
         new PipelineOpenResource(store, new PipelineGraphAdapter(), registry);
     PipelineConfigResource configResource =
         new PipelineConfigResource(registry, metadataProvider);
+    PipelineEditResource editResource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
     return new ResourceConfig()
         .register(openResource)
         .register(configResource)
+        .register(editResource)
         .register(JacksonFeature.class);
   }
 }
