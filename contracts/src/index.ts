@@ -92,7 +92,11 @@ export interface HopConfigField {
 export interface HopConfigGroup {
   key: string;
   label: string;
-  fields: HopConfigField[];
+  /**
+   * Ordered references into HopConfigSchema.fields. Field definitions remain canonical in
+   * schema.fields so T0 generic rendering and T1 layout share one property contract.
+   */
+  fieldKeys: string[];
 }
 
 export interface HopConfigTab {
@@ -122,6 +126,37 @@ export interface HopConfigDocument {
 export interface HopMetadataSummary {
   name: string;
   metadataType: string;
+}
+
+/**
+ * Minimal named-metadata transport. The server resolves metadataType/name through Hop's
+ * metadata provider; the browser never receives or invents a second metadata identity.
+ */
+export interface HopMetadataReadRequest {
+  metadataType: string;
+  name: string;
+}
+
+export interface HopMetadataWriteRequest extends HopMetadataReadRequest {
+  values: Record<string, unknown>;
+  revision?: string;
+}
+
+/**
+ * Sensitive fields are never returned as plaintext. A server may return Hop's encrypted
+ * representation or redact the value. Redaction is explicit so an unchanged editor can preserve
+ * the stored secret instead of accidentally clearing it.
+ */
+export interface HopSensitiveValue {
+  state: "encrypted" | "redacted";
+  value?: string;
+}
+
+export interface HopMetadataDocument {
+  metadataType: string;
+  name: string;
+  revision: string;
+  values: Record<string, unknown>;
 }
 
 export {
