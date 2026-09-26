@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Edge, type Node, type NodeChange } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
 import { DatabaseConnectionPanel, type DatabaseConnection } from "./editor/DatabaseConnectionPanel";
-import { movePipelineTransforms, openPipelineGraph, type GraphSource } from "./editor/graphProvider";
+import { movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { TableInputConfigPanel, type TableInputConfig } from "./editor/TableInputConfigPanel";
 
 const sample: HopGraphDocument = {
@@ -34,6 +34,9 @@ export function App() {
   const [nodes, setNodes] = useState<Node[]>(() => graphNodes(sample));
   const [selectedId, setSelectedId] = useState<string>();
   const [configId, setConfigId] = useState<string>();
+  const [serverConfig, setServerConfig] = useState<TransformConfigDocument>();
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configError, setConfigError] = useState<string>();
   const [metadataName, setMetadataName] = useState<string>();
   const [connections, setConnections] = useState(initialConnections);
   const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, TableInputConfig>>({ input: { connection: "Warehouse", sql: "SELECT *\nFROM orders" } });
@@ -49,6 +52,8 @@ export function App() {
       setNodes(graphNodes(graph));
       setSelectedId(undefined);
       setConfigId(undefined);
+      setServerConfig(undefined);
+      setConfigError(undefined);
       setSource({ kind: "server", path: pipelinePath });
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
@@ -81,6 +86,47 @@ export function App() {
       setNodes(graphNodes(document));
     });
   }, [document, source]);
+  const openTransformConfig = useCallback((nodeId: string) => {
+    if (source.kind !== "server") {
+      setServerConfig(undefined);
+      setConfigError(undefined);
+      setConfigId(nodeId);
+      return;
+    }
+    setConfigLoading(true);
+    setConfigError(undefined);
+    setServerConfig(undefined);
+    readPipelineTransformConfig(document.id, nodeId).then((result) => {
+      setServerConfig(result);
+      setConfigId(nodeId);
+    }).catch((error: unknown) => {
+      setConfigId(undefined);
+      setConfigError(error instanceof Error ? error.message : "Transform config read failed");
+    }).finally(() => setConfigLoading(false));
+  }, [document.id, source]);
+
+  const applyTransformConfig = useCallback((nodeId: string, value: TableInputConfig) => {
+    if (source.kind !== "server") {
+      setTableInputConfigs((current) => ({ ...current, [nodeId]: value }));
+      setConfigId(undefined);
+      return;
+    }
+    if (!serverConfig || serverConfig.nodeId !== nodeId) return;
+    setConfigLoading(true);
+    setConfigError(undefined);
+    const nextConfig = { ...serverConfig.config, connection: value.connection, sql: value.sql };
+    writePipelineTransformConfig(document.id, nodeId, nextConfig)
+      .then(() => readPipelineTransformConfig(document.id, nodeId))
+      .then((authoritative) => {
+        setServerConfig(authoritative);
+        setConfigId(nodeId);
+      })
+      .catch((error: unknown) => {
+        setConfigError(error instanceof Error ? error.message : "Transform config write failed");
+      })
+      .finally(() => setConfigLoading(false));
+  }, [document.id, serverConfig, source]);
+
   const selected = nodes.find((node) => node.id === selectedId);
   const configured = nodes.find((node) => node.id === configId);
   const metadata = connections.find((connection) => connection.name === metadataName);
@@ -99,25 +145,23 @@ export function App() {
         <div className="selection-actions">
           <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
           <button type="button" onClick={() => setMetadataName((selected?.data.pluginId === "TableInput" && selected ? tableInputConfigs[selected.id]?.connection : undefined) ?? connections[0]?.name)}>Connections</button>
-          {canConfigure && selected && <button type="button" onClick={() => setConfigId(selected.id)}>Configure</button>}
+          {canConfigure && selected && <button type="button" disabled={configLoading} onClick={() => openTransformConfig(selected.id)}>Configure</button>}
         </div>
       </header>
       <section className="workspace">
         {source.kind !== "server" && <div className="preview-note">{source.kind === "loading" ? `Opening ${source.path}` : source.reason ? `Development sample fallback · ${source.reason}` : "Walking skeleton · open a server-visible .hpl above or set VITE_HOP_PIPELINE_PATH"}</div>}
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => node.data.pluginId === "TableInput" && setConfigId(node.id)} onNodeDragStop={onNodeDragStop} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={false} panOnDrag zoomOnScroll zoomOnPinch>
+        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => node.data.pluginId === "TableInput" && openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={false} panOnDrag zoomOnScroll zoomOnPinch>
           <MiniMap /><Controls /><Background />
         </ReactFlow>
-        {configured?.data.pluginId === "TableInput" && (
+        {configError && <div className="preview-note" role="alert">{configError}</div>}
+        {configured?.data.pluginId === "TableInput" && (!isRealGraph || serverConfig?.nodeId === configured.id) && (
           <TableInputConfigPanel
             transformName={String(configured.data.label)}
-            value={tableInputConfigs[configured.id] ?? { connection: "", sql: "" }}
+            value={isRealGraph ? { connection: String(serverConfig?.config.connection ?? ""), sql: String(serverConfig?.config.sql ?? "") } : tableInputConfigs[configured.id] ?? { connection: "", sql: "" }}
             connections={connections.map((connection) => ({ id: connection.name, name: connection.name }))}
-            onClose={() => setConfigId(undefined)}
+            onClose={() => { setConfigId(undefined); setServerConfig(undefined); setConfigError(undefined); }}
             onEditConnection={setMetadataName}
-            onApply={(value) => {
-              setTableInputConfigs((current) => ({ ...current, [configured.id]: value }));
-              setConfigId(undefined);
-            }}
+            onApply={(value) => applyTransformConfig(configured.id, value)}
           />
         )}
         {metadata && <DatabaseConnectionPanel value={metadata} onClose={() => setMetadataName(undefined)} onApply={(value) => { setConnections((current) => current.map((item) => item.name === metadata.name ? value : item)); setTableInputConfigs((current) => Object.fromEntries(Object.entries(current).map(([id, config]) => [id, config.connection === metadata.name ? { ...config, connection: value.name } : config]))); setMetadataName(undefined); }} />}

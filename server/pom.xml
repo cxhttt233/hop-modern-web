@@ -25,6 +25,12 @@
       <version>${hop.version}</version>
     </dependency>
     <dependency>
+      <groupId>org.apache.hop</groupId>
+      <artifactId>hop-transform-tableinput</artifactId>
+      <version>${hop.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>jakarta.servlet</groupId>
       <artifactId>jakarta.servlet-api</artifactId>
       <version>6.1.0</version>

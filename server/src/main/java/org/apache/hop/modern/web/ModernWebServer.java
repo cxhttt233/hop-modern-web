@@ -8,9 +8,14 @@ package org.apache.hop.modern.web;
 
 import java.net.URI;
 import org.apache.hop.core.HopClientEnvironment;
+import org.apache.hop.core.plugins.PluginRegistry;
+import org.apache.hop.core.plugins.TransformPluginType;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
+import org.apache.hop.metadata.api.IHopMetadataProvider;
+import org.apache.hop.modern.web.document.PipelineConfigResource;
+import org.apache.hop.modern.web.document.PipelineDocumentRegistry;
 import org.apache.hop.modern.web.document.PipelineDocumentStore;
 import org.apache.hop.modern.web.document.PipelineGraphAdapter;
 import org.apache.hop.modern.web.document.PipelineOpenResource;
@@ -27,18 +32,31 @@ public final class ModernWebServer {
 
   public static void main(String[] args) throws Exception {
     HopClientEnvironment.init();
+    initializePipelinePlugins();
     HttpServer server =
         GrizzlyHttpServerFactory.createHttpServer(DEFAULT_URI, createResourceConfig());
     Runtime.getRuntime().addShutdownHook(new Thread(server::shutdownNow));
     Thread.currentThread().join();
   }
 
+  /** Registers the pipeline transform plugin type required to parse real .hpl transforms. */
+  public static void initializePipelinePlugins() throws Exception {
+    PluginRegistry.addPluginType(TransformPluginType.getInstance());
+    PluginRegistry.init();
+  }
+
   static ResourceConfig createResourceConfig() {
     IVariables variables = Variables.getADefaultVariableSpace();
-    PipelineDocumentStore store =
-        new PipelineDocumentStore(new MemoryMetadataProvider(), variables);
+    IHopMetadataProvider metadataProvider = new MemoryMetadataProvider();
+    PipelineDocumentStore store = new PipelineDocumentStore(metadataProvider, variables);
+    PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
     PipelineOpenResource openResource =
-        new PipelineOpenResource(store, new PipelineGraphAdapter());
-    return new ResourceConfig().register(openResource).register(JacksonFeature.class);
+        new PipelineOpenResource(store, new PipelineGraphAdapter(), registry);
+    PipelineConfigResource configResource =
+        new PipelineConfigResource(registry, metadataProvider);
+    return new ResourceConfig()
+        .register(openResource)
+        .register(configResource)
+        .register(JacksonFeature.class);
   }
 }

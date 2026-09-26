@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: cxhttt233/hop
-          ref: 844a794da83e695f68af69a75bbb71c7d23cf15b
+          ref: cbb70e9215a6dc69da8acfd3743e358f7ba4db1d
           path: hop
       - uses: actions/setup-java@v6
         with:
@@ -37,7 +37,7 @@ jobs:
           cache: maven
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput -am -DskipTests install
       - name: Test standalone server
         working-directory: modern/server
         run: mvn -q test
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: cxhttt233/hop
-          ref: 844a794da83e695f68af69a75bbb71c7d23cf15b
+          ref: cbb70e9215a6dc69da8acfd3743e358f7ba4db1d
           path: hop
       - uses: actions/setup-java@v6
         with:
@@ -63,7 +63,7 @@ jobs:
           node-version: 24
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput -am -DskipTests install
       - name: Build server runtime classpath
         working-directory: modern/server
         run: mvn -q -DskipTests package dependency:build-classpath -Dmdep.outputFile=classpath.txt
@@ -100,6 +100,11 @@ jobs:
         env:
           REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
         run: node e2e/v3-semantic-move.mjs
+      - name: Prove authoritative Table Input config
+        working-directory: modern
+        env:
+          REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/v4-table-input-proof.hpl
+        run: node e2e/v4-table-input-config.mjs
       - name: Show runtime logs on failure
         if: failure()
         run: |
