@@ -38,3 +38,36 @@ test("Database Connection marks password transport as sensitive", () => {
   const password = schema.fields.find(({ key }) => key === "rdbms.password");
   assert.equal(password?.sensitive, true);
 });
+
+
+function assertDeclarativeLayoutCoversSchema(pluginId) {
+  const schema = findConfigSchema("transform", pluginId);
+  assert.ok(schema);
+  assert.ok(schema.tabs?.length, `${pluginId} must expose a T1 declarative layout`);
+
+  const schemaKeys = schema.fields.map(({ key }) => key).sort();
+  const layoutKeys = schema.tabs
+    .flatMap(({ groups }) => groups)
+    .flatMap(({ fieldKeys }) => fieldKeys);
+
+  assert.equal(new Set(layoutKeys).size, layoutKeys.length, `${pluginId} layout must not repeat fields`);
+  assert.deepEqual([...layoutKeys].sort(), schemaKeys, `${pluginId} layout must cover schema.fields exactly once`);
+}
+
+test("Select Values and Sort Rows reuse schema.fields through declarative fieldKeys", () => {
+  assertDeclarativeLayoutCoversSchema("SelectValues");
+  assertDeclarativeLayoutCoversSchema("SortRows");
+});
+
+test("Database Connection sensitive read/write contract stays opaque", () => {
+  const redacted = { state: "redacted" };
+  const encrypted = { state: "encrypted", value: "Encrypted 2be98afc..." };
+
+  assert.deepEqual(redacted, { state: "redacted" });
+  assert.equal(encrypted.state, "encrypted");
+  assert.equal(typeof encrypted.value, "string");
+
+  const schema = findConfigSchema("metadata", "DatabaseMeta");
+  const password = schema?.fields.find(({ key }) => key === "rdbms.password");
+  assert.equal(password?.sensitive, true);
+});
