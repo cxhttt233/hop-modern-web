@@ -105,7 +105,8 @@ export function App() {
     let index = document.nodes.length + 1;
     let nodeId = `new-transform-${index}`;
     while (document.nodes.some((node) => node.id === nodeId)) nodeId = `new-transform-${++index}`;
-    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId: "TableInput", x: 160, y: 160 }));
+    const nextX = Math.max(160, ...document.nodes.map((node) => node.x + 180));
+    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId: "TableInput", x: nextX, y: 160 }));
   }, [document, runGraphCommand, source]);
 
   const deleteSelected = useCallback(() => {
