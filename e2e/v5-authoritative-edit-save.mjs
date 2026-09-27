@@ -28,7 +28,15 @@ try{
  if(!redone.nodes.some(n=>n.id===added.id)) throw new Error("redo add failed");
  await rf(added.id).waitFor();
  p=post("/edit/connect");
- await rf(original).locator(".react-flow__handle.source").dragTo(rf(added.id).locator(".react-flow__handle.target"));
+ const sourceHandle=rf(original).locator(".react-flow__handle.source");
+ const targetHandle=rf(added.id).locator(".react-flow__handle.target");
+ await sourceHandle.waitFor(); await targetHandle.waitFor();
+ const sourceBox=await sourceHandle.boundingBox(); const targetBox=await targetHandle.boundingBox();
+ if(!sourceBox||!targetBox) throw new Error("connect handles are not visible");
+ await page.mouse.move(sourceBox.x+sourceBox.width/2,sourceBox.y+sourceBox.height/2);
+ await page.mouse.down();
+ await page.mouse.move(targetBox.x+targetBox.width/2,targetBox.y+targetBox.height/2,{steps:12});
+ await page.mouse.up();
  const connected=await (await p).json();
  if(!connected.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("connect failed");
  await rf(added.id).click();
