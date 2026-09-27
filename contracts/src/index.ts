@@ -92,7 +92,8 @@ export interface HopConfigField {
 export interface HopConfigGroup {
   key: string;
   label: string;
-  fields: HopConfigField[];
+  /** Ordered references into HopConfigSchema.fields; field semantics have one source of truth. */
+  fieldKeys: string[];
 }
 
 export interface HopConfigTab {
@@ -122,6 +123,30 @@ export interface HopConfigDocument {
 export interface HopMetadataSummary {
   name: string;
   metadataType: string;
+}
+
+/** Opaque sensitive values returned by metadata reads; plaintext is never a read representation. */
+export type HopSensitiveValue =
+  | { state: "redacted" }
+  | { state: "encrypted"; value: string };
+
+export interface HopMetadataDocument {
+  metadataType: string;
+  name: string;
+  revision: string;
+  values: Record<string, unknown>;
+}
+
+/**
+ * Minimal named-metadata write contract.
+ * A redacted sensitive value means "preserve the existing secret"; a user-entered string is a
+ * replacement value and encryption/normalization remains server/Hop-owned.
+ */
+export interface HopMetadataWriteRequest {
+  metadataType: string;
+  name: string;
+  revision?: string;
+  values: Record<string, unknown>;
 }
 
 export {
