@@ -37,7 +37,12 @@ try{
  await page.mouse.down();
  await page.mouse.move(targetBox.x+targetBox.width/2,targetBox.y+targetBox.height/2,{steps:12});
  await page.mouse.up();
- const connected=await (await p).json();
+ const connectResponse=await p;
+ const connectBody=await connectResponse.text();
+ if(!connectResponse.ok()) throw new Error(`connect HTTP ${connectResponse.status()}: ${connectBody}`);
+ let connected;
+ try{ connected=JSON.parse(connectBody); }catch{ throw new Error(`connect returned non-JSON: ${connectBody}`); }
+ if(!Array.isArray(connected.edges)) throw new Error(`connect response missing edges: ${connectBody}`);
  if(!connected.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("connect failed");
  await rf(added.id).click();
  p=post("/edit/delete"); await page.getByRole("button",{name:"Delete"}).click();
