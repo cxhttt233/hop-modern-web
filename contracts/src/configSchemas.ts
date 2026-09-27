@@ -40,6 +40,11 @@ export const selectValuesConfigSchema: HopConfigSchema = {
   pluginType: "transform",
   title: "Select Values",
   tier: "T1",
+  tabs: [
+    { key: "select", label: "Select & alter", groups: [{ key: "select", label: "Fields", fieldKeys: ["fields.field", "fields.select_unspecified"] }] },
+    { key: "remove", label: "Remove", groups: [{ key: "remove", label: "Fields", fieldKeys: ["fields.remove"] }] },
+    { key: "metadata", label: "Metadata", groups: [{ key: "metadata", label: "Changes", fieldKeys: ["fields.meta"] }] },
+  ],
   fields: [
     {
       key: "fields.field",
@@ -84,6 +89,11 @@ export const sortRowsConfigSchema: HopConfigSchema = {
   pluginType: "transform",
   title: "Sort Rows",
   tier: "T1",
+  tabs: [
+    { key: "fields", label: "Fields", groups: [{ key: "fields", label: "Sort fields", fieldKeys: ["fields.field"] }] },
+    { key: "memory", label: "Memory", groups: [{ key: "memory", label: "Sort memory", fieldKeys: ["sort_size", "free_memory", "unique_rows"] }] },
+    { key: "temporary-files", label: "Temporary files", groups: [{ key: "temporary-files", label: "Temporary files", fieldKeys: ["directory", "sort_prefix", "compress", "compress_variables"] }] },
+  ],
   fields: [
     {
       key: "fields.field",
