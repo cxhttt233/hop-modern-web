@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Descriptor;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Property;
+import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Presentation;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Shape;
+import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta;
 import org.apache.hop.pipeline.transforms.sort.SortRowsMeta;
 import org.apache.hop.pipeline.transforms.tableinput.TableInputMeta;
@@ -25,6 +27,8 @@ class AutomaticConfigDescriptorTest {
     Property selected = property(fields.children(), "field");
     assertEquals(Shape.LIST, selected.shape());
     assertFalse(selected.elementProperties().isEmpty());
+    assertEquals(0, fields.layout().order());
+    assertEquals(Presentation.FIELD, fields.layout().presentation());
   }
 
   @Test
@@ -34,6 +38,8 @@ class AutomaticConfigDescriptorTest {
 
     assertEquals(Shape.LIST, sortFields.shape());
     assertEquals("fields", sortFields.groupKey());
+    assertEquals("fields", sortFields.layout().group());
+    assertEquals(Presentation.TABLE, sortFields.layout().presentation());
     assertEquals("org.apache.hop.pipeline.transforms.sort.SortRowsField", sortFields.elementJavaType());
     assertTrue(sortFields.elementProperties().stream().anyMatch(p -> p.key().equals("ascending") && p.shape() == Shape.BOOLEAN));
     assertEquals(Shape.STRING, property(descriptor.properties(), "directory").shape());
@@ -49,7 +55,37 @@ class AutomaticConfigDescriptorTest {
     Property fields = property(descriptor.properties(), "field");
     assertEquals(Shape.LIST, fields.shape());
     assertEquals("fields", fields.groupKey());
+    assertEquals(Presentation.TABLE, fields.layout().presentation());
     assertFalse(fields.elementProperties().isEmpty());
+  }
+
+  @Test
+  void exposesEnumOptionsFromMetadataWithoutPluginDescriptor() {
+    Property mode = property(AutomaticConfigDescriptor.describe(EnumFixture.class).properties(), "mode");
+
+    assertEquals(Shape.ENUM, mode.shape());
+    assertEquals(List.of("ALPHA", "BETA"), mode.options().stream().map(o -> o.label()).toList());
+    assertEquals(List.of("a", "b"), mode.options().stream().map(o -> o.value()).toList());
+    assertEquals(Presentation.FIELD, mode.layout().presentation());
+  }
+
+  private static final class EnumFixture {
+    @HopMetadataProperty(storeWithCode = true)
+    private Mode mode;
+  }
+
+  private enum Mode {
+    ALPHA("a"), BETA("b");
+
+    private final String code;
+
+    Mode(String code) {
+      this.code = code;
+    }
+
+    public String getCode() {
+      return code;
+    }
   }
 
   private static Property property(List<Property> properties, String key) {

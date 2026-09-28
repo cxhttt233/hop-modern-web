@@ -22,6 +22,7 @@ public final class AutomaticConfigDescriptor {
   private static Descriptor describe(Class<?> type, int depth, Set<Class<?>> ancestors) {
     if (depth > MAX_DEPTH || !ancestors.add(type)) return new Descriptor(type.getName(), List.of());
     List<Property> properties = new ArrayList<>();
+    int order = 0;
     for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
       for (Field field : current.getDeclaredFields()) {
         HopMetadataProperty metadata = field.getAnnotation(HopMetadataProperty.class);
@@ -37,7 +38,8 @@ public final class AutomaticConfigDescriptor {
         properties.add(new Property(key, field.getName(), shape, field.getType().getName(),
             metadata.groupKey(), metadata.password(), metadata.storeWithName(), metadata.storeWithCode(),
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
-            itemType == null ? null : itemType.getName(), children, itemProperties, options));
+            itemType == null ? null : itemType.getName(), children, itemProperties, options,
+            new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties));
@@ -86,10 +88,12 @@ public final class AutomaticConfigDescriptor {
   }
 
   public enum Shape { STRING, NUMBER, BOOLEAN, ENUM, OBJECT, LIST }
+  public enum Presentation { FIELD, TABLE }
   public record Descriptor(String className, List<Property> properties) {}
   public record Option(String label, String value) {}
+  public record LayoutHint(int order, String group, Presentation presentation) {}
   public record Property(String key, String javaField, Shape shape, String javaType, String groupKey,
       boolean sensitive, boolean storeWithName, boolean storeWithCode, boolean defaultBoolean,
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
-      List<Property> elementProperties, List<Option> options) {}
+      List<Property> elementProperties, List<Option> options, LayoutHint layout) {}
 }
