@@ -9,6 +9,7 @@ import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Descriptor;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Property;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Presentation;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Shape;
+import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.IEnumHasCodeAndDescription;
 import org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta;
@@ -58,6 +59,17 @@ class AutomaticConfigDescriptorTest {
     assertEquals("fields", fields.groupKey());
     assertEquals(Presentation.TABLE, fields.layout().presentation());
     assertFalse(fields.elementProperties().isEmpty());
+  }
+
+  @Test
+  void discoversDatabaseConnectionSensitiveMetadataGenerically() {
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(BaseDatabaseMeta.class);
+    assertEquals(Shape.STRING, property(descriptor.properties(), "hostname").shape());
+    assertEquals(Shape.STRING, property(descriptor.properties(), "port").shape());
+    assertEquals(Shape.STRING, property(descriptor.properties(), "databaseName").shape());
+    assertEquals(Shape.STRING, property(descriptor.properties(), "username").shape());
+    assertTrue(property(descriptor.properties(), "password").sensitive());
+    assertFalse(property(descriptor.properties(), "hostname").sensitive());
   }
 
   @Test
