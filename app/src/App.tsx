@@ -4,7 +4,6 @@ import type { HopGraphDocument } from "@hop-modern/contracts";
 import { DatabaseConnectionPanel, type DatabaseConnection } from "./editor/DatabaseConnectionPanel";
 import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
-import type { TableInputConfig } from "./editor/TableInputConfigPanel";
 
 const sample: HopGraphDocument = {
   id: "sample", name: "Pipeline", revision: "0",
@@ -40,7 +39,7 @@ export function App() {
   const [configError, setConfigError] = useState<string>();
   const [metadataName, setMetadataName] = useState<string>();
   const [connections, setConnections] = useState(initialConnections);
-  const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, TableInputConfig>>({ input: { connection: "Warehouse", sql: "SELECT *\nFROM orders" } });
+  const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, Record<string, unknown>>>({ input: { connection: "Warehouse", sql: "SELECT *\nFROM orders" } });
   const [pipelinePath, setPipelinePath] = useState(initialPipelinePath);
   const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
@@ -178,7 +177,7 @@ export function App() {
         </form>
         <div className="selection-actions">
           <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
-          <button type="button" onClick={() => setMetadataName((selected?.data.pluginId === "TableInput" && selected ? tableInputConfigs[selected.id]?.connection : undefined) ?? connections[0]?.name)}>Connections</button>
+          <button type="button" onClick={() => { const connection = selected ? tableInputConfigs[selected.id]?.connection : undefined; setMetadataName((typeof connection === "string" ? connection : undefined) ?? connections[0]?.name); }}>Connections</button>
           {isRealGraph && <button type="button" onClick={addTransform}>Add Table Input</button>}
           {isRealGraph && selected && <button type="button" onClick={deleteSelected}>Delete</button>}
           {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>Undo</button>}
