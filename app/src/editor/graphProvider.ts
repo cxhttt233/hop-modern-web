@@ -1,4 +1,5 @@
 import type { HopGraphDocument } from "@hop-modern/contracts";
+import type { ConfigDescriptor } from "./GenericConfigPanel";
 
 export type GraphSource =
   | { kind: "sample"; reason?: string }
@@ -76,6 +77,7 @@ export interface TransformConfigDocument {
   nodeId: string;
   pluginId: string;
   config: Record<string, unknown>;
+  descriptor: ConfigDescriptor;
 }
 
 async function configResponse(response: Response, action: string): Promise<TransformConfigDocument> {
