@@ -10,6 +10,7 @@ import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Property;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Presentation;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Shape;
 import org.apache.hop.metadata.api.HopMetadataProperty;
+import org.apache.hop.metadata.api.IEnumHasCodeAndDescription;
 import org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta;
 import org.apache.hop.pipeline.transforms.sort.SortRowsMeta;
 import org.apache.hop.pipeline.transforms.tableinput.TableInputMeta;
@@ -74,7 +75,7 @@ class AutomaticConfigDescriptorTest {
     private Mode mode;
   }
 
-  private enum Mode {
+  private enum Mode implements IEnumHasCodeAndDescription {
     ALPHA("a"), BETA("b");
 
     private final String code;
@@ -83,8 +84,14 @@ class AutomaticConfigDescriptorTest {
       this.code = code;
     }
 
+    @Override
     public String getCode() {
       return code;
+    }
+
+    @Override
+    public String getDescription() {
+      return name();
     }
   }
 

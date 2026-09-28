@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.apache.hop.metadata.api.HopMetadataProperty;
+import org.apache.hop.metadata.api.IEnumHasCodeAndDescription;
 
 /** Generic T0 descriptor discovery from Hop runtime metadata annotations. */
 public final class AutomaticConfigDescriptor {
@@ -70,6 +71,9 @@ public final class AutomaticConfigDescriptor {
   }
 
   private static String enumCode(Enum<?> value) {
+    if (value instanceof IEnumHasCodeAndDescription coded) {
+      return coded.getCode() == null ? value.name() : coded.getCode();
+    }
     try {
       Object code = value.getClass().getMethod("getCode").invoke(value);
       return code == null ? value.name() : String.valueOf(code);
