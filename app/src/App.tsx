@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Edge, type Node, type NodeChange } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
 import { DatabaseConnectionPanel, type DatabaseConnection } from "./editor/DatabaseConnectionPanel";
-import { movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
+import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { TableInputConfigPanel, type TableInputConfig } from "./editor/TableInputConfigPanel";
 
 const sample: HopGraphDocument = {
@@ -41,6 +41,7 @@ export function App() {
   const [connections, setConnections] = useState(initialConnections);
   const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, TableInputConfig>>({ input: { connection: "Warehouse", sql: "SELECT *\nFROM orders" } });
   const [pipelinePath, setPipelinePath] = useState(initialPipelinePath);
+  const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
 
   useEffect(() => {
@@ -62,7 +63,7 @@ export function App() {
       setSource({ kind: "sample", reason: error instanceof Error ? error.message : "Pipeline open failed" });
     });
     return () => controller.abort();
-  }, [pipelinePath]);
+  }, [pipelinePath, pipelineOpenRevision]);
 
   const edges = useMemo<Edge[]>(() => document.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })), [document]);
   const onNodesChange = useCallback((changes: NodeChange<Node>[]) => setNodes((current) => applyNodeChanges(changes, current)), []);
@@ -86,6 +87,39 @@ export function App() {
       setNodes(graphNodes(document));
     });
   }, [document, source]);
+  const reconcileGraph = useCallback((graph: HopGraphDocument) => {
+    setDocument(graph);
+    setNodes(graphNodes(graph));
+    setSelectedId((current) => current && graph.nodes.some((node) => node.id === current) ? current : undefined);
+  }, []);
+
+  const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>) => {
+    if (source.kind !== "server") return;
+    command().then(reconcileGraph).catch((error: unknown) => {
+      setConfigError(error instanceof Error ? error.message : "Pipeline edit failed");
+      setNodes(graphNodes(document));
+    });
+  }, [document, reconcileGraph, source]);
+
+  const addTransform = useCallback(() => {
+    if (source.kind !== "server") return;
+    let index = document.nodes.length + 1;
+    let nodeId = `new-transform-${index}`;
+    while (document.nodes.some((node) => node.id === nodeId)) nodeId = `new-transform-${++index}`;
+    const nextX = Math.max(160, ...document.nodes.map((node) => node.x + 180));
+    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId: "TableInput", x: nextX, y: 160 }));
+  }, [document, runGraphCommand, source]);
+
+  const deleteSelected = useCallback(() => {
+    if (source.kind !== "server" || !selectedId) return;
+    runGraphCommand(() => deletePipelineTransform(document.id, selectedId));
+  }, [document.id, runGraphCommand, selectedId, source]);
+
+  const connectNodes = useCallback((connection: Connection) => {
+    if (source.kind !== "server" || !connection.source || !connection.target) return;
+    runGraphCommand(() => connectPipelineTransforms(document.id, connection.source, connection.target));
+  }, [document.id, runGraphCommand, source]);
+
   const openTransformConfig = useCallback((nodeId: string) => {
     if (source.kind !== "server") {
       setServerConfig(undefined);
@@ -138,19 +172,24 @@ export function App() {
     <main className="shell">
       <header>
         <div><strong>Hop Modern Web</strong><span>{document.name}</span><span className="preview-badge" title={isRealGraph ? source.path : "Development fallback; open a server-visible .hpl path or configure VITE_HOP_PIPELINE_PATH."}>{sourceLabel}</span></div>
-        <form className="pipeline-open" onSubmit={(event) => { event.preventDefault(); const path = pipelinePathDraft.trim(); if (path) setPipelinePath(path); }}>
+        <form className="pipeline-open" onSubmit={(event) => { event.preventDefault(); const path = pipelinePathDraft.trim(); if (!path) return; if (path === pipelinePath) setPipelineOpenRevision((current) => current + 1); else setPipelinePath(path); }}>
           <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="Server-visible .hpl path" />
           <button type="submit" disabled={!pipelinePathDraft.trim() || source.kind === "loading"}>Open pipeline</button>
         </form>
         <div className="selection-actions">
           <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
           <button type="button" onClick={() => setMetadataName((selected?.data.pluginId === "TableInput" && selected ? tableInputConfigs[selected.id]?.connection : undefined) ?? connections[0]?.name)}>Connections</button>
+          {isRealGraph && <button type="button" onClick={addTransform}>Add Table Input</button>}
+          {isRealGraph && selected && <button type="button" onClick={deleteSelected}>Delete</button>}
+          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>Undo</button>}
+          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>Redo</button>}
+          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => savePipeline(document.id))}>Save</button>}
           {canConfigure && selected && <button type="button" disabled={configLoading} onClick={() => openTransformConfig(selected.id)}>Configure</button>}
         </div>
       </header>
       <section className="workspace">
         {source.kind !== "server" && <div className="preview-note">{source.kind === "loading" ? `Opening ${source.path}` : source.reason ? `Development sample fallback · ${source.reason}` : "Walking skeleton · open a server-visible .hpl above or set VITE_HOP_PIPELINE_PATH"}</div>}
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => node.data.pluginId === "TableInput" && openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={false} panOnDrag zoomOnScroll zoomOnPinch>
+        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => node.data.pluginId === "TableInput" && openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={isRealGraph} panOnDrag zoomOnScroll zoomOnPinch>
           <MiniMap /><Controls /><Background />
         </ReactFlow>
         {configError && <div className="preview-note" role="alert">{configError}</div>}
