@@ -26,6 +26,11 @@
     </dependency>
     <dependency>
       <groupId>org.apache.hop</groupId>
+      <artifactId>hop-web-api</artifactId>
+      <version>${hop.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.hop</groupId>
       <artifactId>hop-transform-tableinput</artifactId>
       <version>${hop.version}</version>
       <scope>test</scope>
