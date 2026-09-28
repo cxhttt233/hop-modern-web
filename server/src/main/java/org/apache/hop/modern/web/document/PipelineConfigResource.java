@@ -94,7 +94,8 @@ public final class PipelineConfigResource {
     return new ConfigResponse(
         transform.getName(),
         transform.getTransformPluginId(),
-        ConfigJsonSerializer.toJson(transform.getTransform(), metadataProvider));
+        ConfigJsonSerializer.toJson(transform.getTransform(), metadataProvider),
+        AutomaticConfigDescriptor.describe(transform.getTransform().getClass()));
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
@@ -117,5 +118,9 @@ public final class PipelineConfigResource {
 
   public record WriteRequest(String nodeId, JsonNode config) {}
 
-  public record ConfigResponse(String nodeId, String pluginId, JsonNode config) {}
+  public record ConfigResponse(
+      String nodeId,
+      String pluginId,
+      JsonNode config,
+      AutomaticConfigDescriptor.Descriptor descriptor) {}
 }
