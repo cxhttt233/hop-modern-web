@@ -19,11 +19,13 @@ try {
   const initialRead = await initialReadPromise;
   const initial = await initialRead.json();
   if (!initialRead.ok() || initial.config?.connection !== "Warehouse" || initial.config?.sql !== "SELECT id, name FROM customers") throw new Error("Initial authoritative config mismatch");
-  if (!initial.descriptor?.properties?.some(p => p.key === "connection") || !initial.descriptor?.properties?.some(p => p.key === "sql")) throw new Error("Runtime descriptor fields missing");
+  const connectionDescriptor = initial.descriptor?.properties?.find(p => p.key === "connection");
+  const sqlDescriptor = initial.descriptor?.properties?.find(p => p.key === "sql");
+  if (!connectionDescriptor || !sqlDescriptor) throw new Error("Runtime descriptor fields missing");
   const panel = page.locator("form.generic-config");
   await panel.waitFor({ state: "visible" });
-  const connection = panel.getByLabel("connection", { exact: true });
-  const sqlField = panel.getByLabel("sql", { exact: true });
+  const connection = panel.locator(`#config-${connectionDescriptor.javaField}`);
+  const sqlField = panel.locator(`#config-${sqlDescriptor.javaField}`);
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
   if (await sqlField.inputValue() !== "SELECT id, name FROM customers") throw new Error("Authoritative SQL not visible");
   const sql = "SELECT id, name FROM customers WHERE id > 10";
