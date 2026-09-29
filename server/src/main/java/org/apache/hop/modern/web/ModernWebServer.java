@@ -54,7 +54,9 @@ public final class ModernWebServer {
   static ResourceConfig createResourceConfig() {
     IVariables variables = Variables.getADefaultVariableSpace();
     IHopMetadataProvider metadataProvider = new MemoryMetadataProvider();
-    PipelineDocumentStore store = new PipelineDocumentStore(metadataProvider, variables);
+    ProductContext productContext = new ProductContext(variables, metadataProvider);
+    PipelineDocumentStore store =
+        new PipelineDocumentStore(productContext.metadataProvider(), productContext.variables());
     PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
     PipelineOpenResource openResource =
         new PipelineOpenResource(store, new PipelineGraphAdapter(), registry);
@@ -62,7 +64,7 @@ public final class ModernWebServer {
         new PipelineConfigResource(registry, metadataProvider);
     PipelineEditResource editResource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
     PipelineExecutionResource executionResource =
-        new PipelineExecutionResource(registry, variables, metadataProvider);
+        new PipelineExecutionResource(registry, productContext);
     return new ResourceConfig()
         .register(openResource)
         .register(configResource)
