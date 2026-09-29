@@ -30,6 +30,14 @@ jobs:
           repository: cxhttt233/hop
           ref: cbb70e9215a6dc69da8acfd3743e358f7ba4db1d
           path: hop
+      - name: Build full Transform source catalog
+        working-directory: modern
+        run: python3 scripts/transform-source-catalog.py ../hop docs/transform-source-catalog.generated.json
+      - name: Upload Transform source catalog
+        uses: actions/upload-artifact@v4
+        with:
+          name: transform-source-catalog
+          path: modern/docs/transform-source-catalog.generated.json
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
