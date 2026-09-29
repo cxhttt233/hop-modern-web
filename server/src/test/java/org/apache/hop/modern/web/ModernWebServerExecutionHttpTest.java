@@ -71,7 +71,7 @@ class ModernWebServerExecutionHttpTest {
     assertTrue(!documentId.isBlank());
 
     HttpResponse<String> started =
-        postJson(base.resolve("api/executions/pipelines/" + documentId), "");
+        postNoBody(base.resolve("api/executions/pipelines/" + documentId));
     assertEquals(202, started.statusCode());
     JsonNode startBody = JSON.readTree(started.body());
     String executionId = startBody.path("id").asText();
@@ -95,7 +95,7 @@ class ModernWebServerExecutionHttpTest {
     URI base = startServer();
 
     HttpResponse<String> missingDocument =
-        postJson(base.resolve("api/executions/pipelines/missing-document"), "");
+        postNoBody(base.resolve("api/executions/pipelines/missing-document"));
     assertEquals(404, missingDocument.statusCode());
     assertEquals("document_not_found", JSON.readTree(missingDocument.body()).path("code").asText());
 
@@ -136,6 +136,11 @@ class ModernWebServerExecutionHttpTest {
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build();
+    return HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+  }
+
+  private static HttpResponse<String> postNoBody(URI uri) throws Exception {
+    HttpRequest request = HttpRequest.newBuilder(uri).POST(HttpRequest.BodyPublishers.noBody()).build();
     return HTTP.send(request, HttpResponse.BodyHandlers.ofString());
   }
 
