@@ -72,7 +72,7 @@ class ModernWebServerExecutionHttpTest {
 
     HttpResponse<String> started =
         postNoBody(base.resolve("api/executions/pipelines/" + documentId));
-    assertEquals(202, started.statusCode());
+    assertEquals(\n        202,\n        started.statusCode(),\n        () ->\n            "execution start HTTP diagnostic: body="\n                + started.body()\n                + ", headers="\n                + started.headers().map());
     JsonNode startBody = JSON.readTree(started.body());
     String executionId = startBody.path("id").asText();
     assertTrue(!executionId.isBlank());
@@ -96,7 +96,7 @@ class ModernWebServerExecutionHttpTest {
 
     HttpResponse<String> missingDocument =
         postNoBody(base.resolve("api/executions/pipelines/missing-document"));
-    assertEquals(404, missingDocument.statusCode());
+    assertEquals(\n        404,\n        missingDocument.statusCode(),\n        () ->\n            "missing-document start diagnostic: body="\n                + missingDocument.body()\n                + ", headers="\n                + missingDocument.headers().map());
     assertEquals("document_not_found", JSON.readTree(missingDocument.body()).path("code").asText());
 
     HttpResponse<String> missingExecution =
