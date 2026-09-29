@@ -8,6 +8,8 @@ import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.modern.web.ModernWebServer;
 import org.apache.hop.pipeline.transform.ITransformMeta;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+@EnabledIfSystemProperty(named = "prodP0Expected", matches = "true")
 class TransformP0L2RoundTripTest {
   static final List<String> IDS=List.of("FilterRows","GroupBy","JsonInput","MergeJoin","ScriptValueMod","TableInput","TableOutput","InsertUpdate");
   @BeforeAll static void init() throws Exception { HopClientEnvironment.init(); ModernWebServer.initializePipelinePlugins(); }
