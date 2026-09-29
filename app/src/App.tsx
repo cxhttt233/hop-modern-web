@@ -1,9 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange, type ReactFlowInstance } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
 import { DatabaseConnectionPanel, type DatabaseConnection } from "./editor/DatabaseConnectionPanel";
 import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
+
+const P0_TRANSFORMS = [
+  "CheckSum", "ConcatFields", "DataGrid", "ExecSql", "FilterRows", "GroupBy", "Http",
+  "InsertUpdate", "JsonInput", "MergeJoin", "ReplaceString", "Rest", "ScriptValueMod",
+  "SelectValues", "SetVariable", "StreamLookup", "StringCut", "TableInput", "TableOutput",
+  "UniqueRowsByHashSet",
+] as const;
+
+function uniqueTransformId(pluginId: string, document: HopGraphDocument): string {
+  const stem = pluginId.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
+  let index = 1;
+  let candidate = `${stem}-${index}`;
+  while (document.nodes.some((node) => node.id === candidate)) candidate = `${stem}-${++index}`;
+  return candidate;
+}
 
 const sample: HopGraphDocument = {
   id: "sample", name: "Pipeline", revision: "0",
@@ -43,6 +58,8 @@ export function App() {
   const [pipelinePath, setPipelinePath] = useState(initialPipelinePath);
   const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
 
   useEffect(() => {
     if (!pipelinePath) return;
@@ -101,14 +118,30 @@ export function App() {
     });
   }, [document, reconcileGraph, source]);
 
-  const addTransform = useCallback(() => {
+  const addTransformAt = useCallback((pluginId: string, x: number, y: number) => {
     if (source.kind !== "server") return;
-    let index = document.nodes.length + 1;
-    let nodeId = `new-transform-${index}`;
-    while (document.nodes.some((node) => node.id === nodeId)) nodeId = `new-transform-${++index}`;
-    const nextX = Math.max(160, ...document.nodes.map((node) => node.x + 180));
-    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId: "TableInput", x: nextX, y: 160 }));
+    const nodeId = uniqueTransformId(pluginId, document);
+    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId, x: Math.round(x), y: Math.round(y) }));
   }, [document, runGraphCommand, source]);
+
+  const onPaletteDragStart = useCallback((event: React.DragEvent, pluginId: string) => {
+    event.dataTransfer.setData("application/x-hop-transform", pluginId);
+    event.dataTransfer.effectAllowed = "copy";
+  }, []);
+
+  const onCanvasDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    if (source.kind !== "server" || !flow) return;
+    const pluginId = event.dataTransfer.getData("application/x-hop-transform");
+    if (!P0_TRANSFORMS.includes(pluginId as (typeof P0_TRANSFORMS)[number])) return;
+    const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    addTransformAt(pluginId, point.x, point.y);
+  }, [addTransformAt, flow, source]);
+
+  const filteredTransforms = useMemo(() => {
+    const query = paletteQuery.trim().toLowerCase();
+    return query ? P0_TRANSFORMS.filter((pluginId) => pluginId.toLowerCase().includes(query)) : P0_TRANSFORMS;
+  }, [paletteQuery]);
 
   const deleteSelected = useCallback(() => {
     if (source.kind !== "server" || !selectedId) return;
@@ -178,7 +211,6 @@ export function App() {
         <div className="selection-actions">
           <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
           <button type="button" onClick={() => { const connection = selected ? tableInputConfigs[selected.id]?.connection : undefined; setMetadataName((typeof connection === "string" ? connection : undefined) ?? connections[0]?.name); }}>Connections</button>
-          {isRealGraph && <button type="button" onClick={addTransform}>Add Table Input</button>}
           {isRealGraph && selected && <button type="button" onClick={deleteSelected}>Delete</button>}
           {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>Undo</button>}
           {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>Redo</button>}
@@ -187,8 +219,20 @@ export function App() {
         </div>
       </header>
       <section className="workspace">
+        {isRealGraph && <aside className="transform-palette" aria-label="Transform palette">
+          <strong>Transforms</strong>
+          <small>{P0_TRANSFORMS.length} production P0</small>
+          <input aria-label="Search transforms" placeholder="Search transforms" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} />
+          <div className="transform-list">
+            {filteredTransforms.map((pluginId) => (
+              <button key={pluginId} type="button" draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)} title={`Drag ${pluginId} onto the pipeline`}>
+                {pluginId}
+              </button>
+            ))}
+          </div>
+        </aside>}
         {source.kind !== "server" && <div className="preview-note">{source.kind === "loading" ? `Opening ${source.path}` : source.reason ? `Development sample fallback · ${source.reason}` : "Walking skeleton · open a server-visible .hpl above or set VITE_HOP_PIPELINE_PATH"}</div>}
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={isRealGraph} panOnDrag zoomOnScroll zoomOnPinch>
+        <ReactFlow nodes={nodes} edges={edges} onInit={setFlow} onDragOver={(event) => { if (isRealGraph) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={onCanvasDrop} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={isRealGraph} panOnDrag zoomOnScroll zoomOnPinch>
           <MiniMap /><Controls /><Background />
         </ReactFlow>
         {configError && <div className="preview-note" role="alert">{configError}</div>}
