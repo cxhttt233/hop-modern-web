@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "levels": ["L0_DISCOVER", "L1_DESCRIPTOR", "L2_SERIALIZE", "L3_GENERIC_UI_RENDER", "L4_BROWSER_ROUND_TRIP", "L5_VISUAL_SEMANTIC_FIT"],
+  "classifications": ["INPUT", "OUTPUT", "OTHER", "UNKNOWN"],
+  "compatibility": ["AUTOMATIC", "DECLARATIVE_OVERRIDE", "BESPOKE_REQUIRED", "BLOCKED"]
+}
