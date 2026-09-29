@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import java.nio.file.Path;
 import java.time.Duration;
 import org.apache.hop.core.HopClientEnvironment;
+import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.modern.web.document.PipelineDocument;
@@ -24,7 +25,7 @@ class PipelineExecutionResourceSnapshotTest {
 
   @Test
   void runningExecutionOwnsSnapshotIndependentFromEditorDocument() {
-    Variables variables = Variables.getADefaultVariableSpace();
+    IVariables variables = Variables.getADefaultVariableSpace();
     MemoryMetadataProvider metadataProvider = new MemoryMetadataProvider();
     PipelineMeta editorPipeline = new PipelineMeta();
     editorPipeline.setName("snapshot-before-edit");
