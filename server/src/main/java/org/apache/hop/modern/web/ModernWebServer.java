@@ -6,6 +6,10 @@
  */
 package org.apache.hop.modern.web;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import jakarta.ws.rs.ext.ContextResolver;
 import java.net.URI;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.plugins.PluginRegistry;
@@ -20,6 +24,7 @@ import org.apache.hop.modern.web.document.PipelineEditResource;
 import org.apache.hop.modern.web.document.PipelineDocumentStore;
 import org.apache.hop.modern.web.document.PipelineGraphAdapter;
 import org.apache.hop.modern.web.document.PipelineOpenResource;
+import org.apache.hop.modern.web.execution.PipelineExecutionResource;
 import org.glassfish.grizzly.http.server.HttpServer;
 import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
 import org.glassfish.jersey.jackson.JacksonFeature;
@@ -56,10 +61,25 @@ public final class ModernWebServer {
     PipelineConfigResource configResource =
         new PipelineConfigResource(registry, metadataProvider);
     PipelineEditResource editResource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
+    PipelineExecutionResource executionResource =
+        new PipelineExecutionResource(registry, variables, metadataProvider);
     return new ResourceConfig()
         .register(openResource)
         .register(configResource)
         .register(editResource)
+        .register(executionResource)
+        .register(new JavaTimeObjectMapperProvider())
         .register(JacksonFeature.class);
+  }
+  private static final class JavaTimeObjectMapperProvider implements ContextResolver<ObjectMapper> {
+    private final ObjectMapper mapper =
+        new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+    @Override
+    public ObjectMapper getContext(Class<?> type) {
+      return mapper;
+    }
   }
 }
