@@ -8,6 +8,7 @@ package org.apache.hop.modern.web.document;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
@@ -117,6 +118,41 @@ class TransformCatalogProbeTest {
     System.out.println(
         "PROD_P0_DISCOVERED=" + (PROD_P0.size() - p0Missing.size()) + "/" + PROD_P0.size());
     System.out.println("PROD_P0_MISSING=" + p0Missing);
+
+    List<Map<String, Object>> p0Rows =
+        rows.stream()
+            .filter(row -> PROD_P0.contains(String.valueOf(row.get("id"))))
+            .sorted(
+                java.util.Comparator.comparing(
+                    row -> String.valueOf(row.get("id"))))
+            .toList();
+    for (Map<String, Object> row : p0Rows) {
+      System.out.println(
+          "PROD_P0_STATUS="
+              + row.get("id")
+              + " instantiate="
+              + row.get("instantiate")
+              + " l1="
+              + row.get("l1")
+              + " failure="
+              + row.get("failure"));
+    }
+
+    boolean p0AllPass =
+        p0Missing.isEmpty()
+            && p0Rows.size() == PROD_P0.size()
+            && p0Rows.stream()
+                .allMatch(
+                    row ->
+                        "PASS".equals(row.get("instantiate"))
+                            && "PASS".equals(row.get("l1")));
+    System.out.println("PROD_P0_L0_L1_PASS=" + p0Rows.size() + "/" + PROD_P0.size());
     System.out.println("CATALOG_INCOMPLETE=" + (!p0Missing.isEmpty()));
+
+    if (Boolean.getBoolean("prodP0Expected")) {
+      assertTrue(p0Missing.isEmpty(), "production P0 transforms missing from runtime: " + p0Missing);
+      assertEquals(PROD_P0.size(), p0Rows.size(), "production P0 runtime row count");
+      assertTrue(p0AllPass, "all production P0 transforms must instantiate and pass L1");
+    }
   }
 }
