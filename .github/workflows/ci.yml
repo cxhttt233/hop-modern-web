@@ -50,6 +50,38 @@ jobs:
         working-directory: modern/server
         run: mvn -q test
 
+  p0-transform-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: modern
+      - uses: actions/checkout@v7
+        with:
+          repository: cxhttt233/hop
+          ref: cbb70e9215a6dc69da8acfd3743e358f7ba4db1d
+          path: hop
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Derive production P0 Transform runtime
+        working-directory: modern
+        shell: bash
+        run: |
+          python3 scripts/transform-source-catalog.py ../hop docs/transform-source-catalog.generated.json
+          python3 scripts/p0-runtime-classpath.py docs/transform-source-catalog.generated.json ../hop server/pom.xml | tee /tmp/p0-runtime.txt
+          grep '^P0_MAVEN_PL=' /tmp/p0-runtime.txt >> "$GITHUB_ENV"
+      - name: Install source-derived production P0 Transform modules
+        working-directory: hop
+        shell: bash
+        run: ./mvnw -q -pl "$P0_MAVEN_PL" -am -DskipTests install
+      - name: Prove production P0 Transform runtime L0/L1
+        working-directory: modern/server
+        run: mvn -q -Dtest=TransformCatalogProbeTest test
+
+
   v2-real-graph:
     runs-on: ubuntu-latest
     steps:
