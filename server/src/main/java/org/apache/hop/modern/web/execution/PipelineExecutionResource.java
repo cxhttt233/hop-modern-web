@@ -67,9 +67,21 @@ public final class PipelineExecutionResource {
       return error(404, "document_not_found", "opened pipeline document was not found");
     }
 
+    PipelineMeta executionPipeline;
+    try {
+      synchronized (document) {
+        executionPipeline =
+            new PipelineMeta(document.pipeline().getXml(variables), metadataProvider, variables);
+      }
+    } catch (HopException | RuntimeException e) {
+      return error(
+          422,
+          "execution_snapshot_failed",
+          e.getMessage() == null ? "pipeline execution snapshot could not be created" : e.getMessage());
+    }
+
     String executionId = UUID.randomUUID().toString();
-    LocalPipelineEngine engine =
-        new LocalPipelineEngine(document.pipeline(), variables, null);
+    LocalPipelineEngine engine = new LocalPipelineEngine(executionPipeline, variables, null);
     engine.setMetadataProvider(metadataProvider);
     executions.register(executionId, documentId, engine);
     try {
