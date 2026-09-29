@@ -11,7 +11,7 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 @EnabledIfSystemProperty(named = "prodP0Expected", matches = "true")
 class TransformP0L2RoundTripTest {
-  static final List<String> IDS=List.of("FilterRows","GroupBy","JsonInput","MergeJoin","ScriptValueMod","TableInput","TableOutput","InsertUpdate");
+  static final List<String> IDS=List.of("CheckSum","ConcatFields","DataGrid","ExecSql","FilterRows","GroupBy","Http","InsertUpdate","JsonInput","MergeJoin","ReplaceString","Rest","ScriptValueMod","SelectValues","SetVariable","StreamLookup","StringCut","TableInput","TableOutput","UniqueRowsByHashSet");
   @BeforeAll static void init() throws Exception { HopClientEnvironment.init(); ModernWebServer.initializePipelinePlugins(); }
   @Test void roundTrips() throws Exception {
     PluginRegistry r=PluginRegistry.getInstance(); int pass=0;
