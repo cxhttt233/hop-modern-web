@@ -13,6 +13,8 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -71,7 +73,11 @@ public final class PipelineExecutionResource {
     try {
       synchronized (document) {
         executionPipeline =
-            new PipelineMeta(document.pipeline().getXml(variables), metadataProvider, variables);
+            new PipelineMeta(
+                new ByteArrayInputStream(
+                    document.pipeline().getXml(variables).getBytes(StandardCharsets.UTF_8)),
+                metadataProvider,
+                variables);
       }
     } catch (HopException | RuntimeException e) {
       return error(
