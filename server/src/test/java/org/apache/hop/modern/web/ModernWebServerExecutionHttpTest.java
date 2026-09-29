@@ -33,7 +33,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 class ModernWebServerExecutionHttpTest {
   private static final ObjectMapper JSON = new ObjectMapper();
-  private static final HttpClient HTTP = HttpClient.newHttpClient();
+  private static final HttpClient HTTP =
+      HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
 
   @TempDir Path tempDir;
   private HttpServer server;
