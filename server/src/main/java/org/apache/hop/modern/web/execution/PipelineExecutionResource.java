@@ -20,8 +20,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 import org.apache.hop.core.exception.HopException;
-import org.apache.hop.core.variables.IVariables;
-import org.apache.hop.metadata.api.IHopMetadataProvider;
+import org.apache.hop.modern.web.ProductContext;
 import org.apache.hop.modern.web.document.PipelineDocument;
 import org.apache.hop.modern.web.document.PipelineDocumentRegistry;
 import org.apache.hop.pipeline.PipelineMeta;
@@ -35,29 +34,24 @@ import org.apache.hop.web.api.execution.PipelineExecutionLifecycle;
 @Produces(MediaType.APPLICATION_JSON)
 public final class PipelineExecutionResource {
   private final PipelineDocumentRegistry documents;
-  private final IVariables variables;
-  private final IHopMetadataProvider metadataProvider;
+  private final ProductContext context;
   private final ExecutionRegistry<IPipelineEngine<PipelineMeta>> executions;
 
   public PipelineExecutionResource(
       PipelineDocumentRegistry documents,
-      IVariables variables,
-      IHopMetadataProvider metadataProvider) {
+      ProductContext context) {
     this(
         documents,
-        variables,
-        metadataProvider,
+        context,
         new ExecutionRegistry<>(Duration.ofHours(1), 256));
   }
 
   PipelineExecutionResource(
       PipelineDocumentRegistry documents,
-      IVariables variables,
-      IHopMetadataProvider metadataProvider,
+      ProductContext context,
       ExecutionRegistry<IPipelineEngine<PipelineMeta>> executions) {
     this.documents = Objects.requireNonNull(documents, "documents");
-    this.variables = Objects.requireNonNull(variables, "variables");
-    this.metadataProvider = Objects.requireNonNull(metadataProvider, "metadataProvider");
+    this.context = Objects.requireNonNull(context, "context");
     this.executions = Objects.requireNonNull(executions, "executions");
   }
 
@@ -75,9 +69,9 @@ public final class PipelineExecutionResource {
         executionPipeline =
             new PipelineMeta(
                 new ByteArrayInputStream(
-                    document.pipeline().getXml(variables).getBytes(StandardCharsets.UTF_8)),
-                metadataProvider,
-                variables);
+                    document.pipeline().getXml(context.variables()).getBytes(StandardCharsets.UTF_8)),
+                context.metadataProvider(),
+                context.variables());
       }
     } catch (HopException | RuntimeException e) {
       return error(
@@ -87,8 +81,9 @@ public final class PipelineExecutionResource {
     }
 
     String executionId = UUID.randomUUID().toString();
-    LocalPipelineEngine engine = new LocalPipelineEngine(executionPipeline, variables, null);
-    engine.setMetadataProvider(metadataProvider);
+    LocalPipelineEngine engine =
+        new LocalPipelineEngine(executionPipeline, context.variables(), null);
+    engine.setMetadataProvider(context.metadataProvider());
     executions.register(executionId, documentId, engine);
     try {
       PipelineExecutionLifecycle.start(executionId, executions);
