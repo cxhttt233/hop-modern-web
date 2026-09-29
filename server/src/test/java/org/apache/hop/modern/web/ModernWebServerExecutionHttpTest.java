@@ -6,6 +6,7 @@
  */
 package org.apache.hop.modern.web;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,6 +20,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
@@ -85,6 +87,7 @@ class ModernWebServerExecutionHttpTest {
     assertTrue(!executionId.isBlank());
     assertEquals(documentId, startBody.path("documentId").asText());
     assertNotNull(startBody.get("start"));
+    assertDoesNotThrow(() -> Instant.parse(startBody.path("start").asText()));
 
     JsonNode terminal = awaitTerminal(base, executionId);
     assertEquals(documentId, terminal.path("documentId").asText());
@@ -94,6 +97,8 @@ class ModernWebServerExecutionHttpTest {
             || terminal.path("state").asText().equals("stopped"));
     assertNotNull(terminal.get("start"));
     assertNotNull(terminal.get("end"));
+    assertDoesNotThrow(() -> Instant.parse(terminal.path("start").asText()));
+    assertDoesNotThrow(() -> Instant.parse(terminal.path("end").asText()));
     assertTrue(terminal.path("durationMillis").asLong(-1) >= 0);
   }
 
