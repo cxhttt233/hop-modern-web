@@ -79,7 +79,7 @@ jobs:
         run: ./mvnw -q -pl "$P0_MAVEN_PL" -am -DskipTests install
       - name: Prove production P0 Transform runtime L0/L1
         working-directory: modern/server
-        run: mvn -q -Dtest=TransformCatalogProbeTest -DprodP0Expected=true test
+        run: mvn -q -Dtest=TransformCatalogProbeTest,TransformP0L2RoundTripTest -DprodP0Expected=true test
 
 
   v2-real-graph:
