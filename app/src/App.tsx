@@ -54,7 +54,7 @@ function transformDisplayName(node: HopGraphDocument["nodes"][number]) {
   if (node.pluginId === "Dummy" && node.id === "source") return "输入";
   if (node.pluginId === "Dummy" && node.id === "sink") return "输出";
   const technical = node.name === node.id || /-\d+$/.test(node.name);
-  return technical ? transformMeta(node.pluginId).name : node.name;
+  return technical ? transformMeta(node.pluginId ?? "Unknown").name : node.name;
 }
 
 function uniqueTransformId(pluginId: string, document: HopGraphDocument): string {
@@ -80,7 +80,7 @@ const sample: HopGraphDocument = {
 
 function graphNodes(document: HopGraphDocument): Node[] {
   return document.nodes.map((node) => {
-    const meta = transformMeta(node.pluginId);
+    const meta = transformMeta(node.pluginId ?? "Unknown");
     return {
       id: node.id,
       position: { x: node.x, y: node.y },
