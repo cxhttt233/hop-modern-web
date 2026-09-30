@@ -4,6 +4,10 @@ import type { HopGraphDocument } from "@hop-modern/contracts";
 import { DatabaseConnectionPanel, type DatabaseConnection } from "./editor/DatabaseConnectionPanel";
 import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
+import { TRANSFORM_ICONS_A } from "./transformIconsA";
+import { TRANSFORM_ICONS_B } from "./transformIconsB";
+
+const TRANSFORM_ICONS: Record<string, string> = { ...TRANSFORM_ICONS_A, ...TRANSFORM_ICONS_B };
 
 const P0_TRANSFORMS = [
   "CheckSum", "ConcatFields", "DataGrid", "ExecSql", "FilterRows", "GroupBy", "Http",
@@ -89,10 +93,10 @@ function graphNodes(document: HopGraphDocument): Node[] {
         pluginId: node.pluginId,
         label: (
           <div className="transform-node-content">
-            <span className="transform-node-icon">{meta.glyph}</span>
+            <span className="transform-node-icon">{TRANSFORM_ICONS[node.pluginId ?? ""] ? <img src={TRANSFORM_ICONS[node.pluginId ?? ""]} alt="" /> : meta.glyph}</span>
             <span className="transform-node-copy">
               <strong>{transformDisplayName(node)}</strong>
-              <small>{meta.name}</small>
+              <small>{node.pluginId ?? meta.name}</small>
             </span>
           </div>
         ),
@@ -300,7 +304,7 @@ export function App() {
           <span className="brand-mark">H</span>
           <span className="brand-copy">
             <strong>Hop 流程设计器</strong>
-            <small>Pipeline Editor</small>
+            <small>流程编排与配置</small>
           </span>
         </div>
 
@@ -370,7 +374,7 @@ export function App() {
                         const meta = transformMeta(pluginId);
                         return (
                           <button key={pluginId} type="button" aria-label={pluginId} draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)} title={`${meta.name} · ${pluginId}`}>
-                            <span className={`palette-icon category-${meta.category}`}>{meta.glyph}</span>
+                            <span className={`palette-icon category-${meta.category}`}>{TRANSFORM_ICONS[pluginId] ? <img src={TRANSFORM_ICONS[pluginId]} alt="" /> : meta.glyph}</span>
                             <span className="palette-item-copy">
                               <strong>{meta.name}</strong>
                               <small>{pluginId}</small>
@@ -395,10 +399,10 @@ export function App() {
 
         {selected && (
           <div className="selection-toolbar" aria-label="Selected transform actions">
-            <span className={`selection-icon category-${selectedMeta?.category ?? "flow"}`}>{selectedMeta?.glyph ?? "·"}</span>
+            <span className={`selection-icon category-${selectedMeta?.category ?? "flow"}`}>{TRANSFORM_ICONS[String(selected.data.pluginId ?? "")] ? <img src={TRANSFORM_ICONS[String(selected.data.pluginId ?? "")]} alt="" /> : (selectedMeta?.glyph ?? "·")}</span>
             <span className="selection-copy">
               <strong>{selectedDisplayName}</strong>
-              <small>{selectedMeta?.name ?? String(selected.data.pluginId ?? "")}</small>
+              <small>{String(selected.data.pluginId ?? selectedMeta?.name ?? "")}</small>
             </span>
             {String(selected.data.pluginId ?? "") === "TableInput" && (
               <button type="button" aria-label="Connections" onClick={() => {
