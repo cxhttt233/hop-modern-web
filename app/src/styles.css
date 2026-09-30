@@ -273,6 +273,13 @@ button { cursor: pointer; }
   line-height: 1;
 }
 .palette-icon { width: 30px; height: 30px; }
+.palette-icon img, .selection-icon img, .transform-node-icon img {
+  width: 21px;
+  height: 21px;
+  display: block;
+  object-fit: contain;
+}
+.transform-node-icon img { width: 23px; height: 23px; }
 .palette-item-copy { min-width: 0; align-items: flex-start; flex-direction: column; gap: 1px; }
 .palette-item-copy strong {
   width: 100%;
