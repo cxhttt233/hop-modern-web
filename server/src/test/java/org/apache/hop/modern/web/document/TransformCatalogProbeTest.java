@@ -97,6 +97,7 @@ class TransformCatalogProbeTest {
                         p -> p.shape().name(), TreeMap::new, Collectors.counting()));
         row.put("descriptorPropertyCount", descriptor.properties().size());
         row.put("descriptorShapes", shapes);
+        row.put("descriptor", descriptor);
         row.put("failure", null);
       } catch (Exception e) {
         row.put("instantiate", "FAIL");
