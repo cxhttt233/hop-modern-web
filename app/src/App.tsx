@@ -304,7 +304,7 @@ export function App() {
           </span>
         </div>
 
-        <div className="file-identity">
+        <div className="file-identity" data-document-name={document.name}>
           <span className="file-dot" aria-hidden="true" />
           <strong>{displayPipelineName}</strong>
           {isRealGraph && dirty && <span className="dirty-state is-dirty" role="status">未保存</span>}
