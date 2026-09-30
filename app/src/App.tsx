@@ -258,7 +258,7 @@ export function App() {
           <div className="selection-toolbar" aria-label="Selected transform actions">
             <span className={`selection-icon category-${selectedMeta?.category ?? "flow"}`}>{selectedMeta?.glyph ?? "·"}</span>
             <span className="selection-copy">
-              <strong>{String((selected.data.label as { props?: { children?: unknown } })?.props ? transformDisplayName(document.nodes.find((node) => node.id === selected.id) ?? { id: selected.id, name: selected.id, kind: "transform", pluginId: String(selected.data.pluginId ?? ""), pluginType: "transform", x: 0, y: 0 }) : selected.id)}</strong>
+              <strong>{selectedDisplayName}</strong>
               <small>{selectedMeta?.name ?? String(selected.data.pluginId ?? "")}</small>
             </span>
             {String(selected.data.pluginId ?? "") === "TableInput" && (
