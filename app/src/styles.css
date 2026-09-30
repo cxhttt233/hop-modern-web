@@ -35,3 +35,15 @@ header span, header small { color: #6b7485; }
 .config-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; }
 .config-actions .primary { border-color: #315fbd; background: #315fbd; color: white; }
 .config-actions .primary:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Editor hierarchy: file + graph first, contextual transform actions second. */
+.file-identity { min-width: 150px; gap: 8px; align-items: center; }
+.file-identity strong { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dirty-state { font-size: 12px; color: #7a8496; }
+.dirty-state.is-dirty { color: #9a5a16; font-weight: 600; }
+.editor-actions { gap: 6px; }
+.editor-actions button, .selection-toolbar button { border: 1px solid #d6dce7; border-radius: 6px; background: white; padding: 6px 10px; color: #283247; }
+.editor-actions .primary-action { border-color: #315fbd; background: #315fbd; color: white; }
+.editor-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.selection-toolbar { position: absolute; z-index: 6; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; border: 1px solid #e0e5ed; border-radius: 8px; background: rgb(255 255 255 / 96%); box-shadow: 0 5px 18px rgb(31 42 68 / 8%); }
+.selection-toolbar strong { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; margin-right: 4px; }
