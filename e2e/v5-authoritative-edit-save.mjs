@@ -15,7 +15,7 @@ try{
  const opened=await (await p).json(); const original=opened.nodes[0]?.id;
  if(!original) throw new Error("real pipeline has no transform");
  await rf(original).waitFor();
- p=post("/edit/add"); await page.getByRole("button",{name:"Add Table Input"}).click();
+ p=post("/edit/add");\n const paletteTableInput=page.getByRole("button",{name:"TableInput"});\n const canvas=page.locator(".react-flow__pane");\n await paletteTableInput.dragTo(canvas,{targetPosition:{x:520,y:260}});
  const addedGraph=await (await p).json();
  const added=addedGraph.nodes.find(n=>!opened.nodes.some(o=>o.id===n.id));
  if(!added) throw new Error("authoritative add missing new transform");
