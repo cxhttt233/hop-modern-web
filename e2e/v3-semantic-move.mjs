@@ -28,7 +28,11 @@ try {
   if (!openResponse.ok()) throw new Error(`Pipeline open failed with ${openResponse.status()}`);
   const opened = await openResponse.json();
 
-  await page.getByText("Server graph").waitFor({ state: "visible" });
+  if (!opened.name || !opened.nodes?.some(node => node.id === "source")) {
+    throw new Error(`Authoritative open payload missing pipeline identity/source: ${JSON.stringify(opened)}`);
+  }
+  await page.getByText(opened.name, { exact: true }).waitFor({ state: "visible" });
+  await page.locator(".react-flow").waitFor({ state: "visible" });
   const source = page.locator('.react-flow__node[data-id="source"]');
   await source.waitFor({ state: "visible" });
 
