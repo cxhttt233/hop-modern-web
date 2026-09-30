@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.apache.hop.modern</groupId>
+  <artifactId>hop-modern-preview-runtime</artifactId>
+  <version>0.0.0-SNAPSHOT</version>
+  <properties>
+    <hop.version>2.20.0-SNAPSHOT</hop.version>
+    <jersey.version>4.0.0</jersey.version>
+  </properties>
+  <dependencies>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-core</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-engine</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-checksum</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-concatfields</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-datagrid</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-sql</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-filterrows</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-groupby</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-http</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-insertupdate</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-json</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-mergejoin</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-replacestring</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-misc-rest</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-script</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-selectvalues</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-setvariable</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-streamlookup</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-stringcut</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-tableinput</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-tableoutput</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-uniquerowsbyhashset</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-sort</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.glassfish.jersey.containers</groupId><artifactId>jersey-container-grizzly2-http</artifactId><version>${jersey.version}</version></dependency>
+    <dependency><groupId>org.glassfish.jersey.media</groupId><artifactId>jersey-media-json-jackson</artifactId><version>${jersey.version}</version></dependency>
+  </dependencies>
+</project>
