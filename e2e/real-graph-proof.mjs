@@ -21,7 +21,7 @@ try {
   if (graph.name !== "real-graph-proof" || graph.nodes?.length < 2 || graph.edges?.length < 1) {
     throw new Error(`Unexpected authoritative graph payload: ${JSON.stringify(graph)}`);
   }
-  await page.getByText("real-graph-proof", { exact: true }).waitFor({ state: "visible" });
+  await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
   await page.locator(".react-flow").waitFor({ state: "visible" });
   const nodes = page.locator(".react-flow__node");
   const edges = page.locator(".react-flow__edge");

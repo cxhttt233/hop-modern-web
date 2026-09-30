@@ -24,7 +24,7 @@ try {
   if (!openResponse.ok() || !graph.name || graph.nodes?.length < 2 || graph.edges?.length < 1) {
     throw new Error(`Unexpected authoritative Palette graph: ${JSON.stringify(graph)}`);
   }
-  await page.getByText(graph.name, { exact: true }).waitFor({ state: "visible" });
+  await page.locator(`.file-identity[data-document-name="${graph.name}"]`).waitFor({ state: "visible" });
   await page.locator(".react-flow").waitFor({ state: "visible" });
 
   const canvas = page.locator(".react-flow__pane");
