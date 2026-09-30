@@ -19,8 +19,13 @@ try {
   let pending = post("/api/pipelines/open");
   await page.getByLabel("Server-visible pipeline path").fill(pipelinePath);
   await page.getByRole("button", { name: "Open pipeline" }).click();
-  let graph = await (await pending).json();
-  await page.getByText("Server graph").waitFor({ state: "visible" });
+  const openResponse = await pending;
+  let graph = await openResponse.json();
+  if (!openResponse.ok() || !graph.name || graph.nodes?.length < 2 || graph.edges?.length < 1) {
+    throw new Error(`Unexpected authoritative Palette graph: ${JSON.stringify(graph)}`);
+  }
+  await page.getByText(graph.name, { exact: true }).waitFor({ state: "visible" });
+  await page.locator(".react-flow").waitFor({ state: "visible" });
 
   const canvas = page.locator(".react-flow__pane");
   const added = [];
