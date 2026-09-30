@@ -11,8 +11,16 @@ page.on("request", (request) => requests.push(request.url()));
 try {
   await page.goto("http://127.0.0.1:5173", { waitUntil: "networkidle" });
   await page.getByLabel("Server-visible pipeline path").fill(pipelinePath);
+  const openPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
   await page.getByRole("button", { name: "Open pipeline" }).click();
-  await page.getByText("Server graph").waitFor({ state: "visible" });
+  const openResponse = await openPending;
+  if (!openResponse.ok()) throw new Error(`Real pipeline open failed: HTTP ${openResponse.status()}`);
+  const graph = await openResponse.json();
+  if (graph.name !== "real-graph-proof" || graph.nodes?.length < 2 || graph.edges?.length < 1) {
+    throw new Error(`Unexpected authoritative graph payload: ${JSON.stringify(graph)}`);
+  }
   await page.getByText("real-graph-proof", { exact: true }).waitFor({ state: "visible" });
   await page.locator(".react-flow").waitFor({ state: "visible" });
   const nodes = page.locator(".react-flow__node");
