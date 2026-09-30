@@ -147,7 +147,153 @@ export function App() {
       setDirty(false);
       setSource({ kind: "sample", reason: error instanceof Error ? error.message : "Pipeline open failed" });
     });
-    return (
+    return () => controller.abort();
+  }, [pipelinePath, pipelineOpenRevision]);
+
+  const edges = useMemo<Edge[]>(() => document.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })), [document]);
+  const onNodesChange = useCallback((changes: NodeChange<Node>[]) => setNodes((current) => applyNodeChanges(changes, current)), []);
+  const onNodeDragStop = useCallback((_: unknown, node: Node) => {
+    if (source.kind !== "server") return;
+    const authoritative = document.nodes.find((candidate) => candidate.id === node.id && candidate.kind === "transform");
+    if (!authoritative) {
+      setNodes(graphNodes(document));
+      return;
+    }
+    const dx = Math.round(node.position.x - authoritative.x);
+    const dy = Math.round(node.position.y - authoritative.y);
+    if (dx === 0 && dy === 0) {
+      setNodes(graphNodes(document));
+      return;
+    }
+    movePipelineTransforms(document.id, [node.id], dx, dy).then((graph) => {
+      setDocument(graph);
+      setNodes(graphNodes(graph));
+      setDirty(true);
+    }).catch(() => {
+      setNodes(graphNodes(document));
+    });
+  }, [document, source]);
+  const reconcileGraph = useCallback((graph: HopGraphDocument) => {
+    setDocument(graph);
+    setNodes(graphNodes(graph));
+    setSelectedId((current) => current && graph.nodes.some((node) => node.id === current) ? current : undefined);
+  }, []);
+
+  const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>) => {
+    if (source.kind !== "server") return;
+    command().then((graph) => {
+      reconcileGraph(graph);
+      setDirty(true);
+    }).catch((error: unknown) => {
+      setConfigError(error instanceof Error ? error.message : "Pipeline edit failed");
+      setNodes(graphNodes(document));
+    });
+  }, [document, reconcileGraph, source]);
+
+  const addTransformAt = useCallback((pluginId: string, x: number, y: number) => {
+    if (source.kind !== "server") return;
+    const nodeId = uniqueTransformId(pluginId, document);
+    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId, x: Math.round(x), y: Math.round(y) }));
+  }, [document, runGraphCommand, source]);
+
+  const onPaletteDragStart = useCallback((event: React.DragEvent, pluginId: string) => {
+    event.dataTransfer.setData("application/x-hop-transform", pluginId);
+    event.dataTransfer.effectAllowed = "copy";
+  }, []);
+
+  const onCanvasDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    if (source.kind !== "server" || !flow) return;
+    const pluginId = event.dataTransfer.getData("application/x-hop-transform");
+    if (!P0_TRANSFORMS.includes(pluginId as (typeof P0_TRANSFORMS)[number])) return;
+    const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    addTransformAt(pluginId, point.x, point.y);
+  }, [addTransformAt, flow, source]);
+
+  const filteredTransforms = useMemo(() => {
+    const query = paletteQuery.trim().toLowerCase();
+    if (!query) return [...P0_TRANSFORMS];
+    return P0_TRANSFORMS.filter((pluginId) => {
+      const meta = transformMeta(pluginId);
+      return pluginId.toLowerCase().includes(query) || meta.name.toLowerCase().includes(query);
+    });
+  }, [paletteQuery]);
+
+  const deleteSelected = useCallback(() => {
+    if (source.kind !== "server" || !selectedId) return;
+    runGraphCommand(() => deletePipelineTransform(document.id, selectedId));
+  }, [document.id, runGraphCommand, selectedId, source]);
+
+  const connectNodes = useCallback((connection: Connection) => {
+    if (source.kind !== "server" || !connection.source || !connection.target) return;
+    runGraphCommand(() => connectPipelineTransforms(document.id, connection.source, connection.target));
+  }, [document.id, runGraphCommand, source]);
+
+  const openTransformConfig = useCallback((nodeId: string) => {
+    if (source.kind !== "server") {
+      setServerConfig(undefined);
+      setConfigError(undefined);
+      setConfigId(nodeId);
+      return;
+    }
+    setConfigLoading(true);
+    setConfigError(undefined);
+    setServerConfig(undefined);
+    readPipelineTransformConfig(document.id, nodeId).then((result) => {
+      setServerConfig(result);
+      setConfigId(nodeId);
+    }).catch((error: unknown) => {
+      setConfigId(undefined);
+      setConfigError(error instanceof Error ? error.message : "Transform config read failed");
+    }).finally(() => setConfigLoading(false));
+  }, [document.id, source]);
+
+  const applyTransformConfig = useCallback((nodeId: string, value: Record<string, unknown>) => {
+    if (source.kind !== "server") {
+      setTableInputConfigs((current) => ({ ...current, [nodeId]: value }));
+      setConfigId(undefined);
+      return;
+    }
+    if (!serverConfig || serverConfig.nodeId !== nodeId) return;
+    setConfigLoading(true);
+    setConfigError(undefined);
+    writePipelineTransformConfig(document.id, nodeId, value)
+      .then(() => readPipelineTransformConfig(document.id, nodeId))
+      .then((authoritative) => {
+        setServerConfig(authoritative);
+        setConfigId(nodeId);
+        setDirty(true);
+      })
+      .catch((error: unknown) => {
+        setConfigError(error instanceof Error ? error.message : "Transform config write failed");
+      })
+      .finally(() => setConfigLoading(false));
+  }, [document.id, serverConfig, source]);
+
+  const saveDocument = useCallback(() => {
+    if (source.kind !== "server") return;
+    setConfigError(undefined);
+    savePipeline(document.id)
+      .then((graph) => {
+        reconcileGraph(graph);
+        setDirty(false);
+      })
+      .catch((error: unknown) => {
+        setConfigError(error instanceof Error ? error.message : "Pipeline save failed");
+      });
+  }, [document.id, reconcileGraph, source]);
+
+  const selected = nodes.find((node) => node.id === selectedId);
+  const configured = nodes.find((node) => node.id === configId);
+  const metadata = connections.find((connection) => connection.name === metadataName);
+  const canConfigure = Boolean(selected);
+  const isRealGraph = source.kind === "server";
+  const displayPipelineName = document.name === "real-graph-proof" ? "示例流程" : (document.name || "未命名流程");
+  const selectedMeta = selected ? transformMeta(String(selected.data.pluginId ?? "")) : undefined;
+  const selectedDocumentNode = selected ? document.nodes.find((node) => node.id === selected.id) : undefined;
+  const selectedDisplayName = selectedDocumentNode ? transformDisplayName(selectedDocumentNode) : "";
+
+  return (
     <main className="shell">
       <header className="topbar">
         <div className="product-brand">
@@ -223,14 +369,7 @@ export function App() {
                       {items.map((pluginId) => {
                         const meta = transformMeta(pluginId);
                         return (
-                          <button
-                            key={pluginId}
-                            type="button"
-                            aria-label={pluginId}
-                            draggable
-                            onDragStart={(event) => onPaletteDragStart(event, pluginId)}
-                            title={`${meta.name} · ${pluginId}`}
-                          >
+                          <button key={pluginId} type="button" aria-label={pluginId} draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)} title={`${meta.name} · ${pluginId}`}>
                             <span className={`palette-icon category-${meta.category}`}>{meta.glyph}</span>
                             <span className="palette-item-copy">
                               <strong>{meta.name}</strong>
@@ -278,25 +417,7 @@ export function App() {
           </div>
         )}
 
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onInit={setFlow}
-          onDragOver={(event) => { if (isRealGraph) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
-          onDrop={onCanvasDrop}
-          onNodesChange={onNodesChange}
-          onNodeClick={(_, node) => setSelectedId(node.id)}
-          onNodeDoubleClick={(_, node) => openTransformConfig(node.id)}
-          onNodeDragStop={onNodeDragStop}
-          onConnect={connectNodes}
-          onPaneClick={() => setSelectedId(undefined)}
-          fitView
-          nodesDraggable
-          nodesConnectable={isRealGraph}
-          panOnDrag
-          zoomOnScroll
-          zoomOnPinch
-        >
+        <ReactFlow nodes={nodes} edges={edges} onInit={setFlow} onDragOver={(event) => { if (isRealGraph) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={onCanvasDrop} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={isRealGraph} panOnDrag zoomOnScroll zoomOnPinch>
           <MiniMap pannable zoomable />
           <Controls />
           <Background gap={24} size={1} />
@@ -304,13 +425,9 @@ export function App() {
 
         {configError && <div className="preview-note error-note" role="alert">操作失败：{configError}</div>}
         {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
-          <GenericConfigPanel
-            descriptor={serverConfig.descriptor}
-            config={serverConfig.config}
-            disabled={configLoading}
+          <GenericConfigPanel descriptor={serverConfig.descriptor} config={serverConfig.config} disabled={configLoading}
             onCancel={() => { setConfigId(undefined); setServerConfig(undefined); setConfigError(undefined); }}
-            onSave={(value) => applyTransformConfig(configured.id, value)}
-          />
+            onSave={(value) => applyTransformConfig(configured.id, value)} />
         )}
         {metadata && <DatabaseConnectionPanel value={metadata} onClose={() => setMetadataName(undefined)} onApply={(value) => {
           setConnections((current) => current.map((item) => item.name === metadata.name ? value : item));
