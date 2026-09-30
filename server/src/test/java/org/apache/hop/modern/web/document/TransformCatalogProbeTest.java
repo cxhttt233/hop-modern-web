@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -118,6 +120,19 @@ class TransformCatalogProbeTest {
     System.out.println(
         "PROD_P0_DISCOVERED=" + (PROD_P0.size() - p0Missing.size()) + "/" + PROD_P0.size());
     System.out.println("PROD_P0_MISSING=" + p0Missing);
+
+    String descriptorFixture = System.getProperty("p0DescriptorFixture");
+    if (descriptorFixture != null && !descriptorFixture.isBlank()) {
+      List<Map<String, Object>> fixtureRows =
+          rows.stream()
+              .filter(row -> PROD_P0.contains(String.valueOf(row.get("id"))))
+              .sorted(java.util.Comparator.comparing(row -> String.valueOf(row.get("id"))))
+              .toList();
+      Path fixturePath = Path.of(descriptorFixture);
+      if (fixturePath.getParent() != null) Files.createDirectories(fixturePath.getParent());
+      JSON.writerWithDefaultPrettyPrinter().writeValue(fixturePath.toFile(), fixtureRows);
+      System.out.println("PROD_P0_DESCRIPTOR_FIXTURE=" + fixturePath.toAbsolutePath());
+    }
 
     List<Map<String, Object>> p0Rows =
         rows.stream()
