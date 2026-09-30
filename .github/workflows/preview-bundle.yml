@@ -1,0 +1,118 @@
+name: Build Tencent Preview Bundle
+
+on:
+  push:
+    branches:
+      - preview/tencent-cloud
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Modern Web
+        uses: actions/checkout@v4
+        with:
+          path: modern
+
+      - name: Checkout pinned Apache Hop
+        uses: actions/checkout@v4
+        with:
+          repository: cxhttt233/hop
+          ref: cbb70e9215a6dc69da8acfd3743e358f7ba4db1d
+          path: hop
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: modern/package-lock.json
+
+      - name: Install pinned Hop runtime modules
+        working-directory: hop
+        run: |
+          ./mvnw -q -DskipTests -Dcheckstyle.skip \
+            -pl lib,core,engine,plugins/transforms/checksum,plugins/transforms/concatfields,plugins/transforms/datagrid,plugins/transforms/sql,plugins/transforms/filterrows,plugins/transforms/groupby,plugins/transforms/http,plugins/transforms/insertupdate,plugins/transforms/json,plugins/transforms/mergejoin,plugins/transforms/replacestring,plugins/transforms/rest,plugins/transforms/script,plugins/transforms/selectvalues,plugins/transforms/setvariable,plugins/transforms/streamlookup,plugins/transforms/stringcut,plugins/transforms/tableinput,plugins/transforms/tableoutput,plugins/transforms/uniquerowsbyhashset,plugins/transforms/sort \
+            -am install
+
+      - name: Build frontend
+        working-directory: modern
+        run: |
+          npm install
+          npm run build
+
+      - name: Build Modern Web server
+        working-directory: modern/server
+        run: mvn -q -DskipTests package
+
+      - name: Assemble preview runtime dependencies
+        working-directory: modern
+        run: |
+          rm -rf server/target/preview-lib
+          mkdir -p server/target/preview-lib
+          mvn -q -f server/pom.xml dependency:copy-dependencies \
+            -DincludeScope=test \
+            -DoutputDirectory="${GITHUB_WORKSPACE}/modern/server/target/preview-lib"
+          mvn -q -f deploy/preview/runtime-pom.xml dependency:copy-dependencies \
+            -DincludeScope=runtime \
+            -DoutputDirectory="${GITHUB_WORKSPACE}/modern/server/target/preview-lib"
+          echo "preview jars: $(find server/target/preview-lib -maxdepth 1 -type f -name '*.jar' | wc -l)"
+          test -f server/target/preview-lib/hop-transform-tableinput-2.20.0-SNAPSHOT.jar
+          test -f server/target/preview-lib/hop-transform-rest-2.20.0-SNAPSHOT.jar
+          test -f server/target/preview-lib/hop-transform-uniquerowsbyhashset-2.20.0-SNAPSHOT.jar
+
+      - name: Build runtime-only preview image
+        working-directory: modern
+        run: |
+          docker build -f deploy/preview/Dockerfile -t hop-modern-web-preview:${GITHUB_SHA} .
+
+      - name: Smoke test frontend and real pipeline API
+        working-directory: modern
+        run: |
+          docker run -d --rm --name hop-modern-preview-smoke -p 4173:80 hop-modern-web-preview:${GITHUB_SHA}
+          trap 'docker logs hop-modern-preview-smoke || true; docker stop hop-modern-preview-smoke || true' EXIT
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4173/ | grep -q '<div id="root"></div>'
+          printf '%s' '{"path":"/workspace/real-graph-proof.hpl"}' > /tmp/open.json
+          curl -fsS -X POST http://127.0.0.1:4173/api/pipelines/open \
+            -H 'content-type: application/json' \
+            --data-binary @/tmp/open.json \
+            | tee /tmp/open-response.json
+          grep -q '"name":"real-graph-proof"' /tmp/open-response.json
+          grep -q '"pluginId":"TableInput"' /tmp/open-response.json
+          docker stop hop-modern-preview-smoke
+          trap - EXIT
+
+      - name: Export deployment image
+        working-directory: modern
+        run: |
+          docker save hop-modern-web-preview:${GITHUB_SHA} | gzip -1 > hop-modern-preview-image.tar.gz
+          sha256sum hop-modern-preview-image.tar.gz > hop-modern-preview-image.tar.gz.sha256
+          ls -lh hop-modern-preview-image.tar.gz
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hop-modern-tencent-preview
+          path: |
+            modern/hop-modern-preview-image.tar.gz
+            modern/hop-modern-preview-image.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
