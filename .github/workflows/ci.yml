@@ -91,6 +91,9 @@ jobs:
       - name: Classify all production P0 transforms through GenericConfigPanel
         working-directory: modern
         run: node e2e/l3-p0-classification.mjs docs/p0-transform-descriptors.generated.json docs/p0-l3-classification.generated.json
+      - name: Prove descriptor-driven ObjectEditor contract
+        working-directory: modern
+        run: node e2e/l3-object-editor-contract.mjs docs/p0-transform-descriptors.generated.json docs/p0-object-editor-contract.generated.json
       - name: Upload P0 L3 descriptor and classification artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -98,6 +101,7 @@ jobs:
           path: |
             modern/docs/p0-transform-descriptors.generated.json
             modern/docs/p0-l3-classification.generated.json
+            modern/docs/p0-object-editor-contract.generated.json
 
   v2-real-graph:
     runs-on: ubuntu-latest
