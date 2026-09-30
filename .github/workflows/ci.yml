@@ -37,7 +37,7 @@ jobs:
           cache: maven
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/filterrows,plugins/transforms/sort -am -DskipTests install
       - name: Test standalone server
         working-directory: modern/server
         run: mvn -q test
@@ -63,7 +63,7 @@ jobs:
           node-version: 24
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/filterrows,plugins/transforms/sort -am -DskipTests install
       - name: Build server runtime classpath
         working-directory: modern/server
         run: mvn -q -DskipTests package dependency:build-classpath -Dmdep.outputFile=classpath.txt
@@ -110,6 +110,11 @@ jobs:
         env:
           REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
         run: node e2e/v5-authoritative-edit-save.mjs
+      - name: Prove three-transform Palette edit/config/save workflow
+        working-directory: modern
+        env:
+          REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
+        run: node e2e/v6-palette-authoritative.mjs
       - name: Show runtime logs on failure
         if: failure()
         run: |
