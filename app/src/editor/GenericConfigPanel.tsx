@@ -11,6 +11,48 @@ export interface GenericConfigPanelProps {
   onCancel: () => void; onSave: (config: Record<string, unknown>) => void | Promise<void>;
 }
 
+const GROUP_LABELS: Record<string, string> = {
+  General: "常规",
+  Input: "输入",
+  Output: "输出",
+  Fields: "字段",
+  Settings: "设置",
+  Advanced: "高级",
+};
+
+const FIELD_LABELS: Record<string, string> = {
+  connection: "连接",
+  sql: "SQL",
+  name: "名称",
+  field: "字段",
+  fields: "字段",
+  type: "类型",
+  format: "格式",
+  length: "长度",
+  precision: "精度",
+  description: "说明",
+  expression: "表达式",
+  script: "脚本",
+  filename: "文件",
+  file: "文件",
+  url: "URL",
+  username: "用户名",
+  password: "密码",
+  database: "数据库",
+  tablename: "表名",
+  table: "表",
+  schema: "模式",
+  limit: "数量限制",
+  encoding: "编码",
+  separator: "分隔符",
+};
+
+const localLabel = (key: string) => {
+  const leaf = key.split(".").at(-1) ?? key;
+  const compact = leaf.replace(/[_-]/g, "").toLowerCase();
+  return FIELD_LABELS[compact] ?? leaf.replace(/([a-z])([A-Z])/g, "$1 $2");
+};
+
 const read = (source: Record<string, unknown>, path: string): unknown =>
   path.split(".").reduce<unknown>((value, key) => value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined, source);
 
@@ -44,7 +86,7 @@ export function GenericConfigPanel({ descriptor, config, disabled, onCancel, onS
     return [...result.entries()];
   }, [descriptor]);
   const set = (key: string, value: unknown) => setDraft((old) => ({ ...old, [key]: value }));
-  const label = (p: ConfigPropertyDescriptor) => p.key.split(".").at(-1)?.replace(/([a-z])([A-Z])/g, "$1 $2") ?? p.key;
+  const label = (p: ConfigPropertyDescriptor) => localLabel(p.key);
 
   const field = (p: ConfigPropertyDescriptor) => {
     const value = draft[p.key]; const id = `config-${p.javaField}`;
@@ -65,13 +107,13 @@ export function GenericConfigPanel({ descriptor, config, disabled, onCancel, onS
     const long = /sql|query|script|description|expression/i.test(p.key);
     if (long) return <textarea id={id} disabled={disabled} rows={6} value={value == null ? "" : String(value)} onChange={(e) => set(p.key, e.target.value)} />;
     return <input id={id} disabled={disabled} type={p.sensitive ? "password" : "text"} value={value == null ? "" : String(value)}
-      placeholder={p.sensitive ? "Leave blank to preserve existing value" : undefined} onChange={(e) => set(p.key, e.target.value)} />;
+      placeholder={p.sensitive ? "留空以保留现有值" : undefined} onChange={(e) => set(p.key, e.target.value)} />;
   };
 
   return <form className="config-panel generic-config" onSubmit={(e) => { e.preventDefault(); if (!Object.values(invalid).some(Boolean)) void onSave(applyGenericConfigDraft(config, descriptor, draft)); }}>
-    <header><strong>Configuration</strong><small>{descriptor.className}</small></header>
-    {groups.map(([group, properties]) => <fieldset key={group}><legend>{group}</legend>{properties.map((p) =>
-      <label key={p.key} htmlFor={`config-${p.javaField}`}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">Enter valid {p.shape.toLowerCase()} JSON</small>}</label>)}</fieldset>)}
-    <footer><button type="button" onClick={onCancel}>Cancel</button><button type="submit" disabled={disabled || Object.values(invalid).some(Boolean)}>Save</button></footer>
+    <header><strong>转换配置</strong><small>{descriptor.className}</small></header>
+    {groups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
+      <label key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
+    <footer><button type="button" aria-label="Cancel" onClick={onCancel}>取消</button><button type="submit" aria-label="Save" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
   </form>;
 }
