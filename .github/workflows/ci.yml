@@ -68,6 +68,9 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: maven
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - name: Derive production P0 Transform runtime
         working-directory: modern
         shell: bash
@@ -79,10 +82,22 @@ jobs:
         working-directory: hop
         shell: bash
         run: ./mvnw -q -pl "$P0_MAVEN_PL" -am -DskipTests install
-      - name: Prove production P0 Transform runtime L0/L1
+      - name: Prove production P0 Transform runtime L0/L1/L2 and emit descriptors
         working-directory: modern/server
-        run: mvn -q -Dtest=TransformCatalogProbeTest,TransformP0L2RoundTripTest -DprodP0Expected=true test
-
+        run: mvn -q -Dtest=TransformCatalogProbeTest,TransformP0L2RoundTripTest -DprodP0Expected=true -Dp0DescriptorFixture=../docs/p0-transform-descriptors.generated.json test
+      - name: Install frontend dependencies for L3 renderer classification
+        working-directory: modern
+        run: npm install
+      - name: Classify all production P0 transforms through GenericConfigPanel
+        working-directory: modern
+        run: node e2e/l3-p0-classification.mjs docs/p0-transform-descriptors.generated.json docs/p0-l3-classification.generated.json
+      - name: Upload P0 L3 descriptor and classification artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-l3-classification
+          path: |
+            modern/docs/p0-transform-descriptors.generated.json
+            modern/docs/p0-l3-classification.generated.json
 
   v2-real-graph:
     runs-on: ubuntu-latest
