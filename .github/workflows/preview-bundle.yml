@@ -26,18 +26,16 @@ jobs:
           path: hop
 
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
 
       - name: Set up Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: modern/package-lock.json
 
       - name: Install pinned Hop runtime modules
         working-directory: hop
