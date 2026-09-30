@@ -41,8 +41,6 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: modern/package-lock.json
 
       - name: Install pinned Hop P0 runtime modules
         working-directory: hop
