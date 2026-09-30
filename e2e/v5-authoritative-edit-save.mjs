@@ -15,6 +15,8 @@ try{
  const opened=await (await p).json(); const original=opened.nodes[0]?.id;
  if(!original) throw new Error("real pipeline has no transform");
  await rf(original).waitFor();
+ if(await page.getByRole("button",{name:"Save"}).isEnabled()) throw new Error("freshly opened authoritative graph must start clean");
+ if(await page.getByText("Unsaved",{exact:true}).count()) throw new Error("freshly opened authoritative graph must not show dirty state");
  p=post("/edit/add");
  const paletteTableInput=page.getByRole("button",{name:"TableInput"});
  const canvas=page.locator(".react-flow__pane");
@@ -23,6 +25,8 @@ try{
  const added=addedGraph.nodes.find(n=>!opened.nodes.some(o=>o.id===n.id));
  if(!added) throw new Error("authoritative add missing new transform");
  await rf(added.id).waitFor();
+ await page.getByText("Unsaved",{exact:true}).waitFor({state:"visible"});
+ if(!(await page.getByRole("button",{name:"Save"}).isEnabled())) throw new Error("authoritative edit must enable Save");
  p=post("/edit/undo"); await page.getByRole("button",{name:"Undo"}).click();
  const undone=await (await p).json();
  if(undone.nodes.some(n=>n.id===added.id)) throw new Error("undo add failed");
@@ -57,6 +61,8 @@ try{
  p=post("/save"); await page.getByRole("button",{name:"Save"}).click();
  const saved=await (await p).json();
  if(!saved.nodes.some(n=>n.id===added.id)||!saved.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("save lost semantics");
+ await page.getByText("Unsaved",{exact:true}).waitFor({state:"hidden"});
+ if(await page.getByRole("button",{name:"Save"}).isEnabled()) throw new Error("successful save must return editor to clean state");
  p=post("/api/pipelines/open"); await page.getByRole("button",{name:"Open pipeline"}).click();
  const reopened=await (await p).json();
  if(!reopened.nodes.some(n=>n.id===added.id)||!reopened.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("disk reopen lost semantics");

@@ -83,7 +83,7 @@ jobs:
           npm run dev -w @hop-modern/app -- --host 127.0.0.1 >/tmp/hop-modern-vite.log 2>&1 &
           echo $! >/tmp/hop-modern-vite.pid
           for i in {1..60}; do
-            if curl -fsS http://127.0.0.1:5173 >/dev/null && curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/pipelines/open >/tmp/server-status 2>/dev/null; then
+            if curl -fsS http://127.0.0.1:5173 >/dev/null && curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/pipelines/open >/tmp/server-status 2>/dev/null; then
               break
             fi
             sleep 2

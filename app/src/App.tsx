@@ -60,6 +60,7 @@ export function App() {
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (!pipelinePath) return;
@@ -72,11 +73,13 @@ export function App() {
       setConfigId(undefined);
       setServerConfig(undefined);
       setConfigError(undefined);
+      setDirty(false);
       setSource({ kind: "server", path: pipelinePath });
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       setDocument(sample);
       setNodes(graphNodes(sample));
+      setDirty(false);
       setSource({ kind: "sample", reason: error instanceof Error ? error.message : "Pipeline open failed" });
     });
     return () => controller.abort();
@@ -100,6 +103,7 @@ export function App() {
     movePipelineTransforms(document.id, [node.id], dx, dy).then((graph) => {
       setDocument(graph);
       setNodes(graphNodes(graph));
+      setDirty(true);
     }).catch(() => {
       setNodes(graphNodes(document));
     });
@@ -112,7 +116,10 @@ export function App() {
 
   const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>) => {
     if (source.kind !== "server") return;
-    command().then(reconcileGraph).catch((error: unknown) => {
+    command().then((graph) => {
+      reconcileGraph(graph);
+      setDirty(true);
+    }).catch((error: unknown) => {
       setConfigError(error instanceof Error ? error.message : "Pipeline edit failed");
       setNodes(graphNodes(document));
     });
@@ -186,6 +193,7 @@ export function App() {
       .then((authoritative) => {
         setServerConfig(authoritative);
         setConfigId(nodeId);
+        setDirty(true);
       })
       .catch((error: unknown) => {
         setConfigError(error instanceof Error ? error.message : "Transform config write failed");
@@ -193,32 +201,49 @@ export function App() {
       .finally(() => setConfigLoading(false));
   }, [document.id, serverConfig, source]);
 
+  const saveDocument = useCallback(() => {
+    if (source.kind !== "server") return;
+    setConfigError(undefined);
+    savePipeline(document.id)
+      .then((graph) => {
+        reconcileGraph(graph);
+        setDirty(false);
+      })
+      .catch((error: unknown) => {
+        setConfigError(error instanceof Error ? error.message : "Pipeline save failed");
+      });
+  }, [document.id, reconcileGraph, source]);
+
   const selected = nodes.find((node) => node.id === selectedId);
   const configured = nodes.find((node) => node.id === configId);
   const metadata = connections.find((connection) => connection.name === metadataName);
   const canConfigure = Boolean(selected);
   const isRealGraph = source.kind === "server";
-  const sourceLabel = source.kind === "server" ? "Server graph" : source.kind === "loading" ? "Loading real pipeline…" : "Development sample";
 
   return (
     <main className="shell">
       <header>
-        <div className="file-identity"><strong>{document.name}</strong></div>
+        <div className="file-identity">
+          <strong>{document.name}</strong>
+          {isRealGraph && dirty && <span className="dirty-state is-dirty" role="status">Unsaved</span>}
+        </div>
         <form className="pipeline-open" onSubmit={(event) => { event.preventDefault(); const path = pipelinePathDraft.trim(); if (!path) return; if (path === pipelinePath) setPipelineOpenRevision((current) => current + 1); else setPipelinePath(path); }}>
           <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="Server-visible .hpl path" />
           <button type="submit" disabled={!pipelinePathDraft.trim() || source.kind === "loading"}>Open pipeline</button>
         </form>
-        <div className="selection-actions">
-          <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
-          <button type="button" onClick={() => { const connection = selected ? tableInputConfigs[selected.id]?.connection : undefined; setMetadataName((typeof connection === "string" ? connection : undefined) ?? connections[0]?.name); }}>Connections</button>
-          {isRealGraph && selected && <button type="button" onClick={deleteSelected}>Delete</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>Undo</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>Redo</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => savePipeline(document.id))}>Save</button>}
-          {canConfigure && selected && <button type="button" disabled={configLoading} onClick={() => openTransformConfig(selected.id)}>Configure</button>}
-        </div>
+        {isRealGraph && <div className="editor-actions">
+          <button type="button" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>Undo</button>
+          <button type="button" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>Redo</button>
+          <button type="button" className="primary-action" disabled={!dirty} onClick={saveDocument}>Save</button>
+        </div>}
       </header>
       <section className="workspace">
+        {selected && <div className="selection-toolbar" aria-label="Selected transform actions">
+          <strong>{String(selected.data.label)}</strong>
+          <button type="button" onClick={() => { const connection = tableInputConfigs[selected.id]?.connection; setMetadataName((typeof connection === "string" ? connection : undefined) ?? connections[0]?.name); }}>Connections</button>
+          {isRealGraph && <button type="button" onClick={deleteSelected}>Delete</button>}
+          {canConfigure && <button type="button" disabled={configLoading} onClick={() => openTransformConfig(selected.id)}>Configure</button>}
+        </div>}
         {isRealGraph && <aside className="transform-palette" aria-label="Transform palette">
           <strong>Transforms</strong>
           <small>{P0_TRANSFORMS.length} production P0</small>

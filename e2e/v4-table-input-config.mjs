@@ -8,9 +8,16 @@ page.on("request", request => requests.push({ url: request.url(), method: reques
 const match = (response, suffix) => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith(suffix);
 try {
   await page.goto("http://127.0.0.1:5173", { waitUntil: "networkidle" });
+  const openPromise = page.waitForResponse(r => match(r, "/api/pipelines/open"));
   await page.getByLabel("Server-visible pipeline path").fill(pipelinePath);
   await page.getByRole("button", { name: "Open pipeline" }).click();
-  await page.getByText("Server graph").waitFor({ state: "visible" });
+  const openResponse = await openPromise;
+  const opened = await openResponse.json();
+  if (!openResponse.ok() || !opened.nodes?.some(node => node.id === "table-input")) {
+    throw new Error(`Authoritative Table Input graph missing: ${JSON.stringify(opened)}`);
+  }
+  await page.getByText(opened.name, { exact: true }).waitFor({ state: "visible" });
+  await page.locator(".react-flow").waitFor({ state: "visible" });
   const node = page.locator('.react-flow__node[data-id="table-input"]');
   await node.waitFor({ state: "visible" });
   await node.click();
