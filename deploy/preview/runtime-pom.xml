@@ -24,7 +24,7 @@
     <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-json</artifactId><version>${hop.version}</version></dependency>
     <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-mergejoin</artifactId><version>${hop.version}</version></dependency>
     <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-replacestring</artifactId><version>${hop.version}</version></dependency>
-    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-misc-rest</artifactId><version>${hop.version}</version></dependency>
+    <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-rest</artifactId><version>${hop.version}</version></dependency>
     <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-script</artifactId><version>${hop.version}</version></dependency>
     <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-selectvalues</artifactId><version>${hop.version}</version></dependency>
     <dependency><groupId>org.apache.hop</groupId><artifactId>hop-transform-setvariable</artifactId><version>${hop.version}</version></dependency>
