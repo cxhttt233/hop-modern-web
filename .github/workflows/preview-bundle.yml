@@ -14,12 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Modern Web
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: modern
 
       - name: Checkout pinned Apache Hop
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: cxhttt233/hop
           ref: cbb70e9215a6dc69da8acfd3743e358f7ba4db1d
@@ -93,7 +93,13 @@ jobs:
             --data-binary @/tmp/open.json \
             | tee /tmp/open-response.json
           grep -q '"name":"real-graph-proof"' /tmp/open-response.json
-          grep -q '"pluginId":"TableInput"' /tmp/open-response.json
+          DOC_ID="$(python3 -c 'import json; print(json.load(open("/tmp/open-response.json"))["id"])')"
+          printf '%s' '{"nodeId":"smoke-table-input","pluginId":"TableInput","x":220,"y":320}' > /tmp/add.json
+          curl -fsS -X POST "http://127.0.0.1:4173/api/pipelines/$DOC_ID/edit/add" \
+            -H 'content-type: application/json' \
+            --data-binary @/tmp/add.json \
+            | tee /tmp/add-response.json
+          grep -q '"pluginId":"TableInput"' /tmp/add-response.json
           docker stop hop-modern-preview-smoke
           trap - EXIT
 
