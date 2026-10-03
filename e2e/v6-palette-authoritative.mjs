@@ -112,6 +112,7 @@ try {
   }
 
   pending = post("/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
   await page.getByRole("button", { name: "Open pipeline" }).click();
   const reopened = await (await pending).json();
   for (const node of added) {
