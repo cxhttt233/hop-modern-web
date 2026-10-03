@@ -63,7 +63,9 @@ try{
  if(!saved.nodes.some(n=>n.id===added.id)||!saved.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("save lost semantics");
  await page.locator(".dirty-state.is-dirty").waitFor({state:"hidden"});
  if(await page.getByRole("button",{name:"Save"}).isEnabled()) throw new Error("successful save must return editor to clean state");
- p=post("/api/pipelines/open"); await page.getByRole("button",{name:"Open pipeline"}).click();
+ p=post("/api/pipelines/open");
+ await page.getByRole("button",{name:"Choose pipeline"}).click();
+ await page.getByRole("button",{name:"Open pipeline"}).click();
  const reopened=await (await p).json();
  if(!reopened.nodes.some(n=>n.id===added.id)||!reopened.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("disk reopen lost semantics");
  for(const s of ["/edit/add","/edit/delete","/edit/connect","/edit/undo","/edit/redo","/save"])
