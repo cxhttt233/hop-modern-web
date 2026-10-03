@@ -42,7 +42,7 @@ jobs:
           cache: maven
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/databases/h2,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
       - name: Install execution web API
         working-directory: hop-web-api
         run: |
@@ -78,7 +78,7 @@ jobs:
           node-version: 24
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/databases/h2,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
       - name: Install execution web API
         working-directory: hop-web-api
         run: |
