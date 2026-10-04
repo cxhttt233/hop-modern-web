@@ -82,7 +82,7 @@ public final class AutomaticConfigDescriptor {
     }
   }
 
-  private static Shape shape(Class<?> type) {
+  private static TextEditorHint textEditorHint(Shape shape, String key, HopMetadataProperty metadata) {\n    if (shape != Shape.STRING) return TextEditorHint.NONE;\n    String metadataType = metadata.hopMetadataPropertyType().name();\n    if (metadataType.contains("SQL")) return TextEditorHint.SQL;\n    String semanticKey = key.toLowerCase(java.util.Locale.ROOT);\n    if (semanticKey.contains("script")) return TextEditorHint.SCRIPT;\n    if (semanticKey.contains("template")) return TextEditorHint.TEMPLATE;\n    return TextEditorHint.NONE;\n  }\n\n  private static Shape shape(Class<?> type) {
     if (type.isArray() || Collection.class.isAssignableFrom(type)) return Shape.LIST;
     if (type.isEnum()) return Shape.ENUM;
     if (type == boolean.class || type == Boolean.class) return Shape.BOOLEAN;
