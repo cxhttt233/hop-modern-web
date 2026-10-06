@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.database.Database;
 import org.apache.hop.core.database.DatabaseMeta;
@@ -22,8 +23,11 @@ import org.apache.hop.pipeline.engine.IPipelineEngine;
 import org.apache.hop.pipeline.transform.TransformMeta;
 import org.apache.hop.pipeline.transforms.tableinput.TableInputMeta;
 import org.apache.hop.web.api.execution.ExecutionRegistry;
+import org.apache.hop.web.api.execution.PipelineExecutionLifecycle;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
 class PipelineExecutionH2StartTest {
   @BeforeAll
@@ -84,4 +88,46 @@ class PipelineExecutionH2StartTest {
         (PipelineExecutionResource.ExecutionStatus) resource.status(accepted.id()).getEntity();
     assertEquals("completed", completed.state());
   }
+
+  @Test
+  void startFailureReturns422AndRemovesRegisteredExecution() throws Exception {
+    IVariables variables = new Variables();
+    MemoryMetadataProvider provider = new MemoryMetadataProvider();
+    ProductContext context = new ProductContext(variables, provider);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("controlled-start-failure");
+
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("doc-fail", Path.of("controlled-start-failure.hpl"), pipeline));
+    ExecutionRegistry<IPipelineEngine<PipelineMeta>> executions =
+        new ExecutionRegistry<>(Duration.ofHours(1), 16);
+    PipelineExecutionResource resource =
+        new PipelineExecutionResource(documents, context, executions);
+    AtomicReference<String> attemptedExecutionId = new AtomicReference<>();
+
+    try (MockedStatic<PipelineExecutionLifecycle> lifecycle =
+        Mockito.mockStatic(PipelineExecutionLifecycle.class)) {
+      lifecycle
+          .when(() -> PipelineExecutionLifecycle.start(Mockito.anyString(), Mockito.same(executions)))
+          .thenAnswer(
+              invocation -> {
+                attemptedExecutionId.set(invocation.getArgument(0));
+                throw new org.apache.hop.core.exception.HopException("controlled start failure");
+              });
+
+      var response = resource.start("doc-fail");
+      assertEquals(422, response.getStatus());
+      var error = (PipelineExecutionResource.ErrorResponse) response.getEntity();
+      assertEquals("execution_start_failed", error.code());
+    }
+
+    String executionId = attemptedExecutionId.get();
+    assertNotNull(executionId);
+    assertTrue(executions.find(executionId).isEmpty());
+    var status = resource.status(executionId);
+    assertEquals(404, status.getStatus());
+    assertEquals("execution_not_found",
+        ((PipelineExecutionResource.ErrorResponse) status.getEntity()).code());
+  }
+
 }
