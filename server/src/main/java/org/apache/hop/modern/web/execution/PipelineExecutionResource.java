@@ -89,6 +89,10 @@ public final class PipelineExecutionResource {
       PipelineExecutionLifecycle.start(executionId, executions);
       return Response.accepted(status(executionId).getEntity()).build();
     } catch (HopException | RuntimeException e) {
+      // A start failure never produces a queryable execution. The authoritative lifecycle
+      // has already marked the entry completed; remove it so failed starts do not retain
+      // an engine/snapshot until the normal completed-entry TTL expires.
+      executions.remove(executionId);
       return error(
           422,
           "execution_start_failed",
