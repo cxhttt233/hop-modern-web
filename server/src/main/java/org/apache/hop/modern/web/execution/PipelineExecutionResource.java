@@ -100,6 +100,22 @@ public final class PipelineExecutionResource {
     }
   }
 
+  @POST
+  @Path("/{executionId}/cancel")
+  public Response cancel(@PathParam("executionId") String executionId) {
+    ExecutionRegistry.Entry<IPipelineEngine<PipelineMeta>> entry =
+        executions.find(executionId).orElse(null);
+    if (entry == null) {
+      return error(404, "execution_not_found", "pipeline execution was not found");
+    }
+
+    IPipelineEngine<PipelineMeta> engine = entry.execution();
+    if (!engine.isFinished() && !engine.isStopped()) {
+      engine.stopAll();
+    }
+    return status(executionId);
+  }
+
   @GET
   @Path("/{executionId}")
   public Response status(@PathParam("executionId") String executionId) {
