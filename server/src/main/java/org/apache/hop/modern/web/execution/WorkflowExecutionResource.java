@@ -1,5 +1,6 @@
 package org.apache.hop.modern.web.execution;
 
+import jakarta.ws.rs.CookieParam;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -12,6 +13,10 @@ import java.util.Objects;
 import java.util.Optional;
 import org.apache.hop.workflow.WorkflowMeta;
 
+/**
+ * Workflow HTTP lifecycle. Session ownership is checked before every network operation.
+ * The legacy one-argument methods are direct adapter probes, not HTTP endpoints.
+ */
 @Path("/api/v2")
 @Produces(MediaType.APPLICATION_JSON)
 public final class WorkflowExecutionResource implements AutoCloseable {
@@ -25,9 +30,45 @@ public final class WorkflowExecutionResource implements AutoCloseable {
 
   @POST
   @Path("/documents/{documentId}/executions")
-  public Response start(@PathParam("documentId") String documentId) {
-    Optional<WorkflowMeta> snapshot = documents.executionSnapshot(documentId);
-    if (snapshot.isEmpty()) return error(404, "document_not_found", "opened workflow document was not found");
+  public Response startHttp(@PathParam("documentId") String documentId,
+                            @CookieParam("hop-modern-session") String session) {
+    try {
+      return startSnapshot(documentId, documents.executionSnapshot(documentId, session));
+    } catch (RuntimeException e) {
+      return error(422, "execution_snapshot_failed", "workflow execution snapshot could not be loaded");
+    }
+  }
+
+  @GET
+  @Path("/executions/{executionId}")
+  public Response statusHttp(@PathParam("executionId") String executionId,
+                             @CookieParam("hop-modern-session") String session) {
+    var snapshot = executions.status(executionId).orElse(null);
+    if (snapshot == null || !documents.owns(snapshot.owner(), session)) {
+      return error(404, "execution_not_found", "workflow execution was not found");
+    }
+    return Response.ok(toStatus(snapshot)).build();
+  }
+
+  @POST
+  @Path("/executions/{executionId}/stop")
+  public Response stopHttp(@PathParam("executionId") String executionId,
+                           @CookieParam("hop-modern-session") String session) {
+    var snapshot = executions.status(executionId).orElse(null);
+    if (snapshot == null || !documents.owns(snapshot.owner(), session)) {
+      return error(404, "execution_not_found", "workflow execution was not found");
+    }
+    return stop(executionId);
+  }
+
+  public Response start(String documentId) {
+    return startSnapshot(documentId, documents.executionSnapshot(documentId));
+  }
+
+  private Response startSnapshot(String documentId, Optional<WorkflowMeta> snapshot) {
+    if (snapshot.isEmpty()) {
+      return error(404, "document_not_found", "opened workflow document was not found");
+    }
     try {
       String id = executions.start(documentId, snapshot.orElseThrow());
       return Response.accepted(executions.status(id).map(WorkflowExecutionResource::toStatus).orElseThrow()).build();
@@ -37,17 +78,13 @@ public final class WorkflowExecutionResource implements AutoCloseable {
     }
   }
 
-  @GET
-  @Path("/executions/{executionId}")
-  public Response status(@PathParam("executionId") String executionId) {
+  public Response status(String executionId) {
     var snapshot = executions.status(executionId).orElse(null);
     return snapshot == null ? error(404, "execution_not_found", "workflow execution was not found")
         : Response.ok(toStatus(snapshot)).build();
   }
 
-  @POST
-  @Path("/executions/{executionId}/stop")
-  public Response stop(@PathParam("executionId") String executionId) {
+  public Response stop(String executionId) {
     var snapshot = executions.stop(executionId).orElse(null);
     return snapshot == null ? error(404, "execution_not_found", "workflow execution was not found")
         : Response.ok(toStatus(snapshot)).build();
@@ -62,11 +99,18 @@ public final class WorkflowExecutionResource implements AutoCloseable {
     return Response.status(status).entity(new ErrorResponse(code, message)).build();
   }
 
-  @Override public void close() { executions.close(); }
+  @Override
+  public void close() { executions.close(); }
 
   @FunctionalInterface
   public interface WorkflowDocumentSource {
     Optional<WorkflowMeta> executionSnapshot(String documentId);
+    default Optional<WorkflowMeta> executionSnapshot(String documentId, String session) {
+      return Optional.empty();
+    }
+    default boolean owns(String documentId, String session) {
+      return false;
+    }
   }
 
   public record ExecutionStatus(String id, String documentId, String state,
