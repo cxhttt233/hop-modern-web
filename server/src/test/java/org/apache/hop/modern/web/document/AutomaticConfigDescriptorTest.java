@@ -9,6 +9,7 @@ import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Descriptor;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Property;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Presentation;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Shape;
+import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.TextEditorHint;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.IEnumHasCodeAndDescription;
 import org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta;
@@ -52,12 +53,30 @@ class AutomaticConfigDescriptorTest {
     Descriptor descriptor = AutomaticConfigDescriptor.describe(TableInputMeta.class);
 
     assertEquals(Shape.STRING, property(descriptor.properties(), "sql").shape());
+    assertEquals(TextEditorHint.SQL, property(descriptor.properties(), "sql").textEditorHint());
     assertEquals(Shape.BOOLEAN, property(descriptor.properties(), "execute_each_row").shape());
     Property fields = property(descriptor.properties(), "field");
     assertEquals(Shape.LIST, fields.shape());
     assertEquals("fields", fields.groupKey());
     assertEquals(Presentation.TABLE, fields.layout().presentation());
     assertFalse(fields.elementProperties().isEmpty());
+  }
+
+  @Test
+  void emitsPluginAgnosticTextEditorHintsFromSemanticKeys() {
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(TextHintFixture.class);
+
+    assertEquals(TextEditorHint.SQL, property(descriptor.properties(), "querySql").textEditorHint());
+    assertEquals(TextEditorHint.SCRIPT, property(descriptor.properties(), "script").textEditorHint());
+    assertEquals(TextEditorHint.TEMPLATE, property(descriptor.properties(), "bodyTemplate").textEditorHint());
+    assertEquals(TextEditorHint.NONE, property(descriptor.properties(), "errorDescription").textEditorHint());
+  }
+
+  private static final class TextHintFixture {
+    @HopMetadataProperty private String querySql;
+    @HopMetadataProperty private String script;
+    @HopMetadataProperty private String bodyTemplate;
+    @HopMetadataProperty private String errorDescription;
   }
 
   @Test

@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.IEnumHasCodeAndDescription;
@@ -40,6 +41,7 @@ public final class AutomaticConfigDescriptor {
             metadata.groupKey(), metadata.password(), metadata.storeWithName(), metadata.storeWithCode(),
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
+            textEditorHint(key, shape),
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD)));
       }
     }
@@ -82,6 +84,19 @@ public final class AutomaticConfigDescriptor {
     }
   }
 
+  private static TextEditorHint textEditorHint(String key, Shape shape) {
+    if (shape != Shape.STRING) return TextEditorHint.NONE;
+    String normalized = key.replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase(Locale.ROOT);
+    String[] tokens = normalized.split("[^a-z0-9]+");
+    String terminal = tokens.length == 0 ? "" : tokens[tokens.length - 1];
+    return switch (terminal) {
+      case "sql" -> TextEditorHint.SQL;
+      case "script" -> TextEditorHint.SCRIPT;
+      case "template" -> TextEditorHint.TEMPLATE;
+      default -> TextEditorHint.NONE;
+    };
+  }
+
   private static Shape shape(Class<?> type) {
     if (type.isArray() || Collection.class.isAssignableFrom(type)) return Shape.LIST;
     if (type.isEnum()) return Shape.ENUM;
@@ -92,6 +107,7 @@ public final class AutomaticConfigDescriptor {
   }
 
   public enum Shape { STRING, NUMBER, BOOLEAN, ENUM, OBJECT, LIST }
+  public enum TextEditorHint { NONE, SQL, SCRIPT, TEMPLATE }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(String className, List<Property> properties) {}
   public record Option(String label, String value) {}
@@ -99,5 +115,6 @@ public final class AutomaticConfigDescriptor {
   public record Property(String key, String javaField, Shape shape, String javaType, String groupKey,
       boolean sensitive, boolean storeWithName, boolean storeWithCode, boolean defaultBoolean,
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
-      List<Property> elementProperties, List<Option> options, LayoutHint layout) {}
+      List<Property> elementProperties, List<Option> options, TextEditorHint textEditorHint,
+      LayoutHint layout) {}
 }
