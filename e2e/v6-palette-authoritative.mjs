@@ -52,12 +52,13 @@ try {
     pending = post("/edit/connect");
     const sourceHandle = rf(from).locator(".react-flow__handle.source");
     const targetHandle = rf(to).locator(".react-flow__handle.target");
-    const sourceBox = await sourceHandle.boundingBox();
-    const targetBox = await targetHandle.boundingBox();
-    if (!sourceBox || !targetBox) throw new Error(`connect handles missing for ${from}->${to}`);
-    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+    await sourceHandle.waitFor({ state: "visible" });
+    await targetHandle.waitFor({ state: "visible" });
+    await sourceHandle.hover({ force: true });
     await page.mouse.down();
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 12 });
+    await page.waitForTimeout(80);
+    await targetHandle.hover({ force: true });
+    await page.waitForTimeout(120);
     await page.mouse.up();
     const response = await pending;
     const body = await response.text();
