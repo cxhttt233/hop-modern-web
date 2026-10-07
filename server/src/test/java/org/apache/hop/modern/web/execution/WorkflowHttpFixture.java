@@ -21,7 +21,7 @@ import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
 /** Test-only real Grizzly/Jersey transport; never substituted for production registry. */
 final class WorkflowHttpFixture implements AutoCloseable {
   static final ObjectMapper JSON = new ObjectMapper();
-  private static final HttpClient HTTP = HttpClient.newHttpClient();
+  private static final HttpClient HTTP = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
   final Path root;
   final WorkflowExecutionAdapter adapter;
   final HttpServer server;
