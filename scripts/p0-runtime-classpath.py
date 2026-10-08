@@ -37,8 +37,19 @@ def main():
     marker = "  </dependencies>"
     if text.count(marker) != 1:
         raise SystemExit("server pom dependencies marker is not unique")
+    existing_root = ET.fromstring(text)
+    existing_dependencies = existing_root.find("m:dependencies", ns)
+    if existing_dependencies is None:
+        raise SystemExit("server pom has no dependencies element")
+    existing_hop_artifacts = {
+        dependency.findtext("m:artifactId", namespaces=ns)
+        for dependency in existing_dependencies.findall("m:dependency", ns)
+        if dependency.findtext("m:groupId", namespaces=ns) == "org.apache.hop"
+    }
     deps = []
     for _, artifact in artifacts:
+        if artifact in existing_hop_artifacts:
+            continue
         deps.append(
             "    <dependency>\n"
             "      <groupId>org.apache.hop</groupId>\n"
