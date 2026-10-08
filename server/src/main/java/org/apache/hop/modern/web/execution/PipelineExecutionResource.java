@@ -72,6 +72,9 @@ public final class PipelineExecutionResource {
                     document.pipeline().getXml(context.variables()).getBytes(StandardCharsets.UTF_8)),
                 context.metadataProvider(),
                 context.variables());
+        // XML round-tripping drops the source path. Preserve the opened .hpl location
+        // so relative resources and Internal.Pipeline.Filename.* resolve correctly.
+        executionPipeline.setFilename(document.path().toString());
       }
     } catch (HopException | RuntimeException e) {
       return error(
@@ -84,6 +87,10 @@ public final class PipelineExecutionResource {
     LocalPipelineEngine engine =
         new LocalPipelineEngine(executionPipeline, context.variables(), null);
     engine.setMetadataProvider(context.metadataProvider());
+    // Mirror the pinned Hop PipelineEngineFactory initialization for local execution.
+    engine.setInternalHopVariables(engine);
+    executionPipeline.setInternalHopVariables(engine);
+    engine.copyParametersFromDefinitions(executionPipeline);
     executions.register(executionId, documentId, engine);
     try {
       PipelineExecutionLifecycle.start(executionId, executions);
