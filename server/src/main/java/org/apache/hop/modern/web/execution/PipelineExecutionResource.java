@@ -74,7 +74,14 @@ public final class PipelineExecutionResource {
                 context.variables());
         // XML round-tripping drops the source path. Preserve the opened .hpl location
         // so relative resources and Internal.Pipeline.Filename.* resolve correctly.
+        // Preserve the opened document's authoritative pipeline name. Hop may synchronize
+        // the effective name to the filename when setFilename() is called.
+        String authoritativeName = document.pipeline().getName();
         executionPipeline.setFilename(document.path().toString());
+        if (!Objects.equals(authoritativeName, executionPipeline.getName())) {
+          executionPipeline.setNameSynchronizedWithFilename(false);
+          executionPipeline.setName(authoritativeName);
+        }
       }
     } catch (HopException | RuntimeException e) {
       return error(
