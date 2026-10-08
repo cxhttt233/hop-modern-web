@@ -33,11 +33,10 @@ public final class WorkflowDocumentOpenResource {
     if (request == null || request.uri() == null || request.uri().isBlank()) {
       return Response.status(400).entity(new ErrorResponse("invalid_document", "uri is required")).build();
     }
-    String session = registry.session(cookie);
     try {
-      var document = registry.open(session, request.uri());
-      return Response.status(201).entity(document)
-          .header("Set-Cookie", "hop-modern-session=" + session + "; Path=/api/v2; HttpOnly; SameSite=Strict")
+      var opened = registry.openOwned(cookie, request.uri());
+      return Response.status(201).entity(opened.document())
+          .header("Set-Cookie", "hop-modern-session=" + opened.owner() + "; Path=/api/v2; HttpOnly; SameSite=Strict")
           .build();
     } catch (NoSuchFileException e) {
       return Response.status(404).entity(new ErrorResponse("document_not_found", "workflow file was not found")).build();
