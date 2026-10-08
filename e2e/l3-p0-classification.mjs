@@ -46,17 +46,88 @@ const controlKind = (html, property) => {
   return "TEXT_INPUT";
 };
 
+const walkProperties = (properties, prefix = "", ancestry = []) => properties.flatMap(property => {
+  const fieldPath = prefix ? `${prefix}.${property.key}` : property.key;
+  const entry = { path: fieldPath, property, ancestry, topLevel: ancestry.length === 0 };
+  return [entry,
+    ...walkProperties(property.children ?? [], fieldPath, [...ancestry, "OBJECT"]),
+    ...walkProperties(property.elementProperties ?? [], fieldPath, [...ancestry, "LIST"])];
+});
+const validTextHints = new Set(["NONE", "SQL", "SCRIPT", "TEMPLATE"]);
+const expectedProducerFields = [
+  ["CheckSum", "checksumtype", "ENUM", "NONE"],
+  ["CheckSum", "resultType", "ENUM", "NONE"],
+  ["Rest", "streamingFormat", "ENUM", "NONE"],
+  ["ExecSql", "sql", "STRING", "SQL"],
+  ["ScriptValueMod", "jsScript.jsScript_script", "STRING", "SCRIPT"],
+  ["TableInput", "sql", "STRING", "SQL"],
+  ["UniqueRowsByHashSet", "error_description", "STRING", "NONE"],
+  ["JsonInput", "file.file.type_filter", "ENUM", "NONE"],
+  ["FilterRows", "compare.condition.operator", "ENUM", "NONE"]
+];
+const producerIndex = new Map();
+for (const source of sourceRows) {
+  const entries = walkProperties(source.descriptor.properties);
+  producerIndex.set(source.id, entries);
+  for (const entry of entries) {
+    const { property, path: fieldPath } = entry;
+    assert.ok(Object.hasOwn(property, "textEditorHint"), `${source.id}.${fieldPath}: missing production hint`);
+    assert.ok(validTextHints.has(property.textEditorHint), `${source.id}.${fieldPath}: invalid production hint`);
+    if (property.shape !== "STRING") assert.equal(property.textEditorHint, "NONE", `${source.id}.${fieldPath}`);
+    if (property.shape === "ENUM") {
+      assert.ok(Array.isArray(property.options) && property.options.length > 0, `${source.id}.${fieldPath}: empty enum options`);
+      assert.ok(property.options.every(option => typeof option.label === "string" && typeof option.value === "string"),
+        `${source.id}.${fieldPath}: malformed enum option`);
+    }
+  }
+}
+for (const [pluginId, fieldPath, shape, hint] of expectedProducerFields) {
+  const entry = producerIndex.get(pluginId)?.find(candidate => candidate.path === fieldPath);
+  assert.ok(entry, `${pluginId}.${fieldPath}: production descriptor path absent`);
+  assert.equal(entry.property.shape, shape, `${pluginId}.${fieldPath}: shape`);
+  assert.equal(entry.property.textEditorHint, hint, `${pluginId}.${fieldPath}: hint`);
+}
+for (const [pluginId, fieldPath, storeWithCode] of [
+  ["CheckSum", "checksumtype", true],
+  ["CheckSum", "resultType", true],
+  ["Rest", "streamingFormat", false]
+]) {
+  const property = producerIndex.get(pluginId).find(entry => entry.path === fieldPath).property;
+  assert.equal(property.storeWithCode, storeWithCode, `${pluginId}.${fieldPath}: storeWithCode`);
+  assert.equal(property.storeWithName, false, `${pluginId}.${fieldPath}: storeWithName`);
+}
+const reachabilityFor = entry => {
+  if (entry.topLevel) return "TOP_LEVEL_FIELD";
+  if (entry.ancestry.includes("LIST")) return "PRODUCER_PRESENT_BUT_LIST_RENDERER_UNREACHABLE";
+  return "PRODUCER_PRESENT_OBJECT_CHILD_NOT_RENDERED_BY_T3";
+};
+
 try {
-  const { GenericConfigPanel } = await vite.ssrLoadModule("/src/editor/GenericConfigPanel.tsx");
+  const { GenericConfigPanel, applyGenericConfigDraft } = await vite.ssrLoadModule("/src/editor/GenericConfigPanel.tsx");
   const matrix = [];
   const gapIds = new Map();
+  let consumerDraftRoundTrip = null;
 
   for (const source of sourceRows) {
     const descriptor = source.descriptor;
     assert.ok(descriptor?.className, `${source.id}: descriptor.className missing`);
     assert.ok(Array.isArray(descriptor.properties), `${source.id}: descriptor.properties missing`);
 
+    const producerEntries = producerIndex.get(source.id);
+    const producerSpecialized = producerEntries.filter(entry => entry.property.textEditorHint !== "NONE");
+    const producerEnums = producerEntries.filter(entry => entry.property.shape === "ENUM");
     const config = Object.fromEntries(descriptor.properties.map(property => [property.key, sampleValue(property)]));
+    if (source.id === "TableInput") {
+      const rawSql = "SELECT \"quoted\"\\\\path\nWHERE id = ${ID} AND note = '雪/<>&'\n-- ${HOP_VAR}";
+      const original = { sql: "old", untouched: { marker: "preserve" } };
+      const updated = applyGenericConfigDraft(original, descriptor, { sql: rawSql });
+      assert.equal(updated.sql, rawSql, "actual consumer must preserve raw SQL");
+      assert.equal(Buffer.compare(Buffer.from(updated.sql, "utf8"), Buffer.from(rawSql, "utf8")), 0,
+        "actual consumer must preserve SQL UTF-8 bytes");
+      assert.deepEqual(updated.untouched, original.untouched, "unrelated config must be preserved");
+      consumerDraftRoundTrip = { pluginId: "TableInput", function: "applyGenericConfigDraft",
+        rawUtf8ByteIdentical: true, unrelatedConfigPreserved: true, status: "PASS" };
+    }
     const html = renderToStaticMarkup(React.createElement(GenericConfigPanel, {
       descriptor,
       config,
@@ -77,7 +148,7 @@ try {
     if (shapes.includes("OBJECT")) gaps.push("OBJECT_EDITOR");
     if (shapes.includes("ENUM")) gaps.push("ENUM_SELECT");
     if (descriptor.properties.some(property =>
-      property.shape === "STRING" && /sql|query|script|description|expression/i.test(property.key))) {
+      property.shape === "STRING" && property.textEditorHint !== "NONE")) {
       gaps.push("SPECIALIZED_TEXT_EDITOR");
     }
 
@@ -111,6 +182,16 @@ try {
       classification,
       exactReason: reason,
       gaps,
+      producerContract: {
+        recursivePropertyCount: producerEntries.length,
+        enums: producerEnums.map(entry => ({ path: entry.path, optionsCount: entry.property.options.length,
+          storeWithCode: entry.property.storeWithCode, storeWithName: entry.property.storeWithName })),
+        specializedText: producerSpecialized.map(entry => ({ path: entry.path,
+          hint: entry.property.textEditorHint, reachability: reachabilityFor(entry) }))
+      },
+      consumerReachability: producerEntries.filter(entry => !entry.topLevel && (entry.property.shape === "ENUM" ||
+        entry.property.textEditorHint !== "NONE")).map(entry => ({ path: entry.path, shape: entry.property.shape,
+          t3Panel: reachabilityFor(entry), task4ActualReactUi: "NOT_VERIFIED_BY_THIS_TEST" }))
     });
   }
 
@@ -124,7 +205,19 @@ try {
     .map(([kind, ids]) => ({ kind, ids: ids.sort(), affected: ids.length }))
     .sort((a, b) => b.affected - a.affected || a.kind.localeCompare(b.kind));
 
-  const output = { counts, commonRendererGaps, rows: matrix };
+  assert.ok(consumerDraftRoundTrip?.rawUtf8ByteIdentical, "TableInput actual draft test must run");
+  const output = {
+    counts, commonRendererGaps, rows: matrix,
+    producerContract: { checkedPlugins: producerIndex.size, expectedExactPaths: expectedProducerFields.length,
+      metadataSource: "recursive production descriptor", status: "PASS" },
+    consumerDraftRoundTrip,
+    acceptanceBoundary: {
+      producerDescriptor: "PASS",
+      t3ActualDraftFunction: "PASS_FOR_TABLEINPUT_SQL",
+      task4ReactUi: "NOT_READY_NOT_TESTED",
+      specializedTextConsumerFormalAdmission: "PENDING_UNTIL_SEPARATE_CONTRACT_IN_CI"
+    }
+  };
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, JSON.stringify(output, null, 2) + "\n", "utf8");
 
@@ -139,6 +232,9 @@ try {
   for (const gap of commonRendererGaps) {
     console.log(`COMMON_RENDERER_GAP=${gap.kind}:${gap.ids.join(",")}`);
   }
+  console.log("PROD_P0_L3_PRODUCER_CONTRACT=PASS");
+  console.log("PROD_P0_L3_TABLEINPUT_SQL_DRAFT_UTF8=PASS");
+  console.log("PROD_P0_L3_TASK4_UI_ADMISSION=NOT_READY");
   console.log("PROD_P0_L3_MATRIX=" + outputPath);
 } finally {
   await vite.close();
