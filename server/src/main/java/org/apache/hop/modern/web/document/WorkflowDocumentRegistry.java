@@ -32,8 +32,23 @@ public final class WorkflowDocumentRegistry implements WorkflowDocumentSource {
     return id;
   }
 
+  /**
+   * Validate the workflow before allocating an owner session. Failed opens must not
+   * create process-global sessions whose cookie was never returned to the client.
+   */
+  public OwnedOpened openOwned(String requestedSession, String uri) throws Exception {
+    LoadedWorkflow loaded = validateAndLoad(uri);
+    String owner = session(requestedSession);
+    return new OwnedOpened(register(owner, loaded), owner);
+  }
+
+  /** Open under an already registered owner. */
   public Opened open(String owner, String uri) throws Exception {
     if (!sessions.containsKey(owner)) throw new IllegalArgumentException("unknown session");
+    return register(owner, validateAndLoad(uri));
+  }
+
+  private LoadedWorkflow validateAndLoad(String uri) throws Exception {
     if (uri == null || !uri.endsWith(".hwf")) throw new IllegalArgumentException("expected .hwf uri");
     Path requested = Path.of(uri);
     Path path = (requested.isAbsolute() ? requested : root.resolve(requested)).toRealPath();
@@ -41,10 +56,18 @@ public final class WorkflowDocumentRegistry implements WorkflowDocumentSource {
       throw new IllegalArgumentException("workflow is outside configured root");
     }
     WorkflowMeta meta = load(path);
-    String id = UUID.randomUUID().toString();
-    documents.put(id, new Entry(owner, path));
-    return new Opened(id, "workflow", meta.getName(), path.toUri().toString(), 0, false);
+    return new LoadedWorkflow(path, meta);
   }
+
+  private Opened register(String owner, LoadedWorkflow loaded) {
+    String id = UUID.randomUUID().toString();
+    documents.put(id, new Entry(owner, loaded.path()));
+    return new Opened(id, "workflow", loaded.meta().getName(),
+        loaded.path().toUri().toString(), 0, false);
+  }
+
+  // Package-private observation only; no HTTP administration endpoint.
+  int sessionCount() { return sessions.size(); }
 
   @Override
   public Optional<WorkflowMeta> executionSnapshot(String documentId) {
@@ -75,5 +98,7 @@ public final class WorkflowDocumentRegistry implements WorkflowDocumentSource {
 
   public record Opened(String docId, String kind, String name, String uri, int revision,
                        boolean changed) {}
+  public record OwnedOpened(Opened document, String owner) {}
+  private record LoadedWorkflow(Path path, WorkflowMeta meta) {}
   private record Entry(String owner, Path path) {}
 }
