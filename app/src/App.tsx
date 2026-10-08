@@ -6,60 +6,12 @@ import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransfor
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
 import { TRANSFORM_ICONS_A } from "./transformIconsA";
 import { TRANSFORM_ICONS_B } from "./transformIconsB";
+import { CATEGORY_ORDER, P0_TRANSFORMS, transformMeta, transformPrimaryName, transformSecondaryName } from "./transformCatalog";
+import { TransformNode, TransformNodeActionsContext } from "./editor/TransformNode";
 
 const TRANSFORM_ICONS: Record<string, string> = { ...TRANSFORM_ICONS_A, ...TRANSFORM_ICONS_B };
 
-const P0_TRANSFORMS = [
-  "CheckSum", "ConcatFields", "DataGrid", "ExecSql", "FilterRows", "GroupBy", "Http",
-  "InsertUpdate", "JsonInput", "MergeJoin", "ReplaceString", "Rest", "ScriptValueMod",
-  "SelectValues", "SetVariable", "StreamLookup", "StringCut", "TableInput", "TableOutput",
-  "UniqueRowsByHashSet",
-] as const;
-
-type TransformCategory = "input" | "output" | "field" | "flow";
-
-const CATEGORY_ORDER: Array<{ id: TransformCategory; label: string }> = [
-  { id: "input", label: "输入与接入" },
-  { id: "output", label: "输出与写入" },
-  { id: "field", label: "字段处理" },
-  { id: "flow", label: "流程与关联" },
-];
-
-const TRANSFORM_CATALOG: Record<string, { name: string; category: TransformCategory; glyph: string }> = {
-  CheckSum: { name: "校验和", category: "field", glyph: "校" },
-  ConcatFields: { name: "字段拼接", category: "field", glyph: "拼" },
-  DataGrid: { name: "数据网格", category: "input", glyph: "数" },
-  ExecSql: { name: "执行 SQL", category: "output", glyph: "SQL" },
-  FilterRows: { name: "过滤记录", category: "flow", glyph: "滤" },
-  GroupBy: { name: "分组汇总", category: "flow", glyph: "组" },
-  Http: { name: "HTTP 客户端", category: "input", glyph: "HTTP" },
-  InsertUpdate: { name: "插入 / 更新", category: "output", glyph: "写" },
-  JsonInput: { name: "JSON 输入", category: "input", glyph: "JSON" },
-  MergeJoin: { name: "合并连接", category: "flow", glyph: "合" },
-  ReplaceString: { name: "字符串替换", category: "field", glyph: "替" },
-  Rest: { name: "REST 客户端", category: "input", glyph: "REST" },
-  ScriptValueMod: { name: "脚本计算", category: "field", glyph: "脚" },
-  SelectValues: { name: "选择字段", category: "field", glyph: "选" },
-  SetVariable: { name: "设置变量", category: "output", glyph: "变" },
-  StreamLookup: { name: "流查询", category: "flow", glyph: "查" },
-  StringCut: { name: "字符串截取", category: "field", glyph: "截" },
-  TableInput: { name: "表输入", category: "input", glyph: "表" },
-  TableOutput: { name: "表输出", category: "output", glyph: "出" },
-  UniqueRowsByHashSet: { name: "记录去重", category: "flow", glyph: "去" },
-  Dummy: { name: "占位转换", category: "flow", glyph: "·" },
-  SortRows: { name: "排序记录", category: "flow", glyph: "序" },
-};
-
-function transformMeta(pluginId: string) {
-  return TRANSFORM_CATALOG[pluginId] ?? { name: pluginId, category: "flow" as TransformCategory, glyph: pluginId.slice(0, 2).toUpperCase() };
-}
-
-function transformDisplayName(node: HopGraphDocument["nodes"][number]) {
-  if (node.pluginId === "Dummy" && node.id === "source") return "输入";
-  if (node.pluginId === "Dummy" && node.id === "sink") return "输出";
-  const technical = node.name === node.id || /-\d+$/.test(node.name);
-  return technical ? transformMeta(node.pluginId ?? "Unknown").name : node.name;
-}
+const NODE_TYPES = { transform: TransformNode };
 
 function uniqueTransformId(pluginId: string, document: HopGraphDocument): string {
   const stem = pluginId.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
@@ -87,19 +39,15 @@ function graphNodes(document: HopGraphDocument): Node[] {
     const meta = transformMeta(node.pluginId ?? "Unknown");
     return {
       id: node.id,
+      type: "transform",
       position: { x: node.x, y: node.y },
-      className: `hop-transform-node category-${meta.category}`,
+      className: "hop-transform-node category-" + meta.category,
       data: {
         pluginId: node.pluginId,
-        label: (
-          <div className="transform-node-content">
-            <span className="transform-node-icon">{TRANSFORM_ICONS[node.pluginId ?? ""] ? <img src={TRANSFORM_ICONS[node.pluginId ?? ""]} alt="" /> : meta.glyph}</span>
-            <span className="transform-node-copy">
-              <strong>{transformDisplayName(node)}</strong>
-              <small>{node.pluginId ?? meta.name}</small>
-            </span>
-          </div>
-        ),
+        title: transformPrimaryName(node),
+        secondary: transformSecondaryName(node),
+        icon: TRANSFORM_ICONS[node.pluginId ?? ""],
+        glyph: meta.glyph,
       },
     };
   });
@@ -115,7 +63,6 @@ export function App() {
   const [document, setDocument] = useState<HopGraphDocument>(sample);
   const [source, setSource] = useState<GraphSource>({ kind: "sample" });
   const [nodes, setNodes] = useState<Node[]>(() => graphNodes(sample));
-  const [selectedId, setSelectedId] = useState<string>();
   const [configId, setConfigId] = useState<string>();
   const [serverConfig, setServerConfig] = useState<TransformConfigDocument>();
   const [configLoading, setConfigLoading] = useState(false);
@@ -138,7 +85,6 @@ export function App() {
     openPipelineGraph(pipelinePath, controller.signal).then((graph) => {
       setDocument(graph);
       setNodes(graphNodes(graph));
-      setSelectedId(undefined);
       setConfigId(undefined);
       setServerConfig(undefined);
       setConfigError(undefined);
@@ -180,7 +126,6 @@ export function App() {
   const reconcileGraph = useCallback((graph: HopGraphDocument) => {
     setDocument(graph);
     setNodes(graphNodes(graph));
-    setSelectedId((current) => current && graph.nodes.some((node) => node.id === current) ? current : undefined);
   }, []);
 
   const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>) => {
@@ -222,11 +167,6 @@ export function App() {
       return pluginId.toLowerCase().includes(query) || meta.name.toLowerCase().includes(query);
     });
   }, [paletteQuery]);
-
-  const deleteSelected = useCallback(() => {
-    if (source.kind !== "server" || !selectedId) return;
-    runGraphCommand(() => deletePipelineTransform(document.id, selectedId));
-  }, [document.id, runGraphCommand, selectedId, source]);
 
   const connectNodes = useCallback((connection: Connection) => {
     if (source.kind !== "server" || !connection.source || !connection.target) return;
@@ -287,15 +227,10 @@ export function App() {
       });
   }, [document.id, reconcileGraph, source]);
 
-  const selected = nodes.find((node) => node.id === selectedId);
   const configured = nodes.find((node) => node.id === configId);
   const metadata = connections.find((connection) => connection.name === metadataName);
-  const canConfigure = Boolean(selected);
   const isRealGraph = source.kind === "server";
   const displayPipelineName = document.name === "real-graph-proof" ? "示例流程" : (document.name || "未命名流程");
-  const selectedMeta = selected ? transformMeta(String(selected.data.pluginId ?? "")) : undefined;
-  const selectedDocumentNode = selected ? document.nodes.find((node) => node.id === selected.id) : undefined;
-  const selectedDisplayName = selectedDocumentNode ? transformDisplayName(selectedDocumentNode) : "";
 
   return (
     <main className="shell">
@@ -397,35 +332,24 @@ export function App() {
           <span>{document.edges.length} 条连接</span>
         </div>
 
-        {selected && (
-          <div className="selection-toolbar" aria-label="Selected transform actions">
-            <span className={`selection-icon category-${selectedMeta?.category ?? "flow"}`}>{TRANSFORM_ICONS[String(selected.data.pluginId ?? "")] ? <img src={TRANSFORM_ICONS[String(selected.data.pluginId ?? "")]} alt="" /> : (selectedMeta?.glyph ?? "·")}</span>
-            <span className="selection-copy">
-              <strong>{selectedDisplayName}</strong>
-              <small>{String(selected.data.pluginId ?? selectedMeta?.name ?? "")}</small>
-            </span>
-            {String(selected.data.pluginId ?? "") === "TableInput" && (
-              <button type="button" aria-label="Connections" onClick={() => {
-                const connection = tableInputConfigs[selected.id]?.connection;
-                setMetadataName((typeof connection === "string" ? connection : undefined) ?? connections[0]?.name);
-              }}>连接</button>
-            )}
-            {canConfigure && <button type="button" aria-label="Configure" className="primary-context" disabled={configLoading} onClick={() => openTransformConfig(selected.id)}>配置</button>}
-            {isRealGraph && <button type="button" aria-label="Delete" className="danger-context" onClick={deleteSelected}>删除</button>}
-          </div>
-        )}
-
         {source.kind !== "server" && (
           <div className="preview-note">
             {source.kind === "loading" ? "正在打开流程…" : source.reason ? "流程打开失败，当前显示示例画布" : "打开一个 .hpl 流程开始编辑"}
           </div>
         )}
 
-        <ReactFlow nodes={nodes} edges={edges} onInit={setFlow} onDragOver={(event) => { if (isRealGraph) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={onCanvasDrop} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={isRealGraph} panOnDrag zoomOnScroll zoomOnPinch>
+        <TransformNodeActionsContext.Provider value={{
+          configure: openTransformConfig,
+          remove: (nodeId) => runGraphCommand(() => deletePipelineTransform(document.id, nodeId)),
+          editable: isRealGraph,
+          loading: configLoading,
+        }}>
+        <ReactFlow nodeTypes={NODE_TYPES} nodes={nodes} edges={edges} onInit={setFlow} onDragOver={(event) => { if (isRealGraph) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={onCanvasDrop} onNodesChange={onNodesChange} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} fitView nodesDraggable nodesConnectable={isRealGraph} panOnDrag zoomOnScroll zoomOnPinch>
           <MiniMap pannable zoomable />
           <Controls />
           <Background gap={24} size={1} />
         </ReactFlow>
+        </TransformNodeActionsContext.Provider>
 
         {configError && <div className="preview-note error-note" role="alert">操作失败：{configError}</div>}
         {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
