@@ -97,6 +97,24 @@ class WorkflowHttpBoundaryTest {
       String executionId = WorkflowHttpFixture.JSON.readTree(started.body()).path("id").asText();
       assertFalse(executionId.isBlank());
       assertEquals(200, f.get("api/v2/executions/" + executionId, reopened.cookie()).statusCode());
+      assertEquals("finished", f.awaitState(executionId, reopened.cookie(), "finished").path("state").asText());
+    }
+  }
+
+  @Test void malformedWorkflowOpenDoesNotIssueOwnerCookie() throws Exception {
+    try (WorkflowHttpFixture f = new WorkflowHttpFixture(root, new WorkflowExecutionAdapter())) {
+      Files.writeString(root.resolve("malformed-open.hwf"), "<workflow>broken");
+      var failed = f.post("api/v2/documents",
+          WorkflowHttpFixture.JSON.writeValueAsString(
+              new WorkflowHttpFixture.OpenRequest("malformed-open.hwf")), null);
+      assertEquals(422, failed.statusCode(), failed::body);
+      assertEquals("document_open_failed",
+          WorkflowHttpFixture.JSON.readTree(failed.body()).path("code").asText());
+      assertTrue(failed.headers().firstValue("Set-Cookie").isEmpty(),
+          "a failed XML parse must not create an owner cookie");
+      f.writeWorkflow("recovery.hwf", false);
+      var recovered = f.open("recovery.hwf", null);
+      assertFalse(recovered.cookie().isBlank());
     }
   }
 
