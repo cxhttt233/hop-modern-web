@@ -11,6 +11,7 @@ import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Presentation
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Shape;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.TextEditorHint;
 import org.apache.hop.metadata.api.HopMetadataProperty;
+import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IEnumHasCodeAndDescription;
 import org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta;
 import org.apache.hop.pipeline.transforms.sort.SortRowsMeta;
@@ -77,6 +78,25 @@ class AutomaticConfigDescriptorTest {
     @HopMetadataProperty private String script;
     @HopMetadataProperty private String bodyTemplate;
     @HopMetadataProperty private String errorDescription;
+  }
+
+  @Test
+  void usesHopSqlSemanticAnnotationWhenFieldNameIsNotSql() {
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(SqlSemanticFixture.class);
+    assertEquals(TextEditorHint.SQL, property(descriptor.properties(), "statement").textEditorHint());
+    assertEquals(TextEditorHint.SQL, property(descriptor.properties(), "selectStatement").textEditorHint());
+    assertEquals(TextEditorHint.NONE, property(descriptor.properties(), "statementPlain").textEditorHint());
+    assertEquals(TextEditorHint.NONE, property(descriptor.properties(), "numericStatement").textEditorHint());
+  }
+
+  private static final class SqlSemanticFixture {
+    @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_SQL)
+    private String statement;
+    @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_SQL_SELECT)
+    private String selectStatement;
+    @HopMetadataProperty private String statementPlain;
+    @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_SQL)
+    private int numericStatement;
   }
 
   @Test
