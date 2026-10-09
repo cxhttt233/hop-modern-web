@@ -78,7 +78,8 @@ class TransformP0L2RoundTripTest {
     assertTrue(fileFilter.storeWithCode());
     assertFalse(fileFilter.storeWithName());
     assertFalse(fileFilter.options().isEmpty());
-    assertEquals(Shape.LIST, property(json, "file").shape());
+    assertEquals(Shape.OBJECT, property(json, "file").shape());
+    assertEquals(Shape.LIST, property(json, "file", "file").shape());
     Descriptor filter = descriptorFor(registry, "FilterRows");
     assertEquals(Shape.ENUM, property(filter, "compare", "condition", "operator").shape());
     assertEquals(Shape.ENUM, property(filter, "compare", "condition", "function").shape());
