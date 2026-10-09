@@ -94,6 +94,9 @@ jobs:
       - name: Prove descriptor-driven ObjectEditor contract
         working-directory: modern
         run: node e2e/l3-object-editor-contract.mjs docs/p0-transform-descriptors.generated.json docs/p0-object-editor-contract.generated.json
+      - name: Verify recursive enum and specialized text descriptor contract
+        working-directory: modern
+        run: node e2e/l3-enum-specialized-text-contract.mjs docs/p0-transform-descriptors.generated.json docs/p0-enum-specialized-text-contract.generated.json
       - name: Upload P0 L3 descriptor and classification artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -102,6 +105,7 @@ jobs:
             modern/docs/p0-transform-descriptors.generated.json
             modern/docs/p0-l3-classification.generated.json
             modern/docs/p0-object-editor-contract.generated.json
+            modern/docs/p0-enum-specialized-text-contract.generated.json
 
   v2-real-graph:
     runs-on: ubuntu-latest
