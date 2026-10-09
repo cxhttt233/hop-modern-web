@@ -50,13 +50,43 @@ public final class WorkflowDocumentRegistry implements WorkflowDocumentSource {
 
   private LoadedWorkflow validateAndLoad(String uri) throws Exception {
     if (uri == null || !uri.endsWith(".hwf")) throw new IllegalArgumentException("expected .hwf uri");
-    Path requested = Path.of(uri);
+    Path requested = resolveRequestedPath(uri);
     Path path = (requested.isAbsolute() ? requested : root.resolve(requested)).toRealPath();
     if (!path.startsWith(root) || !java.nio.file.Files.isRegularFile(path)) {
       throw new IllegalArgumentException("workflow is outside configured root");
     }
     WorkflowMeta meta = load(path);
     return new LoadedWorkflow(path, meta);
+  }
+
+  /**
+   * Accept native filesystem paths (including POSIX names containing ':') and local file URIs.
+   * Remote URI schemes and file authorities are never treated as filesystem paths.
+   */
+  private static Path resolveRequestedPath(String value) {
+    if (value.regionMatches(true, 0, "file:", 0, 5)) {
+      java.net.URI parsed = java.net.URI.create(value);
+      if (!"file".equalsIgnoreCase(parsed.getScheme())
+          || parsed.getRawAuthority() != null
+          || parsed.getRawQuery() != null
+          || parsed.getRawFragment() != null) {
+        throw new IllegalArgumentException("only local file URIs are supported");
+      }
+      return Path.of(parsed);
+    }
+    int colon = value.indexOf(':');
+    if (colon > 0 && value.substring(0, colon).matches("[A-Za-z][A-Za-z0-9+.-]*")) {
+      String scheme = value.substring(0, colon).toLowerCase(java.util.Locale.ROOT);
+      String suffix = value.substring(colon + 1);
+      boolean windowsDrive = colon == 1 && Character.isLetter(value.charAt(0));
+      if (!windowsDrive
+          && (suffix.startsWith("//")
+              || java.util.Set.of("http", "https", "ftp", "sftp", "s3", "gs", "hdfs",
+                  "webdav", "jar", "zip").contains(scheme))) {
+        throw new IllegalArgumentException("remote workflow URIs are not supported");
+      }
+    }
+    return Path.of(value);
   }
 
   private Opened register(String owner, LoadedWorkflow loaded) {
