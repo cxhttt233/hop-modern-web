@@ -1,6 +1,7 @@
 package org.apache.hop.modern.web.document;
 
 import java.nio.file.Path;
+import org.apache.hop.core.xml.XmlHandler;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -56,7 +57,9 @@ public final class WorkflowDocumentRegistry implements WorkflowDocumentSource {
       throw new IllegalArgumentException("workflow is outside configured root");
     }
     WorkflowMeta meta = load(path);
-    return new LoadedWorkflow(path, meta);
+    // Freeze the document as it was opened. Never reload a mutable disk path for execution.
+    // Serialize before allocating a session so a failed snapshot cannot leak an owner.
+    return new LoadedWorkflow(path, meta, meta.getXml(variables));
   }
 
   /**
@@ -91,7 +94,7 @@ public final class WorkflowDocumentRegistry implements WorkflowDocumentSource {
 
   private Opened register(String owner, LoadedWorkflow loaded) {
     String id = UUID.randomUUID().toString();
-    documents.put(id, new Entry(owner, loaded.path()));
+    documents.put(id, new Entry(owner, loaded.path(), loaded.xml()));
     return new Opened(id, "workflow", loaded.meta().getName(),
         loaded.path().toUri().toString(), 0, false);
   }
@@ -109,7 +112,12 @@ public final class WorkflowDocumentRegistry implements WorkflowDocumentSource {
     Entry entry = documents.get(documentId);
     if (entry == null || !entry.owner.equals(owner)) return Optional.empty();
     try {
-      return Optional.of(load(entry.path));
+      // Reconstruct a detached graph per execution, preserving the opened document revision.
+      // This cannot silently switch to newer .hwf bytes or fail if the file is removed.
+      WorkflowMeta snapshot = new WorkflowMeta(
+          XmlHandler.loadXmlString(entry.xml, WorkflowMeta.XML_TAG), metadata, variables);
+      snapshot.setFilename(entry.path.toString());
+      return Optional.of(snapshot);
     } catch (Exception e) {
       throw new IllegalStateException("workflow snapshot failed", e);
     }
@@ -129,6 +137,6 @@ public final class WorkflowDocumentRegistry implements WorkflowDocumentSource {
   public record Opened(String docId, String kind, String name, String uri, int revision,
                        boolean changed) {}
   public record OwnedOpened(Opened document, String owner) {}
-  private record LoadedWorkflow(Path path, WorkflowMeta meta) {}
-  private record Entry(String owner, Path path) {}
+  private record LoadedWorkflow(Path path, WorkflowMeta meta, String xml) {}
+  private record Entry(String owner, Path path, String xml) {}
 }
