@@ -83,6 +83,61 @@ class WorkflowHttpBoundaryTest {
     }
   }
 
+
+  @Test void canonicalFileUriReopensOverRealHttpAndStartsWorkflow() throws Exception {
+    try (WorkflowHttpFixture f = new WorkflowHttpFixture(root, new WorkflowExecutionAdapter())) {
+      Path file = f.writeWorkflow("canonical-reopen.hwf", false);
+      var first = f.open("canonical-reopen.hwf", null);
+      var reopened = f.open(file.toUri().toString(), first.cookie());
+      assertEquals(first.cookie(), reopened.cookie(), "same owner must be preserved");
+      assertEquals(file.toUri().toString(), reopened.json().path("uri").asText());
+      String id = reopened.json().path("docId").asText();
+      var started = f.post("api/v2/documents/" + id + "/executions", null, reopened.cookie());
+      assertEquals(202, started.statusCode(), started::body);
+      String executionId = WorkflowHttpFixture.JSON.readTree(started.body()).path("id").asText();
+      assertFalse(executionId.isBlank());
+      assertEquals(200, f.get("api/v2/executions/" + executionId, reopened.cookie()).statusCode());
+    }
+  }
+
+  @Test void remoteUriSchemesAndFileAuthoritiesRejectWithoutSessionCookie() throws Exception {
+    try (WorkflowHttpFixture f = new WorkflowHttpFixture(root, new WorkflowExecutionAdapter())) {
+      for (String uri : List.of("https://example.invalid/workflow.hwf",
+          "s3://bucket/workflow.hwf", "file://remotehost/tmp/workflow.hwf",
+          "file:///tmp/workflow.hwf?query=1")) {
+        var response = f.post("api/v2/documents",
+            WorkflowHttpFixture.JSON.writeValueAsString(new WorkflowHttpFixture.OpenRequest(uri)), null);
+        assertEquals(400, response.statusCode(), () -> uri + ": " + response.body());
+        assertEquals("invalid_document",
+            WorkflowHttpFixture.JSON.readTree(response.body()).path("code").asText(), uri);
+        assertTrue(response.headers().firstValue("Set-Cookie").isEmpty(), uri);
+      }
+    }
+  }
+
+  @Test void nativeColonPathAndStaticSymlinkEscapeRespectRootOverHttp() throws Exception {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        !System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win"));
+    try (WorkflowHttpFixture f = new WorkflowHttpFixture(root, new WorkflowExecutionAdapter())) {
+      f.writeWorkflow("native:colon.hwf", false);
+      var opened = f.open("native:colon.hwf", null);
+      assertEquals("workflow", opened.json().path("kind").asText());
+      Path outside = Files.createTempFile("workflow-outside-", ".hwf");
+      try {
+        Files.createSymbolicLink(root.resolve("escape.hwf"), outside);
+        var response = f.post("api/v2/documents",
+            WorkflowHttpFixture.JSON.writeValueAsString(
+                new WorkflowHttpFixture.OpenRequest("escape.hwf")), null);
+        assertEquals(400, response.statusCode(), response::body);
+        assertEquals("invalid_document",
+            WorkflowHttpFixture.JSON.readTree(response.body()).path("code").asText());
+        assertTrue(response.headers().firstValue("Set-Cookie").isEmpty());
+      } finally {
+        Files.deleteIfExists(outside);
+      }
+    }
+  }
+
   private static final class RejectingExecutor extends AbstractExecutorService {
     private boolean shutdown;
     @Override public void shutdown() { shutdown = true; }
