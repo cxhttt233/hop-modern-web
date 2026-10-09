@@ -30,6 +30,11 @@ jobs:
           repository: cxhttt233/hop
           ref: cbb70e9215a6dc69da8acfd3743e358f7ba4db1d
           path: hop
+      - uses: actions/checkout@v7
+        with:
+          repository: cxhttt233/hop
+          ref: 481694961ac0cabfabf6fe7c53c75fdfc9b6078c
+          path: hop-web-api
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -37,7 +42,12 @@ jobs:
           cache: maven
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+        run: ./mvnw -q -pl lib,lib-jdbc,core,engine,plugins/databases/h2,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+      - name: Install execution web API
+        working-directory: hop-web-api
+        run: |
+          ./mvnw -q -f web/pom.xml -N -DskipTests -Dcheckstyle.skip install
+          ./mvnw -q -f web/api/pom.xml -DskipTests -Dcheckstyle.skip install
       - name: Test standalone server
         working-directory: modern/server
         run: mvn -q test
@@ -53,6 +63,11 @@ jobs:
           repository: cxhttt233/hop
           ref: cbb70e9215a6dc69da8acfd3743e358f7ba4db1d
           path: hop
+      - uses: actions/checkout@v7
+        with:
+          repository: cxhttt233/hop
+          ref: 481694961ac0cabfabf6fe7c53c75fdfc9b6078c
+          path: hop-web-api
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -63,7 +78,12 @@ jobs:
           node-version: 24
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+        run: ./mvnw -q -pl lib,lib-jdbc,core,engine,plugins/databases/h2,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+      - name: Install execution web API
+        working-directory: hop-web-api
+        run: |
+          ./mvnw -q -f web/pom.xml -N -DskipTests -Dcheckstyle.skip install
+          ./mvnw -q -f web/api/pom.xml -DskipTests -Dcheckstyle.skip install
       - name: Build server runtime classpath
         working-directory: modern/server
         run: mvn -q -DskipTests package dependency:build-classpath -Dmdep.outputFile=classpath.txt
