@@ -41,7 +41,7 @@ public final class AutomaticConfigDescriptor {
             metadata.groupKey(), metadata.password(), metadata.storeWithName(), metadata.storeWithCode(),
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
-            textEditorHint(key, shape),
+            textEditorHint(key, shape, metadata),
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD)));
       }
     }
@@ -84,8 +84,18 @@ public final class AutomaticConfigDescriptor {
     }
   }
 
-  private static TextEditorHint textEditorHint(String key, Shape shape) {
+  private static TextEditorHint textEditorHint(
+      String key, Shape shape, HopMetadataProperty metadata) {
     if (shape != Shape.STRING) return TextEditorHint.NONE;
+    switch (metadata.hopMetadataPropertyType()) {
+      case RDBMS_SQL, RDBMS_SQL_SELECT, RDBMS_SQL_INSERT, RDBMS_SQL_UPDATE,
+          RDBMS_SQL_DELETE, RDBMS_SQL_BULK -> {
+        return TextEditorHint.SQL;
+      }
+      default -> {
+        // Fall back to the semantic field name for untyped properties.
+      }
+    }
     String normalized = key.replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase(Locale.ROOT);
     String[] tokens = normalized.split("[^a-z0-9]+");
     String terminal = tokens.length == 0 ? "" : tokens[tokens.length - 1];
