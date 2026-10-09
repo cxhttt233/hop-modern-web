@@ -11,7 +11,7 @@ const walk = (properties, prefix = "", topLevel = true) => properties.flatMap(pr
 });
 const entries = rows.flatMap(row => walk(row.descriptor.properties).map(x => ({ pluginId: row.id, ...x })));
 
-const enumEntries = entries.filter(x => x.topLevel && x.property.shape === "ENUM");
+const enumEntries = entries.filter(x => x.property.shape === "ENUM");
 const enumAffected = Object.values(Object.groupBy(enumEntries, x => x.pluginId)).map(group => ({
   pluginId: group[0].pluginId,
   paths: group.map(x => x.path),
@@ -26,8 +26,22 @@ const enumAffected = Object.values(Object.groupBy(enumEntries, x => x.pluginId))
     return { path:x.path, options:p.options, currentValueProbe:current, nullProbe:null, emptyProbe:"", storeWithName:p.storeWithName, storeWithCode:p.storeWithCode };
   })
 })).sort((a,b)=>a.pluginId.localeCompare(b.pluginId));
-assert.deepEqual(enumAffected.map(x=>x.pluginId), ["CheckSum","Rest"]);
-assert.deepEqual(enumAffected.map(x => x.paths), [["checksumtype","resultType"],["streamingFormat"]]);
+const topLevelEnumAffected = Object.values(Object.groupBy(enumEntries.filter(x => x.topLevel), x => x.pluginId))
+  .map(group => ({pluginId:group[0].pluginId,paths:group.map(x => x.path)}))
+  .sort((a,b)=>a.pluginId.localeCompare(b.pluginId));
+assert.deepEqual(topLevelEnumAffected.map(x=>x.pluginId), ["CheckSum","Rest"]);
+assert.deepEqual(topLevelEnumAffected.map(x => x.paths), [["checksumtype","resultType"],["streamingFormat"]]);
+const nestedEnumExpected = [
+  { pluginId: "FilterRows", path: "compare.condition.operator" },
+  { pluginId: "JsonInput", path: "file.file.type_filter" }
+];
+for (const expected of nestedEnumExpected) {
+  const found = enumEntries.find(x => x.pluginId === expected.pluginId && x.path === expected.path);
+  assert.ok(found, "missing nested ENUM " + expected.pluginId + "." + expected.path);
+  assert.ok(found.property.options?.length, "missing nested ENUM options " + expected.path);
+  assert.equal(found.property.storeWithName, false);
+  assert.equal(found.property.storeWithCode, true);
+}
 assert.ok(enumAffected.find(x=>x.pluginId==="CheckSum").fields.every(x=>x.storeWithCode));
 assert.ok(enumAffected.find(x=>x.pluginId==="Rest").fields.every(x=>!x.storeWithCode));
 
@@ -63,19 +77,21 @@ assert.equal(Buffer.compare(Buffer.from(reread,"utf8"),Buffer.from(raw,"utf8")),
 
 const artifact = {
   source:{productionP0:20,discovery:"recursive generated-descriptor walk",pluginIdBranches:false},
-  enumSelect:{affected:enumAffected,acceptance:"PASS",task4Admission:"READY",semantics:{options:"label=display,value=authoritative stored value",currentValue:"config value matched against options[].value",nullEmpty:"preserved distinctly",storeWithName:"descriptor false for affected enums",storeWithCode:"CheckSum=true uses code; Rest=false uses enum name",writeReread:"production P0 L2 authoritative serializer round-trip gate + exact JSON value probe"}},
-  specializedTextEditor:{affected:specializedAffected,acceptance:"PASS",task4Admission:"READY",semantics:{hint:"production descriptor property.textEditorHint authoritative",rawStringAuthoritative:true,preserved:["newline","quotes","backslash","variable-placeholder","unicode","special-characters"],falsePositiveRejected:"UniqueRowsByHashSet.error_description",writeReread:"production P0 L2 authoritative serializer round-trip gate + byte-identical UTF-8 probe"}},
+  nestedEnumExamples:nestedEnumExpected,
+  enumSelect:{affected:enumAffected,acceptance:"PASS",task4Admission:"PENDING_CONSUMER_INTEGRATION",semantics:{options:"label=display,value=authoritative stored value",currentValue:"config value matched against options[].value",nullEmpty:"preserved distinctly",storeWithName:"descriptor false for affected enums",storeWithCode:"CheckSum=true uses code; Rest=false uses enum name",writeReread:"production P0 L2 authoritative serializer round-trip gate + exact JSON value probe"}},
+  specializedTextEditor:{affected:specializedAffected,acceptance:"PASS",task4Admission:"PENDING_CONSUMER_INTEGRATION",semantics:{hint:"production descriptor property.textEditorHint authoritative",rawStringAuthoritative:true,preserved:["newline","quotes","backslash","variable-placeholder","unicode","special-characters"],falsePositiveRejected:"UniqueRowsByHashSet.error_description",writeReread:"production P0 L2 authoritative serializer round-trip gate + byte-identical UTF-8 probe"}},
   genericDescriptorMetadataDelta:["production Property.textEditorHint: NONE|SQL|SCRIPT|TEMPLATE (no E2E heuristic)"],
-  remainingCommonRendererGap:"NONE_AT_DESCRIPTOR_CONTRACT_LAYER; Task4 owns React controls"
+  remainingCommonRendererGap:"NONE_AT_DESCRIPTOR_CONTRACT_LAYER; Task4 owns React controls",
+  evidenceBoundary:"Descriptor metadata and JSON probes do not prove real React editor write/read/save/reopen"
 };
 await fs.writeFile(output,JSON.stringify(artifact,null,2)+"\n");
 const fmt=a=>a.map(x=>`${x.pluginId}:${x.paths.join(",")}`).join(";");
 console.log("WORKLOAD=MEDIUM");
 console.log("ENUM_SELECT_AFFECTED="+fmt(enumAffected));
 console.log("ENUM_SELECT_ACCEPTANCE=PASS");
-console.log("ENUM_SELECT_TASK4_ADMISSION=READY");
+console.log("ENUM_SELECT_TASK4_ADMISSION=PENDING_CONSUMER_INTEGRATION");
 console.log("SPECIALIZED_TEXT_AFFECTED="+fmt(specializedAffected));
 console.log("SPECIALIZED_TEXT_EDITOR_ACCEPTANCE=PASS");
-console.log("SPECIALIZED_TEXT_EDITOR_TASK4_ADMISSION=READY");
+console.log("SPECIALIZED_TEXT_EDITOR_TASK4_ADMISSION=PENDING_CONSUMER_INTEGRATION");
 console.log("genericDescriptorMetadataDelta=production-Property.textEditorHint:NONE|SQL|SCRIPT|TEMPLATE");
 console.log("remaining common renderer gap=NONE_AT_DESCRIPTOR_CONTRACT_LAYER;TASK4_REACT_CONTROLS");
