@@ -59,6 +59,7 @@ class PipelineExecutionOpenedHplRegressionTest {
 
     TableInputMeta input = new TableInputMeta();
     input.setConnection("Warehouse");
+    input.setVariableReplacementActive(true);
     input.setSql("SELECT ID FROM ${P1_TABLE}");
     PipelineMeta original = new PipelineMeta();
     original.setName("opened-hpl-with-parameter");
