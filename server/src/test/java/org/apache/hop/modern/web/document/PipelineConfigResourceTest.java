@@ -12,6 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.ws.rs.core.Response;
 import java.nio.file.Files;
+import java.util.List;
+import org.apache.hop.core.xml.XmlHandler;
+import org.apache.hop.pipeline.transforms.rest.RestMeta;
+import org.apache.hop.pipeline.transforms.rest.fields.HeaderField;
+import org.apache.hop.pipeline.transforms.rest.fields.ParameterField;
+import org.apache.hop.pipeline.transforms.rest.fields.MatrixParameterField;
 import java.nio.file.Path;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.variables.Variables;
@@ -188,6 +194,73 @@ class PipelineConfigResourceTest {
             "doc-1", new PipelineConfigResource.WriteRequest("source", invalid)),
         422,
         "invalid_config");
+  }
+
+
+  @Test
+  void restThreeGroupedRequestTablesSurviveConfigWriteAndHopXmlReopen() throws Exception {
+    MemoryMetadataProvider provider = new MemoryMetadataProvider();
+    PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
+    PipelineMeta pipeline = new PipelineMeta();
+    RestMeta rest = new RestMeta();
+    rest.setDefault();
+    rest.setUrl("https://example.invalid/river");
+    rest.setHeaderFields(List.of(
+        new HeaderField("header_甲<&>", "X-Source"),
+        new HeaderField("header_乙", "X-Second")));
+    rest.setParameterFields(List.of(
+        new ParameterField("query_甲", "region"),
+        new ParameterField("query_乙&", "page")));
+    rest.setMatrixParameterFields(List.of(
+        new MatrixParameterField("matrix_甲", "zone"),
+        new MatrixParameterField("matrix_乙", "stage")));
+    TransformMeta transform = new TransformMeta("Rest", "rest-source", rest);
+    pipeline.addTransform(transform);
+    registry.put(new PipelineDocument("rest-doc", tempDir.resolve("rest.hpl"), pipeline));
+    PipelineConfigResource resource = new PipelineConfigResource(registry, provider);
+
+    Response read = resource.read("rest-doc", new PipelineConfigResource.ReadRequest("rest-source"));
+    assertEquals(200, read.getStatus());
+    PipelineConfigResource.ConfigResponse initial =
+        (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals(2, initial.config().path("headers").path("header").size());
+    assertEquals(2, initial.config().path("parameters").path("parameter").size());
+    assertEquals(2, initial.config().path("matrixParameters").path("matrixParameter").size());
+    assertEquals("header_甲<&>",
+        initial.config().path("headers").path("header").get(0).path("field").asText());
+    assertTrue(initial.descriptor().properties().stream().anyMatch(
+        p -> p.key().equals("header") && p.groupKey().equals("headers")
+            && !p.elementProperties().isEmpty()));
+    assertTrue(initial.descriptor().properties().stream().anyMatch(
+        p -> p.key().equals("parameter") && p.groupKey().equals("parameters")
+            && !p.elementProperties().isEmpty()));
+    assertTrue(initial.descriptor().properties().stream().anyMatch(
+        p -> p.key().equals("matrixParameter") && p.groupKey().equals("matrixParameters")
+            && !p.elementProperties().isEmpty()));
+
+    ObjectNode changed = ((ObjectNode) initial.config()).deepCopy();
+    ((ObjectNode) changed.path("headers").path("header").get(1))
+        .put("name", "X-Updated");
+    Response write = resource.write(
+        "rest-doc", new PipelineConfigResource.WriteRequest("rest-source", changed));
+    assertEquals(200, write.getStatus());
+    PipelineConfigResource.ConfigResponse written =
+        (PipelineConfigResource.ConfigResponse) write.getEntity();
+    assertEquals("X-Updated",
+        written.config().path("headers").path("header").get(1).path("name").asText());
+    assertEquals(2, ((RestMeta) transform.getTransform()).getParameterFields().size());
+    assertEquals(2, ((RestMeta) transform.getTransform()).getMatrixParameterFields().size());
+
+    RestMeta reopened = new RestMeta();
+    reopened.loadXml(
+        XmlHandler.wrapLoadXmlString(((RestMeta) transform.getTransform()).getXml()), provider);
+    ObjectNode reopenedJson = ConfigJsonSerializer.toJson(reopened, provider);
+    assertEquals(written.config().path("headers").path("header"),
+        reopenedJson.path("headers").path("header"));
+    assertEquals(written.config().path("parameters").path("parameter"),
+        reopenedJson.path("parameters").path("parameter"));
+    assertEquals(written.config().path("matrixParameters").path("matrixParameter"),
+        reopenedJson.path("matrixParameters").path("matrixParameter"));
   }
 
   private static void assertError(Response response, int status, String code) {
