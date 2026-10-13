@@ -73,8 +73,8 @@ public final class WorkflowExecutionResource implements AutoCloseable {
       String id = executions.start(documentId, snapshot.orElseThrow());
       return Response.accepted(executions.status(id).map(WorkflowExecutionResource::toStatus).orElseThrow()).build();
     } catch (RuntimeException e) {
-      return error(422, "execution_start_failed",
-          e.getMessage() == null ? "workflow execution could not be started" : e.getMessage());
+      // Never expose engine, executor or filesystem exception details over HTTP.
+      return error(422, "execution_start_failed", "workflow execution could not be started");
     }
   }
 
