@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange, type ReactFlowInstance } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
-import { DatabaseConnectionPanel, type DatabaseConnection } from "./editor/DatabaseConnectionPanel";
 import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
 import { TRANSFORM_ICONS_A } from "./transformIconsA";
@@ -21,17 +20,8 @@ function uniqueTransformId(pluginId: string, document: HopGraphDocument): string
   return candidate;
 }
 
-const sample: HopGraphDocument = {
-  id: "sample", name: "Pipeline", revision: "0",
-  nodes: [
-    { id: "input", name: "Table input", kind: "transform", pluginId: "TableInput", x: 80, y: 120 },
-    { id: "select", name: "Select values", kind: "transform", pluginId: "SelectValues", x: 360, y: 120 },
-    { id: "sort", name: "Sort rows", kind: "transform", pluginId: "SortRows", x: 640, y: 120 },
-  ],
-  edges: [
-    { id: "input-select", source: "input", target: "select", enabled: true },
-    { id: "select-sort", source: "select", target: "sort", enabled: true },
-  ],
+const emptyDocument: HopGraphDocument = {
+  id: "", name: "", revision: "", nodes: [], edges: [],
 };
 
 function graphNodes(document: HopGraphDocument): Node[] {
@@ -53,23 +43,16 @@ function graphNodes(document: HopGraphDocument): Node[] {
   });
 }
 
-const initialConnections: DatabaseConnection[] = [
-  { name: "Warehouse", rdbms: { hostname: "db.internal", databaseName: "warehouse", port: "5432", username: "hop" } },
-  { name: "Reporting", rdbms: { hostname: "reports.internal", databaseName: "reporting", port: "5432", username: "hop" } },
-];
 
 export function App() {
   const initialPipelinePath = import.meta.env.VITE_HOP_PIPELINE_PATH?.trim() ?? "";
-  const [document, setDocument] = useState<HopGraphDocument>(sample);
+  const [document, setDocument] = useState<HopGraphDocument>(emptyDocument);
   const [source, setSource] = useState<GraphSource>({ kind: "sample" });
-  const [nodes, setNodes] = useState<Node[]>(() => graphNodes(sample));
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [configId, setConfigId] = useState<string>();
   const [serverConfig, setServerConfig] = useState<TransformConfigDocument>();
   const [configLoading, setConfigLoading] = useState(false);
   const [configError, setConfigError] = useState<string>();
-  const [metadataName, setMetadataName] = useState<string>();
-  const [connections, setConnections] = useState(initialConnections);
-  const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, Record<string, unknown>>>({ input: { connection: "Warehouse", sql: "SELECT *\nFROM orders" } });
   const [pipelinePath, setPipelinePath] = useState(initialPipelinePath);
   const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
@@ -79,23 +62,29 @@ export function App() {
   const [showOpenPanel, setShowOpenPanel] = useState(!initialPipelinePath);
 
   useEffect(() => {
-    if (!pipelinePath) return;
+    // A new open attempt must never display the previous file as the current one.
+    setDocument(emptyDocument);
+    setNodes([]);
+    setConfigId(undefined);
+    setServerConfig(undefined);
+    setConfigError(undefined);
+    setConfigLoading(false);
+    setDirty(false);
+    if (!pipelinePath) {
+      setSource({ kind: "sample" });
+      return;
+    }
     const controller = new AbortController();
     setSource({ kind: "loading", path: pipelinePath });
     openPipelineGraph(pipelinePath, controller.signal).then((graph) => {
+      if (controller.signal.aborted) return;
       setDocument(graph);
       setNodes(graphNodes(graph));
-      setConfigId(undefined);
-      setServerConfig(undefined);
-      setConfigError(undefined);
-      setDirty(false);
       setSource({ kind: "server", path: pipelinePath });
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
-      setDocument(sample);
-      setNodes(graphNodes(sample));
-      setDirty(false);
-      setSource({ kind: "sample", reason: error instanceof Error ? error.message : "Pipeline open failed" });
+      setSource({ kind: "sample", reason: error instanceof Error ? error.message : "无法打开流程" });
+      setShowOpenPanel(true);
     });
     return () => controller.abort();
   }, [pipelinePath, pipelineOpenRevision]);
@@ -174,12 +163,7 @@ export function App() {
   }, [document.id, runGraphCommand, source]);
 
   const openTransformConfig = useCallback((nodeId: string) => {
-    if (source.kind !== "server") {
-      setServerConfig(undefined);
-      setConfigError(undefined);
-      setConfigId(nodeId);
-      return;
-    }
+    if (source.kind !== "server") return;
     setConfigLoading(true);
     setConfigError(undefined);
     setServerConfig(undefined);
@@ -193,11 +177,7 @@ export function App() {
   }, [document.id, source]);
 
   const applyTransformConfig = useCallback((nodeId: string, value: Record<string, unknown>) => {
-    if (source.kind !== "server") {
-      setTableInputConfigs((current) => ({ ...current, [nodeId]: value }));
-      setConfigId(undefined);
-      return;
-    }
+    if (source.kind !== "server") return;
     if (!serverConfig || serverConfig.nodeId !== nodeId) return;
     setConfigLoading(true);
     setConfigError(undefined);
@@ -228,9 +208,8 @@ export function App() {
   }, [document.id, reconcileGraph, source]);
 
   const configured = nodes.find((node) => node.id === configId);
-  const metadata = connections.find((connection) => connection.name === metadataName);
   const isRealGraph = source.kind === "server";
-  const displayPipelineName = document.name === "real-graph-proof" ? "示例流程" : (document.name || "未命名流程");
+  const displayPipelineName = isRealGraph ? (document.name || "未命名流程") : "未打开流程";
 
   return (
     <main className="shell">
@@ -334,7 +313,7 @@ export function App() {
 
         {source.kind !== "server" && (
           <div className="preview-note">
-            {source.kind === "loading" ? "正在打开流程…" : source.reason ? "流程打开失败，当前显示示例画布" : "打开一个 .hpl 流程开始编辑"}
+            {source.kind === "loading" ? "正在打开流程…" : source.reason ? `流程打开失败：${source.reason}` : "打开服务器上的 .hpl 文件后开始编辑"}
           </div>
         )}
 
@@ -357,11 +336,6 @@ export function App() {
             onCancel={() => { setConfigId(undefined); setServerConfig(undefined); setConfigError(undefined); }}
             onSave={(value) => applyTransformConfig(configured.id, value)} />
         )}
-        {metadata && <DatabaseConnectionPanel value={metadata} onClose={() => setMetadataName(undefined)} onApply={(value) => {
-          setConnections((current) => current.map((item) => item.name === metadata.name ? value : item));
-          setTableInputConfigs((current) => Object.fromEntries(Object.entries(current).map(([id, config]) => [id, config.connection === metadata.name ? { ...config, connection: value.name } : config])));
-          setMetadataName(undefined);
-        }} />}
       </section>
     </main>
   );
