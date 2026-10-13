@@ -55,16 +55,19 @@ class WorkflowHttpBoundaryTest {
     }
   }
 
-  @Test void failedSnapshotDoesNotRegisterAnExecution() throws Exception {
+  @Test void openedSnapshotExecutesEvenIfDiskWorkflowIsCorrupted() throws Exception {
     try (WorkflowHttpFixture f = new WorkflowHttpFixture(root, new WorkflowExecutionAdapter())) {
       Path path = f.writeWorkflow("valid.hwf", false);
       var opened = f.open("valid.hwf", null);
+      // The execution must use the pinned open-time XML, not reload mutable disk bytes.
       Files.writeString(path, "<workflow>broken");
       var response = f.post("api/v2/documents/" + opened.json().path("docId").asText() +
           "/executions", null, opened.cookie());
-      assertEquals(422, response.statusCode(), response::body);
-      assertEquals("execution_snapshot_failed", WorkflowHttpFixture.JSON.readTree(response.body()).path("code").asText());
-      assertEquals(0, f.adapter.size());
+      assertEquals(202, response.statusCode(), response::body);
+      String id = WorkflowHttpFixture.JSON.readTree(response.body()).path("id").asText();
+      assertFalse(id.isBlank(), "accepted execution must return an id");
+      var finished = f.awaitState(id, opened.cookie(), "finished");
+      assertEquals(0, finished.path("errors").asInt(), finished::toString);
     }
   }
 
