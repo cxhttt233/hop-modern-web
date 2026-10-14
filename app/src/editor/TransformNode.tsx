@@ -39,7 +39,16 @@ export function TransformNode({ id, data, selected }: NodeProps) {
           {icon ? <img src={icon} alt="" /> : glyph}
         </span>
         <span className="transform-node-copy">
-          <strong>{title}</strong>
+          <button
+            type="button"
+            className="nodrag nopan transform-node-name-action"
+            aria-label={"配置转换：" + title}
+            title={"打开" + title + "的配置"}
+            disabled={!actions?.editable || actions.loading}
+            onClick={(event) => { event.stopPropagation(); actions?.configure(id); }}
+            onDoubleClick={(event) => event.stopPropagation()}
+            style={{ all: "unset", display: "block", width: "100%", boxSizing: "border-box", cursor: actions?.editable ? "pointer" : "default" }}
+          ><strong style={{ display: "block" }}>{title}</strong></button>
           <small>{secondary}</small>
         </span>
       </div>
