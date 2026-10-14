@@ -41,18 +41,40 @@ try {
   const beforeGraph = opened.nodes.find((node) => node.id === "source");
   if (!beforeGraph) throw new Error("Opened graph did not contain source transform");
 
-  const box = await source.boundingBox();
-  if (!box) throw new Error("Source node has no bounding box");
+  // The title is now an intentional nodrag config button. Start the real
+  // React Flow gesture on the icon, not the node's geometric center.
+  const dragHandle = source.locator(".transform-node-icon");
+  const box = await dragHandle.boundingBox();
+  if (!box) throw new Error("Source drag icon has no bounding box");
+  const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const hit = await page.evaluate(({ x, y }) => {
+    const target = document.elementFromPoint(x, y);
+    return {
+      nodeId: target?.closest(".react-flow__node")?.getAttribute("data-id"),
+      icon: Boolean(target?.closest(".transform-node-icon")),
+      blocked: Boolean(target?.closest(".nodrag")),
+    };
+  }, start);
+  if (hit.nodeId !== "source" || !hit.icon || hit.blocked) {
+    throw new Error(`Drag icon hit-test failed: ${JSON.stringify(hit)}`);
+  }
+
   const moveResponsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
-      /\/api\/pipelines\/[^/]+\/move$/.test(new URL(response.url()).pathname)
+      /\/api\/pipelines\/[^/]+\/move$/.test(new URL(response.url()).pathname),
+    { timeout: 15000 }
   );
 
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 48, box.y + box.height / 2 + 32, { steps: 8 });
-  await page.mouse.up();
+  try {
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x + 48, start.y + 32, { steps: 12 });
+    await page.mouse.up();
+  } catch (error) {
+    await moveResponsePromise.catch(() => undefined);
+    throw error;
+  }
 
   const moveResponse = await moveResponsePromise;
   if (!moveResponse.ok()) throw new Error(`Transform move failed with ${moveResponse.status()}`);
