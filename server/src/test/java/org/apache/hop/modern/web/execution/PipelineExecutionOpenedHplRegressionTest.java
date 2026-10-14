@@ -42,6 +42,31 @@ class PipelineExecutionOpenedHplRegressionTest {
   }
 
   @Test
+  void parsesCapturedHplBytesAfterFileChanges(@TempDir Path root) throws Exception {
+    IVariables variables = new Variables();
+    MemoryMetadataProvider provider = new MemoryMetadataProvider();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    Path path = root.resolve("snapshot.hpl");
+
+    PipelineMeta before = new PipelineMeta();
+    before.setName("snapshot-before");
+    before.addParameterDefinition("SNAPSHOT_VALUE", "before", "snapshot revision fixture");
+    store.save(path, before);
+    byte[] captured = Files.readAllBytes(path);
+
+    PipelineMeta after = new PipelineMeta();
+    after.setName("snapshot-after");
+    after.addParameterDefinition("SNAPSHOT_VALUE", "after", "snapshot revision fixture");
+    store.save(path, after);
+
+    PipelineMeta pinned = store.open(path, captured);
+    PipelineMeta current = store.open(path);
+    assertEquals("before", pinned.getParameterDefault("SNAPSHOT_VALUE"));
+    assertEquals("after", current.getParameterDefault("SNAPSHOT_VALUE"));
+    assertEquals(path.toString(), pinned.getFilename());
+  }
+
+  @Test
   void openedHplRetainsRelativeDirectoryAndParameterDefaultDuringH2Execution(@TempDir Path root)
       throws Exception {
     IVariables variables = new Variables();
