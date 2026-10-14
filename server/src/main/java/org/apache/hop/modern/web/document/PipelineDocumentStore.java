@@ -6,6 +6,7 @@
  */
 package org.apache.hop.modern.web.document;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -38,6 +39,17 @@ public final class PipelineDocumentStore {
       pipeline.setFilename(path.toString());
       return pipeline;
     }
+  }
+
+  /** Parse the exact bytes captured for the open revision, without re-reading a changing path. */
+  public PipelineMeta open(Path path, byte[] bytes)
+      throws HopXmlException, HopMissingPluginsException {
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(bytes, "bytes");
+    PipelineMeta pipeline =
+        new PipelineMeta(new ByteArrayInputStream(bytes), metadataProvider, variables);
+    pipeline.setFilename(path.toString());
+    return pipeline;
   }
 
   public void save(Path path, PipelineMeta pipeline) throws IOException, HopException {
