@@ -80,10 +80,18 @@ public final class PipelineConfigResource {
       }
       try {
         ITransformMeta decoded = decode(request.config(), transform.getTransform().getClass());
+        // Validate that the complete response can be encoded before mutating live Hop metadata.
+        // Otherwise a serialization failure returns 422 after the edit has already committed.
+        ConfigResponse prepared =
+            new ConfigResponse(
+                transform.getName(),
+                transform.getTransformPluginId(),
+                ConfigJsonSerializer.toJson(decoded, metadataProvider),
+                AutomaticConfigDescriptor.describe(decoded.getClass()));
         transform.setTransform(decoded);
         transform.setChanged();
         document.pipeline().setChanged();
-        return Response.ok(response(transform)).build();
+        return Response.ok(prepared).build();
       } catch (HopException | ClassCastException e) {
         return error(422, "invalid_config", "transform config could not be decoded");
       }
