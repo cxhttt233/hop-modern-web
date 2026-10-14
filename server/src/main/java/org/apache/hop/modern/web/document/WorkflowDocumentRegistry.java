@@ -131,7 +131,16 @@ public final class WorkflowDocumentRegistry implements WorkflowDocumentSource {
 
   private WorkflowMeta load(Path path) throws Exception {
     if (!path.toRealPath().startsWith(root)) throw new IllegalArgumentException("path escaped root");
-    return new WorkflowMeta(variables, path.toString(), metadata);
+    // Parse from an already-open file descriptor. HopVfs filename loading reopens the path,
+    // which could follow a swapped final-component symlink outside the validated root.
+    try (java.io.InputStream stream =
+        java.nio.file.Files.newInputStream(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+      org.w3c.dom.Document xml = XmlHandler.loadXmlFile(stream, null, false, false);
+      WorkflowMeta meta = new WorkflowMeta();
+      meta.loadXml(XmlHandler.getSubNode(xml, WorkflowMeta.XML_TAG),
+          path.toString(), metadata, variables);
+      return meta;
+    }
   }
 
   public record Opened(String docId, String kind, String name, String uri, int revision,
