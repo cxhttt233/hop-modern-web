@@ -7,6 +7,7 @@
 package org.apache.hop.modern.web.document;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -261,6 +262,48 @@ class PipelineConfigResourceTest {
         reopenedJson.path("parameters").path("parameter"));
     assertEquals(written.config().path("matrixParameters").path("matrixParameter"),
         reopenedJson.path("matrixParameters").path("matrixParameter"));
+  }
+
+  @Test
+  void failedResponseSerializationDoesNotCommitDecodedTransformConfig() throws Exception {
+    MemoryMetadataProvider provider = new MemoryMetadataProvider();
+    PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
+    PipelineMeta pipeline = new PipelineMeta();
+    TableInputMeta original = new TableInputMeta();
+    original.setSql("select 1");
+    TransformMeta transform = new TransformMeta("TableInput", "source", original);
+    pipeline.addTransform(transform);
+    registry.put(new PipelineDocument("atomic-doc", tempDir.resolve("atomic.hpl"), pipeline));
+    PipelineConfigResource resource = new PipelineConfigResource(registry, provider);
+
+    boolean transformWasChanged = transform.hasChanged();
+    boolean pipelineWasChanged = pipeline.hasChanged();
+    ObjectNode changed = ConfigJsonSerializer.toJson(original, provider).deepCopy();
+    changed.put("sql", "select 2");
+
+    try (org.mockito.MockedStatic<ConfigJsonSerializer> serializer =
+        org.mockito.Mockito.mockStatic(
+            ConfigJsonSerializer.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+      serializer
+          .when(() -> ConfigJsonSerializer.toJson(
+              org.mockito.Mockito.any(), org.mockito.Mockito.same(provider)))
+          .thenThrow(new org.apache.hop.core.exception.HopException("forced encode failure"));
+      Response failed =
+          resource.write(
+              "atomic-doc", new PipelineConfigResource.WriteRequest("source", changed));
+      assertError(failed, 422, "invalid_config");
+    }
+
+    assertSame(original, transform.getTransform(), "failed write replaced live transform meta");
+    assertEquals("select 1", ((TableInputMeta) transform.getTransform()).getSql());
+    assertEquals(transformWasChanged, transform.hasChanged());
+    assertEquals(pipelineWasChanged, pipeline.hasChanged());
+
+    Response reread = resource.read(
+        "atomic-doc", new PipelineConfigResource.ReadRequest("source"));
+    assertEquals(200, reread.getStatus());
+    assertEquals("select 1",
+        ((PipelineConfigResource.ConfigResponse) reread.getEntity()).config().path("sql").asText());
   }
 
   private static void assertError(Response response, int status, String code) {
