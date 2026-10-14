@@ -67,7 +67,10 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
 
   public boolean remove(String id) {
     Entry entry = executions.get(id);
-    return entry != null && terminal(entry.engine) && executions.remove(id, entry);
+    // A queued or still-unwinding task must remain discoverable until its worker exits.
+    // Engine flags alone can report stopped/inactive before a queued Runnable starts.
+    return entry != null && entry.completedAt != null
+        && terminal(entry.engine) && executions.remove(id, entry);
   }
 
   int size() {
