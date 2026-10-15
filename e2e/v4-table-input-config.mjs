@@ -16,7 +16,7 @@ try {
   if (!openResponse.ok() || !opened.nodes?.some(node => node.id === "table-input")) {
     throw new Error(`Authoritative Table Input graph missing: ${JSON.stringify(opened)}`);
   }
-  await page.getByText(opened.name, { exact: true }).waitFor({ state: "visible" });
+  await page.locator(`.file-identity[data-document-name="${opened.name}"]`).waitFor({ state: "visible" });
   await page.locator(".react-flow").waitFor({ state: "visible" });
   const node = page.locator('.react-flow__node[data-id="table-input"]');
   await node.waitFor({ state: "visible" });
