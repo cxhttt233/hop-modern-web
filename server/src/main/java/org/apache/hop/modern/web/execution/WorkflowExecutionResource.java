@@ -1,5 +1,8 @@
 package org.apache.hop.modern.web.execution;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.CookieParam;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -20,6 +23,7 @@ import org.apache.hop.workflow.WorkflowMeta;
 @Path("/api/v2")
 @Produces(MediaType.APPLICATION_JSON)
 public final class WorkflowExecutionResource implements AutoCloseable {
+  private static final ObjectMapper JSON = new ObjectMapper();
   private final WorkflowDocumentSource documents;
   private final WorkflowExecutionAdapter executions;
 
@@ -31,7 +35,31 @@ public final class WorkflowExecutionResource implements AutoCloseable {
   @POST
   @Path("/documents/{documentId}/executions")
   public Response startHttp(@PathParam("documentId") String documentId,
-                            @CookieParam("hop-modern-session") String session) {
+                            @CookieParam("hop-modern-session") String session,
+                            String requestBody) {
+    // The product currently supports only the default local execution configuration.
+    // Reject options we cannot honor instead of silently running with different settings.
+    if (requestBody != null && !requestBody.isBlank()) {
+      final JsonNode options;
+      try {
+        options = JSON.readTree(requestBody);
+      } catch (JsonProcessingException e) {
+        return error(400, "invalid_run_options", "workflow run options must be a JSON object");
+      }
+      if (options == null || !options.isObject()) {
+        return error(400, "invalid_run_options", "workflow run options must be a JSON object");
+      }
+      var fields = options.fields();
+      while (fields.hasNext()) {
+        var option = fields.next();
+        if ("runConfiguration".equals(option.getKey()) && option.getValue().isTextual()
+            && "local".equalsIgnoreCase(option.getValue().asText())) {
+          continue;
+        }
+        return error(422, "unsupported_run_options",
+            "workflow run option is not supported by the local executor");
+      }
+    }
     try {
       return startSnapshot(documentId, documents.executionSnapshot(documentId, session));
     } catch (RuntimeException e) {
