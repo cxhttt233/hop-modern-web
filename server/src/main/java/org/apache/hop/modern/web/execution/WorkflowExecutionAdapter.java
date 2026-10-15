@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
+import java.util.function.Function;
 import org.apache.hop.core.Result;
 import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.engines.local.LocalWorkflowEngine;
@@ -17,19 +18,26 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
   private final Map<String, Entry> executions = new ConcurrentHashMap<>();
   private final ExecutorService executor;
   private final Supplier<String> ids;
+  private final Function<WorkflowMeta, LocalWorkflowEngine> engineFactory;
 
   public WorkflowExecutionAdapter() {
     this(Executors.newCachedThreadPool(), () -> UUID.randomUUID().toString());
   }
 
   WorkflowExecutionAdapter(ExecutorService executor, Supplier<String> ids) {
+    this(executor, ids, LocalWorkflowEngine::new);
+  }
+
+  WorkflowExecutionAdapter(ExecutorService executor, Supplier<String> ids,
+      Function<WorkflowMeta, LocalWorkflowEngine> engineFactory) {
     this.executor = executor;
     this.ids = ids;
+    this.engineFactory = engineFactory;
   }
 
   public String start(String owner, WorkflowMeta workflowMeta) {
     String id = ids.get();
-    LocalWorkflowEngine engine = new LocalWorkflowEngine(workflowMeta);
+    LocalWorkflowEngine engine = engineFactory.apply(workflowMeta);
     Entry entry = new Entry(owner, engine, Instant.now());
     if (executions.putIfAbsent(id, entry) != null) {
       throw new IllegalStateException("duplicate workflow execution id");
@@ -38,8 +46,15 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
       executor.submit(() -> {
         try {
           engine.startExecution();
-        } finally {
+        } catch (RuntimeException | Error failure) {
+          // A worker crash must not leave a permanently STARTING execution with zero errors.
+          // Publish completion before the volatile crash flag so status cannot expose
+          // a failed worker without its completion timestamp.
           entry.completedAt = Instant.now();
+          entry.crashed = true;
+          throw failure;
+        } finally {
+          if (entry.completedAt == null) entry.completedAt = Instant.now();
         }
       });
       return id;
@@ -59,7 +74,7 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
     if (entry == null) {
       return Optional.empty();
     }
-    if (!terminal(entry.engine)) {
+    if (!terminal(entry)) {
       entry.engine.stopExecution();
     }
     return Optional.of(snapshot(id, entry));
@@ -70,7 +85,7 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
     // A queued or still-unwinding task must remain discoverable until its worker exits.
     // Engine flags alone can report stopped/inactive before a queued Runnable starts.
     return entry != null && entry.completedAt != null
-        && terminal(entry.engine) && executions.remove(id, entry);
+        && terminal(entry) && executions.remove(id, entry);
   }
 
   int size() {
@@ -79,8 +94,12 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
 
   private static Snapshot snapshot(String id, Entry entry) {
     Result result = entry.engine.getResult();
-    long errors = result == null ? 0 : result.getNrErrors();
-    return new Snapshot(id, entry.owner, state(entry.engine, errors), entry.createdAt,
+    boolean crashed = entry.crashed;
+    long errors = Math.max(result == null ? 0 : result.getNrErrors(), crashed ? 1 : 0);
+    State current = crashed
+        ? (entry.engine.isActive() ? State.HALTING : State.FAILED)
+        : state(entry.engine, errors);
+    return new Snapshot(id, entry.owner, current, entry.createdAt,
         entry.completedAt, errors, result != null && result.isStopped());
   }
 
@@ -89,6 +108,10 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
     if (engine.isFinished()) return errors > 0 ? State.FAILED : State.FINISHED;
     if (engine.isActive()) return State.RUNNING;
     return State.STARTING;
+  }
+
+  private static boolean terminal(Entry entry) {
+    return (entry.crashed && !entry.engine.isActive()) || terminal(entry.engine);
   }
 
   private static boolean terminal(LocalWorkflowEngine engine) {
@@ -111,6 +134,7 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
     private final LocalWorkflowEngine engine;
     private final Instant createdAt;
     private volatile Instant completedAt;
+    private volatile boolean crashed;
 
     private Entry(String owner, LocalWorkflowEngine engine, Instant createdAt) {
       this.owner = owner;
