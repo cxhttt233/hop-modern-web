@@ -45,7 +45,11 @@ export function TransformNode({ id, data, selected }: NodeProps) {
             aria-label={"配置转换：" + title}
             title={"打开" + title + "的配置"}
             disabled={!actions?.editable || actions.loading}
-            onClick={(event) => { event.stopPropagation(); actions?.configure(id); }}
+            onClick={() => {
+              // Bubble the click to React Flow so title activation also selects the
+              // node and keeps its contextual toolbar accessible.
+              actions?.configure(id);
+            }}
             onDoubleClick={(event) => event.stopPropagation()}
             style={{ all: "unset", display: "block", width: "100%", boxSizing: "border-box", cursor: actions?.editable ? "pointer" : "default" }}
           ><strong style={{ display: "block" }}>{title}</strong></button>
