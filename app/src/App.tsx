@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange, type ReactFlowInstance } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
 import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
@@ -52,6 +52,7 @@ export function App() {
   const [configId, setConfigId] = useState<string>();
   const [serverConfig, setServerConfig] = useState<TransformConfigDocument>();
   const [configLoading, setConfigLoading] = useState(false);
+  const configRequestGeneration = useRef(0);
   const [configError, setConfigError] = useState<string>();
   const [pipelinePath, setPipelinePath] = useState(initialPipelinePath);
   const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
@@ -63,6 +64,7 @@ export function App() {
 
   useEffect(() => {
     // A new open attempt must never display the previous file as the current one.
+    configRequestGeneration.current += 1;
     setDocument(emptyDocument);
     setNodes([]);
     setConfigId(undefined);
@@ -164,35 +166,58 @@ export function App() {
 
   const openTransformConfig = useCallback((nodeId: string) => {
     if (source.kind !== "server") return;
+    const generation = ++configRequestGeneration.current;
+    setConfigId(undefined);
     setConfigLoading(true);
     setConfigError(undefined);
     setServerConfig(undefined);
     readPipelineTransformConfig(document.id, nodeId).then((result) => {
+      if (generation !== configRequestGeneration.current) return;
       setServerConfig(result);
       setConfigId(nodeId);
     }).catch((error: unknown) => {
+      if (generation !== configRequestGeneration.current) return;
       setConfigId(undefined);
       setConfigError(error instanceof Error ? error.message : "Transform config read failed");
-    }).finally(() => setConfigLoading(false));
+    }).finally(() => {
+      if (generation === configRequestGeneration.current) setConfigLoading(false);
+    });
   }, [document.id, source]);
 
   const applyTransformConfig = useCallback((nodeId: string, value: Record<string, unknown>) => {
     if (source.kind !== "server") return;
     if (!serverConfig || serverConfig.nodeId !== nodeId) return;
+    const generation = ++configRequestGeneration.current;
     setConfigLoading(true);
     setConfigError(undefined);
     writePipelineTransformConfig(document.id, nodeId, value)
       .then(() => readPipelineTransformConfig(document.id, nodeId))
       .then((authoritative) => {
+        if (generation !== configRequestGeneration.current) return;
         setServerConfig(authoritative);
         setConfigId(nodeId);
         setDirty(true);
       })
       .catch((error: unknown) => {
+        if (generation !== configRequestGeneration.current) return;
         setConfigError(error instanceof Error ? error.message : "Transform config write failed");
       })
-      .finally(() => setConfigLoading(false));
+      .finally(() => {
+        if (generation === configRequestGeneration.current) setConfigLoading(false);
+      });
   }, [document.id, serverConfig, source]);
+
+  const removeTransform = useCallback((nodeId: string) => {
+    if (source.kind !== "server") return;
+    // A deleted node must not leave a config dialog that reappears after Undo.
+    // Also discard any late config/read response for that node.
+    configRequestGeneration.current += 1;
+    setConfigId(undefined);
+    setServerConfig(undefined);
+    setConfigLoading(false);
+    setConfigError(undefined);
+    runGraphCommand(() => deletePipelineTransform(document.id, nodeId));
+  }, [document.id, runGraphCommand, source]);
 
   const saveDocument = useCallback(() => {
     if (source.kind !== "server") return;
@@ -319,7 +344,7 @@ export function App() {
 
         <TransformNodeActionsContext.Provider value={{
           configure: openTransformConfig,
-          remove: (nodeId) => runGraphCommand(() => deletePipelineTransform(document.id, nodeId)),
+          remove: removeTransform,
           editable: isRealGraph,
           loading: configLoading,
         }}>
@@ -333,7 +358,7 @@ export function App() {
         {configError && <div className="preview-note error-note" role="alert">操作失败：{configError}</div>}
         {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
           <GenericConfigPanel descriptor={serverConfig.descriptor} config={serverConfig.config} disabled={configLoading}
-            onCancel={() => { setConfigId(undefined); setServerConfig(undefined); setConfigError(undefined); }}
+            onCancel={() => { configRequestGeneration.current += 1; setConfigId(undefined); setServerConfig(undefined); setConfigLoading(false); setConfigError(undefined); }}
             onSave={(value) => applyTransformConfig(configured.id, value)} />
         )}
       </section>
