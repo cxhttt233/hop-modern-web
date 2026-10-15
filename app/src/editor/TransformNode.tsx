@@ -45,7 +45,10 @@ export function TransformNode({ id, data, selected }: NodeProps) {
             aria-label={"配置转换：" + title}
             title={"打开" + title + "的配置"}
             disabled={!actions?.editable || actions.loading}
-            onClick={() => {
+            onClick={(event) => {
+              // A double-click emits two click events before dblclick. Keep the
+              // first configuration request, but never issue a duplicate read.
+              if (event.detail > 1) return;
               // Bubble the click to React Flow so title activation also selects the
               // node and keeps its contextual toolbar accessible.
               actions?.configure(id);
