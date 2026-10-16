@@ -7,6 +7,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.function.Supplier;
 import java.util.function.Function;
 import org.apache.hop.core.Result;
@@ -15,10 +16,12 @@ import org.apache.hop.workflow.engines.local.LocalWorkflowEngine;
 
 /** Product-owned async registry/adapter; Hop remains authoritative for workflow lifecycle. */
 public final class WorkflowExecutionAdapter implements AutoCloseable {
+  private static final int DEFAULT_MAX_TRACKED_EXECUTIONS = 1024;
   private final Map<String, Entry> executions = new ConcurrentHashMap<>();
   private final ExecutorService executor;
   private final Supplier<String> ids;
   private final Function<WorkflowMeta, LocalWorkflowEngine> engineFactory;
+  private final Semaphore capacity;
 
   public WorkflowExecutionAdapter() {
     this(Executors.newCachedThreadPool(), () -> UUID.randomUUID().toString());
@@ -30,37 +33,54 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
 
   WorkflowExecutionAdapter(ExecutorService executor, Supplier<String> ids,
       Function<WorkflowMeta, LocalWorkflowEngine> engineFactory) {
+    this(executor, ids, engineFactory, DEFAULT_MAX_TRACKED_EXECUTIONS);
+  }
+
+  WorkflowExecutionAdapter(ExecutorService executor, Supplier<String> ids,
+      Function<WorkflowMeta, LocalWorkflowEngine> engineFactory, int maxTracked) {
+    if (maxTracked < 1) throw new IllegalArgumentException("maxTracked must be positive");
     this.executor = executor;
     this.ids = ids;
     this.engineFactory = engineFactory;
+    this.capacity = new Semaphore(maxTracked);
   }
 
   public String start(String owner, WorkflowMeta workflowMeta) {
-    String id = ids.get();
-    LocalWorkflowEngine engine = engineFactory.apply(workflowMeta);
-    Entry entry = new Entry(owner, engine, Instant.now());
-    if (executions.putIfAbsent(id, entry) != null) {
-      throw new IllegalStateException("duplicate workflow execution id");
+    // Bound the registry even when completed executions are retained for inspection.
+    // Reserve before engine allocation; release on every unsuccessful start.
+    if (!capacity.tryAcquire()) {
+      throw new IllegalStateException("workflow execution registry capacity exceeded");
     }
     try {
-      executor.submit(() -> {
-        try {
-          engine.startExecution();
-        } catch (RuntimeException | Error failure) {
-          // A worker crash must not leave a permanently STARTING execution with zero errors.
-          // Publish completion before the volatile crash flag so status cannot expose
-          // a failed worker without its completion timestamp.
-          entry.completedAt = Instant.now();
-          entry.crashed = true;
-          throw failure;
-        } finally {
-          if (entry.completedAt == null) entry.completedAt = Instant.now();
-        }
-      });
-      return id;
-    } catch (RuntimeException e) {
-      executions.remove(id, entry);
-      throw e;
+      String id = ids.get();
+      LocalWorkflowEngine engine = engineFactory.apply(workflowMeta);
+      Entry entry = new Entry(owner, engine, Instant.now());
+      if (executions.putIfAbsent(id, entry) != null) {
+        throw new IllegalStateException("duplicate workflow execution id");
+      }
+      try {
+        executor.submit(() -> {
+          try {
+            engine.startExecution();
+          } catch (RuntimeException | Error failure) {
+            // A worker crash must not leave a permanently STARTING execution with zero errors.
+            // Publish completion before the volatile crash flag so status cannot expose
+            // a failed worker without its completion timestamp.
+            entry.completedAt = Instant.now();
+            entry.crashed = true;
+            throw failure;
+          } finally {
+            if (entry.completedAt == null) entry.completedAt = Instant.now();
+          }
+        });
+        return id;
+      } catch (RuntimeException | Error failure) {
+        executions.remove(id, entry);
+        throw failure;
+      }
+    } catch (RuntimeException | Error failure) {
+      capacity.release();
+      throw failure;
     }
   }
 
@@ -84,8 +104,10 @@ public final class WorkflowExecutionAdapter implements AutoCloseable {
     Entry entry = executions.get(id);
     // A queued or still-unwinding task must remain discoverable until its worker exits.
     // Engine flags alone can report stopped/inactive before a queued Runnable starts.
-    return entry != null && entry.completedAt != null
-        && terminal(entry) && executions.remove(id, entry);
+    if (entry == null || entry.completedAt == null || !terminal(entry)
+        || !executions.remove(id, entry)) return false;
+    capacity.release();
+    return true;
   }
 
   int size() {
