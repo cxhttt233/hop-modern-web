@@ -87,12 +87,15 @@ class WorkflowHttpBoundaryTest {
       assertEquals("invalid_run_options",
           WorkflowHttpFixture.JSON.readTree(nonObject.body()).path("code").asText());
 
-      var unsupported = f.post(url, "{\\"logLevel\\":\\"DEBUG\\"}", opened.cookie());
+      // Build JSON with the same mapper as the HTTP fixture; avoid hand-escaped payloads.
+      var unsupportedOptions = WorkflowHttpFixture.JSON.createObjectNode().put("logLevel", "DEBUG");
+      var unsupported = f.post(url, unsupportedOptions.toString(), opened.cookie());
       assertEquals(422, unsupported.statusCode(), unsupported::body);
       assertEquals("unsupported_run_options",
           WorkflowHttpFixture.JSON.readTree(unsupported.body()).path("code").asText());
 
-      var accepted = f.post(url, "{\\"runConfiguration\\":\\"LOCAL\\"}", opened.cookie());
+      var localOptions = WorkflowHttpFixture.JSON.createObjectNode().put("runConfiguration", "LOCAL");
+      var accepted = f.post(url, localOptions.toString(), opened.cookie());
       assertEquals(202, accepted.statusCode(), accepted::body);
       String executionId = WorkflowHttpFixture.JSON.readTree(accepted.body()).path("id").asText();
       assertFalse(executionId.isBlank());
