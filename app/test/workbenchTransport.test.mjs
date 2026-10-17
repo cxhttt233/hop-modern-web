@@ -84,3 +84,25 @@ test('RuoYi permission denial remains a permission failure',async()=>{
   })
   assert.equal(response.status,403)
 })
+
+test('new transform configuration uses Workbench product API and unsaved graph',async()=>{
+  globalThis.document={cookie:'Admin-Token=valid-session-token'}
+  const seen=[]
+  globalThis.window={fetch:async(...args)=>{seen.push(args);return new Response(JSON.stringify({nodeId:'json-input-1',pluginId:'JsonInput',config:{},descriptor:{properties:[]}}),{status:200,headers:{'content-type':'application/json'}})}}
+  const response=await workbenchFetch('/api/pipelines/id/config/read',{method:'POST',body:JSON.stringify({
+    path:'Demo/test.hpl',expectedRevision:'a'.repeat(64),nodes:[{id:'json-input-1',name:'JSON 输入 1',pluginId:'JsonInput'}],edges:[],nodeId:'json-input-1'
+  })})
+  assert.equal(response.status,200)
+  assert.equal(seen[0][0],'/api/workbench/modern-editor/config/read')
+  const body=JSON.parse(seen[0][1].body)
+  assert.equal(body.nodeId,'json-input-1')
+  assert.equal(body.nodes[0].pluginId,'JsonInput')
+  assert.equal(body.expectedRevision,'a'.repeat(64))
+})
+test('invalid config/read identity or revision rejects without network',async()=>{
+  let count=0
+  globalThis.window={fetch:async()=>{count++;throw new Error('unexpected request')}}
+  const response=await workbenchFetch('/api/pipelines/id/config/read',{method:'POST',body:JSON.stringify({path:'Demo/test.hpl',expectedRevision:'incorrect',nodes:[],edges:[],nodeId:'x'})})
+  assert.equal(response.status,400)
+  assert.equal(count,0)
+})

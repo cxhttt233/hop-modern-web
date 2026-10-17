@@ -75,6 +75,26 @@ class HopModernEditorControllerTest {
         assertTrue(Files.getPosixFilePermissions(file).contains(
             java.nio.file.attribute.PosixFilePermission.GROUP_WRITE));
     }
+    @Test void readTransformConfigRequiresAuthorizedProjectAndRevision() throws Exception {
+        file();
+        var read=new HopModernEditorController.ConfigReadRequest(
+            "Demo", "flows/test.hpl", "invalid",
+            new ObjectMapper().createArrayNode(),new ObjectMapper().createArrayNode(),"json-input-1");
+        assertEquals(HttpStatus.BAD_REQUEST,subject().configRead(read).getStatusCode());
+        Method method=HopModernEditorController.class.getDeclaredMethod(
+            "configRead",HopModernEditorController.ConfigReadRequest.class);
+        assertTrue(method.getAnnotation(PreAuthorize.class).value().contains("workbench:hop:access"));
+    }
+    @Test void rejectsUnsupportedConfigEditsBeforeWriting() throws Exception {
+        Path file=file();
+        byte[] original=Files.readAllBytes(file);
+        var request=new HopModernEditorController.SaveRequest(
+            "Demo", "flows/test.hpl", "a".repeat(64),
+            new ObjectMapper().createArrayNode(),new ObjectMapper().createArrayNode(),
+            new ObjectMapper().createArrayNode());
+        assertEquals(HttpStatus.BAD_REQUEST,subject().save(request).getStatusCode());
+        assertArrayEquals(original,Files.readAllBytes(file));
+    }
     @Test void openAndSaveHaveSeparateWorkbenchPermissions() throws Exception {
         Method open=HopModernEditorController.class.getDeclaredMethod(
             "open",HopModernEditorController.OpenRequest.class);

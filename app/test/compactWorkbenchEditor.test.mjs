@@ -20,10 +20,12 @@ test('embedded sidebar matches actual draggable draft capabilities and avoids du
   assert.doesNotMatch(app,/导出草稿|本地草稿 · 未写回 Hop/)
 })
 
-test('embedded configure is a functional local rename rather than false operation error',()=>{
+test('embedded configure opens real parameter form and preserves independent rename',()=>{
   assert.match(app,/renameDraftTransform\(doc, draftRenameId, draftRenameText\)/)
   assert.match(app,/className="draft-rename-panel"/)
-  assert.match(node,/actions\?\.draftMode \? "重命名" : "配置"/)
+  assert.match(node,/>配置<\/button>/)
+  assert.match(node,/>重命名<\/button>/)
+  assert.match(app,/readWorkbenchTransformConfig\(pipelinePath, documentRef\.current, nodeId\)/)
   assert.doesNotMatch(app,/节点配置和写回 \.hpl 尚未接入后端。当前支持/)
   assert.match(app,/onClick=\{\(\) => setConfigError\(undefined\)\}/)
   assert.match(style,/\.preview-note\.error-note\{\s*top:auto;bottom:22px;/)
