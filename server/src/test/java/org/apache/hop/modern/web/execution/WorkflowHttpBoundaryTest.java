@@ -71,6 +71,36 @@ class WorkflowHttpBoundaryTest {
     }
   }
 
+  @Test void localRunOptionsAreAcceptedAndUnsupportedOptionsRejectedOverHttp() throws Exception {
+    try (WorkflowHttpFixture f = new WorkflowHttpFixture(root, new WorkflowExecutionAdapter())) {
+      f.writeWorkflow("options.hwf", false);
+      var opened = f.open("options.hwf", null);
+      String url = "api/v2/documents/" + opened.json().path("docId").asText() + "/executions";
+
+      var malformed = f.post(url, "{broken", opened.cookie());
+      assertEquals(400, malformed.statusCode(), malformed::body);
+      assertEquals("invalid_run_options",
+          WorkflowHttpFixture.JSON.readTree(malformed.body()).path("code").asText());
+
+      var nonObject = f.post(url, "[]", opened.cookie());
+      assertEquals(400, nonObject.statusCode(), nonObject::body);
+      assertEquals("invalid_run_options",
+          WorkflowHttpFixture.JSON.readTree(nonObject.body()).path("code").asText());
+
+      var unsupported = f.post(url, "{\\"logLevel\\":\\"DEBUG\\"}", opened.cookie());
+      assertEquals(422, unsupported.statusCode(), unsupported::body);
+      assertEquals("unsupported_run_options",
+          WorkflowHttpFixture.JSON.readTree(unsupported.body()).path("code").asText());
+
+      var accepted = f.post(url, "{\\"runConfiguration\\":\\"LOCAL\\"}", opened.cookie());
+      assertEquals(202, accepted.statusCode(), accepted::body);
+      String executionId = WorkflowHttpFixture.JSON.readTree(accepted.body()).path("id").asText();
+      assertFalse(executionId.isBlank());
+      var finished = f.awaitState(executionId, opened.cookie(), "finished");
+      assertEquals(0, finished.path("errors").asInt(-1), finished::toString);
+    }
+  }
+
   @Test void rejectedAsyncSubmissionIsRolledBack() throws Exception {
     WorkflowExecutionAdapter rejected =
         new WorkflowExecutionAdapter(new RejectingExecutor(), () -> "rejected-id");
