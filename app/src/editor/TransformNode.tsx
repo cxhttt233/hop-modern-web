@@ -4,6 +4,7 @@ import { Handle, NodeToolbar, Position, type NodeProps } from "@xyflow/react";
 export interface TransformNodeActions {
   configure: (nodeId: string) => void;
   remove: (nodeId: string) => void;
+  rename?: (nodeId: string) => void;
   editable: boolean;
   draftMode?: boolean;
   loading: boolean;
@@ -65,7 +66,13 @@ export function TransformNode({ id, data, selected }: NodeProps) {
           aria-label="Configure"
           disabled={actions?.loading}
           onClick={(event) => { event.stopPropagation(); actions?.configure(id); }}
-        >{actions?.draftMode ? "重命名" : "配置"}</button>
+        >配置</button>
+        {actions?.draftMode && <button
+          type="button"
+          className="nodrag nopan"
+          aria-label="Rename"
+          onClick={(event) => { event.stopPropagation(); actions?.rename?.(id); }}
+        >重命名</button>}
         <button
           type="button"
           className="nodrag nopan danger-context"

@@ -43,6 +43,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/workbench/modern-editor")
 public class HopModernEditorController {
+    private static final org.slf4j.Logger LOG =
+        org.slf4j.LoggerFactory.getLogger(HopModernEditorController.class);
     private static final int MAX_BYTES = 8 * 1024 * 1024;
     private static final Object WRITE_LOCK = new Object();
     private final WorkbenchProperties config;
@@ -55,7 +57,15 @@ public class HopModernEditorController {
     }
 
     public record OpenRequest(String project, String file) {}
-    public record SaveRequest(String project, String file, String expectedRevision, JsonNode nodes, JsonNode edges) {}
+    public record SaveRequest(String project, String file, String expectedRevision,
+                              JsonNode nodes, JsonNode edges, JsonNode configEdits) {
+        public SaveRequest(String project, String file, String expectedRevision,
+                           JsonNode nodes, JsonNode edges) {
+            this(project, file, expectedRevision, nodes, edges, null);
+        }
+    }
+    public record ConfigReadRequest(String project, String file, String expectedRevision,
+                                    JsonNode nodes, JsonNode edges, String nodeId) {}
 
     @PostMapping("/open")
     @PreAuthorize("@ss.hasPermi('workbench:hop:access')")
@@ -76,6 +86,40 @@ public class HopModernEditorController {
         }
     }
 
+    @PostMapping("/config/read")
+    @PreAuthorize("@ss.hasPermi('workbench:hop:access')")
+    public ResponseEntity<?> configRead(@RequestBody ConfigReadRequest request) {
+        if (request == null || request.expectedRevision() == null
+            || !request.expectedRevision().matches("[0-9a-f]{64}")
+            || request.nodeId() == null || request.nodeId().isBlank()
+            || request.nodeId().length() > 180
+            || request.nodes() == null || !request.nodes().isArray()
+            || request.edges() == null || !request.edges().isArray()
+            || request.nodes().size() > 1000 || request.edges().size() > 3000)
+            return failure(HttpStatus.BAD_REQUEST,"invalid_config_request");
+        try {
+            Path file = requireProjectFile(request.project(),request.file());
+            byte[] original = readBounded(file);
+            if (!sha(original).equals(request.expectedRevision()))
+                return failure(HttpStatus.CONFLICT,"pipeline_modified_elsewhere");
+            ObjectNode body = engineRequest("config-read",request.project(),request.file(),
+                                           original,request.nodes(),request.edges());
+            body.put("nodeId",request.nodeId());
+            ObjectNode result = callEngine(body, true);
+            return ResponseEntity.ok(result);
+        } catch (BadInput bad) {
+            return failure(HttpStatus.BAD_REQUEST,bad.code);
+        } catch (IllegalArgumentException badConfig) {
+            return failure(HttpStatus.BAD_REQUEST,"invalid_transform_config");
+        } catch (IOException unavailable) {
+            LOG.warn("Workbench Modern config read unavailable: {}", unavailable.toString());
+            return failure(HttpStatus.BAD_GATEWAY,"hop_engine_unavailable");
+        } catch (Exception exception) {
+            LOG.warn("Workbench Modern config read failed: {}", exception.toString());
+            return failure(HttpStatus.BAD_GATEWAY,"modern_engine_unavailable");
+        }
+    }
+
     @PostMapping("/save")
     @Log(title = "Workbench保存Hop Pipeline", businessType = BusinessType.UPDATE)
     @PreAuthorize("@ss.hasRole('admin') or @ss.hasPermi('workbench:hop:edit')")
@@ -84,7 +128,9 @@ public class HopModernEditorController {
             || !request.expectedRevision().matches("[0-9a-f]{64}")
             || request.nodes() == null || !request.nodes().isArray()
             || request.edges() == null || !request.edges().isArray()
-            || request.nodes().size() > 1000 || request.edges().size() > 3000)
+            || request.nodes().size() > 1000 || request.edges().size() > 3000
+            || (request.configEdits() != null && (!request.configEdits().isObject()
+                || request.configEdits().size() > 100)))
             return failure(HttpStatus.BAD_REQUEST,"invalid_save_request");
         synchronized (WRITE_LOCK) {
             try {
@@ -95,6 +141,8 @@ public class HopModernEditorController {
 
                 ObjectNode body = engineRequest("save",request.project(),request.file(),
                     original,request.nodes(),request.edges());
+                if (request.configEdits() != null)
+                    body.set("configEdits",request.configEdits());
                 ObjectNode result = callEngine(body);
                 String xmlBase64 = result.path("xmlBase64").asText("");
                 if (xmlBase64.isEmpty() || xmlBase64.length() > MAX_BYTES * 2)
@@ -116,10 +164,16 @@ public class HopModernEditorController {
             } catch (BadInput bad) {
                 return failure(HttpStatus.BAD_REQUEST,bad.code);
             } catch (java.nio.file.AccessDeniedException denied) {
+                LOG.warn("Workbench Modern file write denied: {}", denied.toString());
                 return failure(HttpStatus.FORBIDDEN,"project_write_denied");
+            } catch (IllegalArgumentException invalid) {
+                LOG.warn("Workbench Modern invalid graph/config: {}", invalid.toString());
+                return failure(HttpStatus.BAD_REQUEST,"invalid_transform_config");
             } catch (IOException io) {
+                LOG.warn("Workbench Modern save I/O failure: {}", io.toString());
                 return failure(HttpStatus.SERVICE_UNAVAILABLE,"hop_project_write_unavailable");
             } catch (Exception error) {
+                LOG.warn("Workbench Modern save failed: {}", error.toString());
                 return failure(HttpStatus.BAD_GATEWAY,"modern_engine_unavailable");
             }
         }
@@ -138,6 +192,10 @@ public class HopModernEditorController {
     }
 
     private ObjectNode callEngine(ObjectNode payload) throws Exception {
+        return callEngine(payload, false);
+    }
+
+    private ObjectNode callEngine(ObjectNode payload, boolean configResponse) throws Exception {
         String token=System.getenv("WORKBENCH_MODERN_ENGINE_TOKEN");
         String url=System.getenv("WORKBENCH_MODERN_ENGINE_URL");
         if (token == null || token.length() < 32 || url == null || url.isBlank())
@@ -159,11 +217,21 @@ public class HopModernEditorController {
             throw new IOException("Engine response exceeded bounds");
         if (response.statusCode()==403) throw new IOException("Engine authorization rejected request");
         if (response.statusCode()==409) throw new BadInput("engine_revision_mismatch");
-        if (response.statusCode()!=200) throw new IOException("Engine refused graph operation");
+        if (response.statusCode()==400 || response.statusCode()==422)
+            throw new IllegalArgumentException("Engine rejected transform configuration/graph ("+response.statusCode()+")");
+        if (response.statusCode()!=200)
+            throw new IOException("Engine unavailable HTTP "+response.statusCode());
         JsonNode parsed=mapper.readTree(response.body());
-        if (!(parsed instanceof ObjectNode graph) || !graph.path("nodes").isArray()
-            || !graph.path("edges").isArray() || !graph.path("revision").isTextual())
+        if (!(parsed instanceof ObjectNode graph))
             throw new IOException("Invalid engine response");
+        if (configResponse) {
+            if (!graph.path("nodeId").isTextual() || !graph.path("config").isObject()
+                || !graph.path("descriptor").isObject())
+                throw new IOException("Invalid engine config response");
+        } else if (!graph.path("nodes").isArray()
+            || !graph.path("edges").isArray() || !graph.path("revision").isTextual()) {
+            throw new IOException("Invalid engine graph response");
+        }
         return graph;
     }
 

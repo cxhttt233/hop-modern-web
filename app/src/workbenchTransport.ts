@@ -100,5 +100,21 @@ export async function workbenchFetch(input: string, init: RequestInit = {}): Pro
     },init.signal);
   }
 
+  if (/^\/api\/pipelines\/[^/]+\/config\/read$/.test(input) && init.method?.toUpperCase() === "POST") {
+    let payload: { path?: unknown; expectedRevision?: unknown; nodes?: unknown; edges?: unknown; nodeId?: unknown };
+    try { payload = JSON.parse(String(init.body ?? "{}")); }
+    catch { return jsonError("invalid_request",400); }
+    const selected = parseFilePath(payload.path);
+    if (!selected || typeof payload.expectedRevision !== "string" ||
+        !/^[0-9a-f]{64}$/.test(payload.expectedRevision) ||
+        !Array.isArray(payload.nodes) || !Array.isArray(payload.edges) ||
+        typeof payload.nodeId !== "string" || !payload.nodeId || payload.nodeId.length > 180)
+      return jsonError("invalid_config_request",400);
+    return toWorkbench("config/read", {
+      ...selected, expectedRevision: payload.expectedRevision,
+      nodes: payload.nodes, edges: payload.edges, nodeId: payload.nodeId,
+    },init.signal);
+  }
+
   return jsonError("editing_operation_not_available",501);
 }

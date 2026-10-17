@@ -79,12 +79,16 @@ export function savePipeline(documentId: string): Promise<HopGraphDocument> {
 }
 
 /** Workbench save is owned by its authenticated product API, backed by the independent Modern Hop engine. */
-export async function saveWorkbenchGraph(path: string, document: HopGraphDocument): Promise<HopGraphDocument> {
+export async function saveWorkbenchGraph(
+  path: string, document: HopGraphDocument,
+  configEdits: Record<string, Record<string, unknown>> = {},
+): Promise<HopGraphDocument> {
   const response = await workbenchFetch(`/api/pipelines/${encodeURIComponent(document.id)}/save`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      path, expectedRevision: document.revision, nodes: document.nodes, edges: document.edges,
+      path, expectedRevision: document.revision, nodes: document.nodes,
+      edges: document.edges, configEdits,
     }),
   });
   if (response.status === 409) throw new Error("该流程已被其他窗口或 Hop Web 修改。请重新打开并核对，当前改动未覆盖原文件。");
@@ -105,6 +109,20 @@ async function configResponse(response: Response, action: string): Promise<Trans
     throw new Error(`${action} failed (${response.status})${detail ? `: ${detail}` : ""}`);
   }
   return (await response.json()) as TransformConfigDocument;
+}
+
+export async function readWorkbenchTransformConfig(
+  path: string, graph: HopGraphDocument, nodeId: string,
+): Promise<TransformConfigDocument> {
+  const response = await workbenchFetch(`/api/pipelines/${encodeURIComponent(graph.id)}/config/read`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      path, expectedRevision: graph.revision,
+      nodes: graph.nodes, edges: graph.edges, nodeId,
+    }),
+  });
+  return configResponse(response, "Transform config read");
 }
 
 export async function readPipelineTransformConfig(documentId: string, nodeId: string): Promise<TransformConfigDocument> {

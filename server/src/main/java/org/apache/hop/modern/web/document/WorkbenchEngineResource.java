@@ -7,6 +7,8 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.apache.hop.metadata.serializer.json.ConfigJsonSerializer;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -68,7 +70,7 @@ public final class WorkbenchEngineResource {
     }
     if (request == null || request.xmlBase64() == null || request.xmlBase64().length() > MAX_HPL_BYTES * 2
         || request.id() == null || request.id().length() > 350
-        || !Set.of("open","save").contains(request.operation())) return error(400,"invalid_request");
+        || !Set.of("open","save","config-read").contains(request.operation())) return error(400,"invalid_request");
     try {
       byte[] bytes = Base64.getDecoder().decode(request.xmlBase64());
       if (bytes.length > MAX_HPL_BYTES) return error(413,"pipeline_too_large");
@@ -83,6 +85,31 @@ public final class WorkbenchEngineResource {
           request.nodes().size() > 1000 || request.edges().size() > 3000)
         return error(400,"invalid_graph");
       mergeGraph(pipeline, request.nodes(), request.edges());
+      if ("config-read".equals(request.operation())) {
+        EngineNode node = selectedNode(request, request.nodeId());
+        TransformMeta transform = pipeline.findTransform(node.name());
+        if (transform == null || transform.getTransform() == null)
+          return error(422, "unknown_transform");
+        return Response.ok(new ConfigResponse(
+            node.id(), node.pluginId(),
+            ConfigJsonSerializer.toJson(transform.getTransform(), metadata),
+            AutomaticConfigDescriptor.describe(transform.getTransform().getClass()))).build();
+      }
+      if (request.configEdits() != null) {
+        if (request.configEdits().size() > 100) return error(400,"too_many_configs");
+        for (Map.Entry<String, JsonNode> entry : request.configEdits().entrySet()) {
+          EngineNode node = selectedNode(request, entry.getKey());
+          TransformMeta transform = pipeline.findTransform(node.name());
+          if (transform == null || transform.getTransform() == null ||
+              entry.getValue() == null || !entry.getValue().isObject())
+            return error(400,"invalid_transform_config");
+          @SuppressWarnings({"unchecked", "rawtypes"})
+          ITransformMeta config = (ITransformMeta) ConfigJsonSerializer.fromJson(
+              entry.getValue(), (Class) transform.getTransform().getClass(), metadata);
+          transform.setTransform(config);
+          transform.setChanged();
+        }
+      }
       byte[] updated = pipeline.getXml(variables).getBytes(StandardCharsets.UTF_8);
       if (updated.length > MAX_HPL_BYTES) return error(413,"pipeline_too_large");
       PipelineMeta check = new PipelineMeta(new ByteArrayInputStream(updated), metadata, variables);
@@ -96,6 +123,13 @@ public final class WorkbenchEngineResource {
     } catch (Exception ex) {
       return error(422,"hop_engine_failed");
     }
+  }
+
+  private static EngineNode selectedNode(EngineRequest request, String id) {
+    if (id == null || id.isBlank()) throw new IllegalArgumentException("missing node id");
+    return request.nodes().stream()
+        .filter(n -> n != null && id.equals(n.id()))
+        .findFirst().orElseThrow(() -> new IllegalArgumentException("unknown node"));
   }
 
   private EngineGraph response(String id, PipelineMeta pipeline, String revision, String xml) {
@@ -170,9 +204,20 @@ public final class WorkbenchEngineResource {
     return Response.status(status).entity(Map.of("code",code)).build();
   }
   public record EngineRequest(String operation,String id,String revision,String xmlBase64,
-                              List<EngineNode> nodes,List<EngineEdge> edges) {}
+                              List<EngineNode> nodes,List<EngineEdge> edges,
+                              String nodeId,Map<String,JsonNode> configEdits) {
+    // Compatible with existing in-memory graph checks.
+    public EngineRequest(String operation,String id,String revision,String xmlBase64,
+                         List<EngineNode> nodes,List<EngineEdge> edges) {
+      this(operation,id,revision,xmlBase64,nodes,edges,null,null);
+    }
+  }
+  public record ConfigResponse(String nodeId, String pluginId, JsonNode config,
+                               AutomaticConfigDescriptor.Descriptor descriptor) {}
+  @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
   public record EngineNode(String id,String name,String kind,String pluginId,String pluginType,
                            int x,int y) {}
+  @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
   public record EngineEdge(String id,String source,String target,boolean enabled) {}
   public record EngineGraph(String id,String name,String revision,
                             List<PipelineGraphDocument.Node> nodes,

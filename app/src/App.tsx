@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange, type ReactFlowInstance } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
-import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, saveWorkbenchGraph, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
+import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, readWorkbenchTransformConfig, redoPipelineEdit, savePipeline, saveWorkbenchGraph, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
 import { TRANSFORM_ICONS_A } from "./transformIconsA";
 import { TRANSFORM_ICONS_B } from "./transformIconsB";
@@ -71,6 +71,7 @@ export function App({ initialPath, embedded = false, onRegisterSave, onSaveResul
   const undoRef = useRef<HopGraphDocument[]>([]);
   const redoRef = useRef<HopGraphDocument[]>([]);
   const savingRef = useRef(false);
+  const configEditsRef = useRef<Record<string, Record<string, unknown>>>({});
 
   const applyLocalEdit = useCallback((produce: (current: HopGraphDocument) => HopGraphDocument) => {
     const before = documentRef.current;
@@ -101,6 +102,7 @@ export function App({ initialPath, embedded = false, onRegisterSave, onSaveResul
     documentRef.current = emptyDocument;
     undoRef.current = [];
     redoRef.current = [];
+    configEditsRef.current = {};
     setDocument(emptyDocument);
     setNodes([]);
     setConfigId(undefined);
@@ -223,12 +225,19 @@ export function App({ initialPath, embedded = false, onRegisterSave, onSaveResul
   const openTransformConfig = useCallback((nodeId: string) => {
     if (source.kind !== "server") return;
     if (embedded) {
-      const selected = documentRef.current.nodes.find(item => item.id === nodeId)
-      if (selected) {
-        setConfigError(undefined)
-        setDraftRenameId(nodeId)
-        setDraftRenameText(selected.name)
-      }
+      setConfigLoading(true);
+      setConfigError(undefined);
+      setConfigId(undefined);
+      setServerConfig(undefined);
+      readWorkbenchTransformConfig(pipelinePath, documentRef.current, nodeId)
+        .then(result => {
+          setServerConfig({
+            ...result, config: configEditsRef.current[nodeId] ?? result.config,
+          });
+          setConfigId(nodeId);
+        }).catch((error: unknown) => {
+          setConfigError(error instanceof Error ? error.message : "转换配置读取失败");
+        }).finally(() => setConfigLoading(false));
       return;
     }
     setConfigLoading(true);
@@ -241,11 +250,19 @@ export function App({ initialPath, embedded = false, onRegisterSave, onSaveResul
       setConfigId(undefined);
       setConfigError(error instanceof Error ? error.message : "Transform config read failed");
     }).finally(() => setConfigLoading(false));
-  }, [document.id, source, embedded]);
+  }, [document.id, source, embedded, pipelinePath]);
 
   const applyTransformConfig = useCallback((nodeId: string, value: Record<string, unknown>) => {
     if (source.kind !== "server") return;
     if (!serverConfig || serverConfig.nodeId !== nodeId) return;
+    if (embedded) {
+      configEditsRef.current = { ...configEditsRef.current, [nodeId]: value };
+      setServerConfig(undefined);
+      setConfigId(undefined);
+      setConfigError(undefined);
+      setDirty(true);
+      return;
+    }
     setConfigLoading(true);
     setConfigError(undefined);
     writePipelineTransformConfig(document.id, nodeId, value)
@@ -259,7 +276,7 @@ export function App({ initialPath, embedded = false, onRegisterSave, onSaveResul
         setConfigError(error instanceof Error ? error.message : "Transform config write failed");
       })
       .finally(() => setConfigLoading(false));
-  }, [document.id, serverConfig, source]);
+  }, [document.id, serverConfig, source, embedded]);
 
   const saveDocument = useCallback(() => {
     if (source.kind !== "server" || savingRef.current) return;
@@ -270,15 +287,16 @@ export function App({ initialPath, embedded = false, onRegisterSave, onSaveResul
     savingRef.current = true;
     setConfigError(undefined);
     const operation = embedded
-      ? saveWorkbenchGraph(pipelinePath, documentRef.current)
+      ? saveWorkbenchGraph(pipelinePath, documentRef.current, configEditsRef.current)
       : savePipeline(document.id);
     operation.then((graph) => {
       documentRef.current = graph;
       reconcileGraph(graph);
       undoRef.current = [];
       redoRef.current = [];
+      configEditsRef.current = {};
       setDirty(false);
-      onSaveResult?.({ ok: true, message: "流程已保存至 Hop Web" });
+      onSaveResult?.({ ok: true, message: "流程已保存至 Workbench 的 Hop 项目文件" });
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : "Pipeline save failed";
       setConfigError(message);
@@ -423,6 +441,13 @@ export function App({ initialPath, embedded = false, onRegisterSave, onSaveResul
             ? applyLocalEdit(doc => deleteDraftTransform(doc, nodeId))
             : runGraphCommand(() => deletePipelineTransform(document.id, nodeId)),
           editable: canEdit,
+          rename: (nodeId) => {
+            const selected = documentRef.current.nodes.find(item => item.id === nodeId);
+            if (embedded && selected) {
+              setDraftRenameId(nodeId);
+              setDraftRenameText(selected.name);
+            }
+          },
           draftMode: embedded,
           loading: configLoading,
         }}>
@@ -447,7 +472,7 @@ export function App({ initialPath, embedded = false, onRegisterSave, onSaveResul
             <label htmlFor="hop-draft-rename">转换名称</label>
             <input id="hop-draft-rename" autoFocus maxLength={180} value={draftRenameText}
               onChange={(event) => setDraftRenameText(event.target.value)} />
-            <small>仅修改本地草稿，尚不会写回 .hpl</small>
+            <small>修改会随顶部“保存”一起写入 .hpl</small>
             <div>
               <button type="button" onClick={() => setDraftRenameId(undefined)}>取消</button>
               <button type="submit" disabled={!draftRenameText.trim()}>应用</button>
