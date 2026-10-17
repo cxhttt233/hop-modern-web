@@ -159,11 +159,6 @@ export function App() {
     });
   }, [paletteQuery]);
 
-  const deleteSelected = useCallback(() => {
-    if (source.kind !== "server" || !selectedId) return;
-    runGraphCommand(() => deletePipelineTransform(document.id, selectedId));
-  }, [document.id, runGraphCommand, selectedId, source]);
-
   const connectNodes = useCallback((connection: Connection) => {
     if (source.kind !== "server" || !connection.source || !connection.target) return;
     runGraphCommand(() => connectPipelineTransforms(document.id, connection.source, connection.target));
@@ -212,7 +207,6 @@ export function App() {
   const selected = nodes.find((node) => node.id === selectedId);
   const configured = nodes.find((node) => node.id === configId);
   const metadata = connections.find((connection) => connection.name === metadataName);
-  const canConfigure = Boolean(selected);
   const isRealGraph = source.kind === "server";
   const sourceLabel = source.kind === "server" ? "实际流程" : source.kind === "loading" ? "正在加载…" : "开发预览";
   const previewError = source.kind === "sample" ? source.reason : undefined;
@@ -223,17 +217,19 @@ export function App() {
         <div><strong>Hop 流程设计器</strong><span>{document.name}</span><span className="preview-badge" title={isRealGraph ? source.path : "Development fallback; open a server-visible .hpl path or configure VITE_HOP_PIPELINE_PATH."}>{sourceLabel}</span></div>
         <form className="pipeline-open" onSubmit={(event) => { event.preventDefault(); const path = pipelinePathDraft.trim(); if (!path) return; if (path === pipelinePath) setPipelineOpenRevision((current) => current + 1); else setPipelinePath(path); }}>
           <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="服务器上的 .hpl 文件路径" />
-          <button type="submit" disabled={!pipelinePathDraft.trim() || source.kind === "loading"}>打开流程</button>
+          <button type="submit" aria-label="Open pipeline" disabled={!pipelinePathDraft.trim() || source.kind === "loading"}>打开流程</button>
         </form>
         <div className="selection-actions">
           <small>{selected ? String(selected.data.title) : "选择转换节点"}</small>
           <button type="button" onClick={() => { const connection = selected ? tableInputConfigs[selected.id]?.connection : undefined; setMetadataName((typeof connection === "string" ? connection : undefined) ?? connections[0]?.name); }}>连接（示例）</button>
           
-          {isRealGraph && selected && <button type="button" onClick={deleteSelected}>删除</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => savePipeline(document.id))}>保存</button>}
-          {canConfigure && selected && <button type="button" disabled={configLoading} onClick={() => openTransformConfig(selected.id)}>配置</button>}
+          {isRealGraph && <button type="button" aria-label="Add Table Input" onClick={() => {
+            const nextX = Math.max(160, ...document.nodes.map((node) => node.x + 180));
+            addTransformAt("TableInput", nextX, 160);
+          }}>添加表输入</button>}
+          {isRealGraph && <button type="button" aria-label="Undo" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>}
+          {isRealGraph && <button type="button" aria-label="Redo" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>}
+          {isRealGraph && <button type="button" aria-label="Save" onClick={() => runGraphCommand(() => savePipeline(document.id))}>保存</button>}
         </div>
       </header>
       <section className="workspace">
