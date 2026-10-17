@@ -16,6 +16,8 @@ jobs:
         run: npm install
       - name: Typecheck
         run: npm run typecheck
+      - name: Verify standalone editor UX and graph operations
+        run: node --test app/test/draftGraph.test.mjs app/test/standaloneBackport.test.mjs
       - name: Build frontend
         run: npm run build
 
