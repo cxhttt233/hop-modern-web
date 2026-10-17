@@ -215,6 +215,7 @@ export function App() {
   const canConfigure = Boolean(selected);
   const isRealGraph = source.kind === "server";
   const sourceLabel = source.kind === "server" ? "实际流程" : source.kind === "loading" ? "正在加载…" : "开发预览";
+  const previewError = source.kind === "sample" ? source.reason : undefined;
 
   return (
     <main className="shell">
@@ -274,8 +275,8 @@ export function App() {
         </aside>
         <div className="editor-canvas">
           {source.kind !== "server" &&
-            <div className={"preview-note" + (source.reason ? " error-note" : "")} role={source.reason ? "alert" : "status"}>
-              {source.kind === "loading" ? `正在打开 ${source.path}` : source.reason ? `流程打开失败：${source.reason}` : "打开服务器上的 .hpl 文件后开始编辑"}
+            <div className={"preview-note" + (previewError ? " error-note" : "")} role={previewError ? "alert" : "status"}>
+              {source.kind === "loading" ? `正在打开 ${source.path}` : previewError ? `流程打开失败：${previewError}` : "打开服务器上的 .hpl 文件后开始编辑"}
             </div>}
           {isRealGraph && document.nodes.length === 0 &&
             <div className="empty-graph-state" role="status">
