@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange, type ReactFlowInstance } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
 import { DatabaseConnectionPanel, type DatabaseConnection } from "./editor/DatabaseConnectionPanel";
 import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
+import { TransformNode, TransformNodeActionsContext } from "./editor/TransformNode";
+import { CATEGORY_ORDER, P0_TRANSFORMS, transformMeta, transformPrimaryName, transformSecondaryName } from "./transformCatalog";
+
+const NODE_TYPES = { transform: TransformNode };
 
 const sample: HopGraphDocument = {
   id: "sample", name: "Pipeline", revision: "0",
@@ -19,7 +23,21 @@ const sample: HopGraphDocument = {
 };
 
 function graphNodes(document: HopGraphDocument): Node[] {
-  return document.nodes.map((node) => ({ id: node.id, position: { x: node.x, y: node.y }, data: { label: node.name, pluginId: node.pluginId } }));
+  return document.nodes.map((node) => {
+    const meta = transformMeta(node.pluginId ?? "Unknown");
+    return {
+      id: node.id,
+      type: "transform",
+      className: "hop-transform-node category-" + meta.category,
+      position: { x: node.x, y: node.y },
+      data: {
+        pluginId: node.pluginId,
+        title: transformPrimaryName(node),
+        secondary: transformSecondaryName(node),
+        glyph: meta.glyph,
+      },
+    };
+  });
 }
 
 const initialConnections: DatabaseConnection[] = [
@@ -43,12 +61,22 @@ export function App() {
   const [pipelinePath, setPipelinePath] = useState(initialPipelinePath);
   const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
 
   useEffect(() => {
     if (!pipelinePath) return;
+    // Never show the last opened document after a different file fails to load.
+    setNodes([]);
+    setDocument({ id: "", name: "", revision: "", nodes: [], edges: [] });
+    setSelectedId(undefined);
+    setConfigId(undefined);
+    setServerConfig(undefined);
+    setConfigError(undefined);
     const controller = new AbortController();
     setSource({ kind: "loading", path: pipelinePath });
     openPipelineGraph(pipelinePath, controller.signal).then((graph) => {
+      if (controller.signal.aborted) return;
       setDocument(graph);
       setNodes(graphNodes(graph));
       setSelectedId(undefined);
@@ -58,9 +86,9 @@ export function App() {
       setSource({ kind: "server", path: pipelinePath });
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
-      setDocument(sample);
-      setNodes(graphNodes(sample));
-      setSource({ kind: "sample", reason: error instanceof Error ? error.message : "Pipeline open failed" });
+      setDocument({ id: "", name: "", revision: "", nodes: [], edges: [] });
+      setNodes([]);
+      setSource({ kind: "sample", reason: error instanceof Error ? error.message : "流程打开失败" });
     });
     return () => controller.abort();
   }, [pipelinePath, pipelineOpenRevision]);
@@ -101,19 +129,35 @@ export function App() {
     });
   }, [document, reconcileGraph, source]);
 
-  const addTransform = useCallback(() => {
+  // Reuse the authoritative Modern Web semantic command API: no Workbench transport.
+  const addTransformAt = useCallback((pluginId: string, x: number, y: number) => {
     if (source.kind !== "server") return;
-    let index = document.nodes.length + 1;
-    let nodeId = `new-transform-${index}`;
-    while (document.nodes.some((node) => node.id === nodeId)) nodeId = `new-transform-${++index}`;
-    const nextX = Math.max(160, ...document.nodes.map((node) => node.x + 180));
-    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId: "TableInput", x: nextX, y: 160 }));
+    const stem = pluginId.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+      .replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
+    let index = 1;
+    let nodeId = `${stem}-${index}`;
+    while (document.nodes.some((node) => node.id === nodeId)) nodeId = `${stem}-${++index}`;
+    runGraphCommand(() => addPipelineTransform(document.id, {
+      nodeId, pluginId, x: Math.round(x), y: Math.round(y),
+    }));
   }, [document, runGraphCommand, source]);
 
-  const deleteSelected = useCallback(() => {
-    if (source.kind !== "server" || !selectedId) return;
-    runGraphCommand(() => deletePipelineTransform(document.id, selectedId));
-  }, [document.id, runGraphCommand, selectedId, source]);
+  const onCanvasDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    if (source.kind !== "server" || !flow) return;
+    const pluginId = event.dataTransfer.getData("application/x-hop-transform");
+    if (!P0_TRANSFORMS.includes(pluginId as (typeof P0_TRANSFORMS)[number])) return;
+    const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    addTransformAt(pluginId, point.x, point.y);
+  }, [addTransformAt, flow, source]);
+
+  const filteredTransforms = useMemo(() => {
+    const query = paletteQuery.trim().toLowerCase();
+    return P0_TRANSFORMS.filter((pluginId) => {
+      const meta = transformMeta(pluginId);
+      return !query || pluginId.toLowerCase().includes(query) || meta.name.toLowerCase().includes(query);
+    });
+  }, [paletteQuery]);
 
   const connectNodes = useCallback((connection: Connection) => {
     if (source.kind !== "server" || !connection.source || !connection.target) return;
@@ -163,35 +207,107 @@ export function App() {
   const selected = nodes.find((node) => node.id === selectedId);
   const configured = nodes.find((node) => node.id === configId);
   const metadata = connections.find((connection) => connection.name === metadataName);
-  const canConfigure = Boolean(selected);
   const isRealGraph = source.kind === "server";
-  const sourceLabel = source.kind === "server" ? "Server graph" : source.kind === "loading" ? "Loading real pipeline…" : "Development sample";
+  const sourceLabel = source.kind === "server" ? "实际流程" : source.kind === "loading" ? "正在加载…" : "开发预览";
+  const previewError = source.kind === "sample" ? source.reason : undefined;
 
   return (
     <main className="shell">
-      <header>
-        <div><strong>Hop Modern Web</strong><span>{document.name}</span><span className="preview-badge" title={isRealGraph ? source.path : "Development fallback; open a server-visible .hpl path or configure VITE_HOP_PIPELINE_PATH."}>{sourceLabel}</span></div>
+      <header className="modern-topbar">
+        <div><strong>Hop 流程设计器</strong><span>{document.name}</span><span className="preview-badge" title={isRealGraph ? source.path : "Development fallback; open a server-visible .hpl path or configure VITE_HOP_PIPELINE_PATH."}>{sourceLabel}</span></div>
         <form className="pipeline-open" onSubmit={(event) => { event.preventDefault(); const path = pipelinePathDraft.trim(); if (!path) return; if (path === pipelinePath) setPipelineOpenRevision((current) => current + 1); else setPipelinePath(path); }}>
-          <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="Server-visible .hpl path" />
-          <button type="submit" disabled={!pipelinePathDraft.trim() || source.kind === "loading"}>Open pipeline</button>
+          <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="服务器上的 .hpl 文件路径" />
+          <button type="submit" aria-label="Open pipeline" disabled={!pipelinePathDraft.trim() || source.kind === "loading"}>打开流程</button>
         </form>
         <div className="selection-actions">
-          <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
-          <button type="button" onClick={() => { const connection = selected ? tableInputConfigs[selected.id]?.connection : undefined; setMetadataName((typeof connection === "string" ? connection : undefined) ?? connections[0]?.name); }}>Connections</button>
-          {isRealGraph && <button type="button" onClick={addTransform}>Add Table Input</button>}
-          {isRealGraph && selected && <button type="button" onClick={deleteSelected}>Delete</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>Undo</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>Redo</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => savePipeline(document.id))}>Save</button>}
-          {canConfigure && selected && <button type="button" disabled={configLoading} onClick={() => openTransformConfig(selected.id)}>Configure</button>}
+          <small>{selected ? String(selected.data.title) : "选择转换节点"}</small>
+          <button type="button" onClick={() => { const connection = selected ? tableInputConfigs[selected.id]?.connection : undefined; setMetadataName((typeof connection === "string" ? connection : undefined) ?? connections[0]?.name); }}>连接（示例）</button>
+          
+          {isRealGraph && <button type="button" aria-label="Add Table Input" onClick={() => {
+            const nextX = Math.max(160, ...document.nodes.map((node) => node.x + 180));
+            addTransformAt("TableInput", nextX, 160);
+          }}>添加表输入</button>}
+          {isRealGraph && <button type="button" aria-label="Undo" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>}
+          {isRealGraph && <button type="button" aria-label="Redo" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>}
+          {isRealGraph && <button type="button" aria-label="Save" onClick={() => runGraphCommand(() => savePipeline(document.id))}>保存</button>}
         </div>
       </header>
       <section className="workspace">
-        {source.kind !== "server" && <div className="preview-note">{source.kind === "loading" ? `Opening ${source.path}` : source.reason ? `Development sample fallback · ${source.reason}` : "Walking skeleton · open a server-visible .hpl above or set VITE_HOP_PIPELINE_PATH"}</div>}
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={isRealGraph} panOnDrag zoomOnScroll zoomOnPinch>
-          <MiniMap /><Controls /><Background />
-        </ReactFlow>
-        {configError && <div className="preview-note" role="alert">{configError}</div>}
+        <aside className="transform-palette" aria-label="转换组件库">
+          <div className="palette-heading">
+            <strong>转换组件</strong>
+            <small>拖拽到画布</small>
+            <span>{P0_TRANSFORMS.length}</span>
+          </div>
+          <label className="palette-search">
+            <span className="sr-only">搜索转换</span>
+            <input aria-label="搜索转换" placeholder="搜索组件名称或 ID…" value={paletteQuery}
+              onChange={(event) => setPaletteQuery(event.target.value)} />
+          </label>
+          <div className="transform-list">
+            {CATEGORY_ORDER.map((category) => {
+              const items = filteredTransforms.filter((id) => transformMeta(id).category === category.id);
+              if (!items.length) return null;
+              return <section className="transform-group" key={category.id}>
+                <h3>{category.label} <small>{items.length}</small></h3>
+                {items.map((pluginId) => {
+                  const meta = transformMeta(pluginId);
+                  return <button type="button" key={pluginId} className="transform-palette-item"
+                    draggable={isRealGraph}
+                    disabled={!isRealGraph}
+                    title={meta.name + " · " + pluginId}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData("application/x-hop-transform", pluginId);
+                      event.dataTransfer.effectAllowed = "copy";
+                    }}>
+                    <span className={"palette-icon category-" + meta.category}>{meta.glyph}</span>
+                    <span className="palette-copy"><strong>{meta.name}</strong><small>{pluginId}</small></span>
+                    <span className="palette-grip" aria-hidden="true">⋮⋮</span>
+                  </button>;
+                })}
+              </section>;
+            })}
+          </div>
+        </aside>
+        <div className="editor-canvas">
+          {source.kind !== "server" &&
+            <div className={"preview-note" + (previewError ? " error-note" : "")} role={previewError ? "alert" : "status"}>
+              {source.kind === "loading" ? `正在打开 ${source.path}` : previewError ? `流程打开失败：${previewError}` : "打开服务器上的 .hpl 文件后开始编辑"}
+            </div>}
+          {isRealGraph && document.nodes.length === 0 &&
+            <div className="empty-graph-state" role="status">
+              <span aria-hidden="true">◇</span>
+              <strong>此流程暂无转换节点</strong>
+              <p>从左侧组件库拖入转换，开始设计流程。</p>
+            </div>}
+          <TransformNodeActionsContext.Provider value={{
+            configure: openTransformConfig,
+            remove: (nodeId) => runGraphCommand(() => deletePipelineTransform(document.id, nodeId)),
+            editable: isRealGraph,
+            loading: configLoading,
+          }}>
+            <ReactFlow nodeTypes={NODE_TYPES} nodes={nodes} edges={edges} onInit={setFlow}
+              onNodesChange={onNodesChange}
+              onNodeClick={(_, node) => setSelectedId(node.id)}
+              onNodeDoubleClick={(_, node) => openTransformConfig(node.id)}
+              onNodeDragStop={onNodeDragStop}
+              onConnect={connectNodes}
+              onPaneClick={() => setSelectedId(undefined)}
+              onDragOver={(event) => { if (isRealGraph) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
+              onDrop={onCanvasDrop}
+              fitView fitViewOptions={{ padding: 0.24, maxZoom: 1 }}
+              maxZoom={1.5} nodesDraggable={isRealGraph} nodesConnectable={isRealGraph}
+              panOnDrag zoomOnScroll zoomOnPinch>
+              {nodes.length > 0 && <MiniMap pannable zoomable />}
+              {nodes.length > 0 && <Controls />}
+              <Background gap={24} size={1} />
+            </ReactFlow>
+          </TransformNodeActionsContext.Provider>
+          {configError && <div className="preview-note error-note" role="alert">
+            {configError}
+            <button type="button" aria-label="关闭提示" onClick={() => setConfigError(undefined)}>×</button>
+          </div>}
+        </div>
         {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
           <GenericConfigPanel
             descriptor={serverConfig.descriptor}

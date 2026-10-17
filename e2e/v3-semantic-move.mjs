@@ -28,7 +28,7 @@ try {
   if (!openResponse.ok()) throw new Error(`Pipeline open failed with ${openResponse.status()}`);
   const opened = await openResponse.json();
 
-  await page.getByText("Server graph").waitFor({ state: "visible" });
+  await page.getByText("实际流程").waitFor({ state: "visible" });
   const source = page.locator('.react-flow__node[data-id="source"]');
   await source.waitFor({ state: "visible" });
 

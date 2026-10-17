@@ -10,7 +10,7 @@ try {
   await page.goto("http://127.0.0.1:5173", { waitUntil: "networkidle" });
   await page.getByLabel("Server-visible pipeline path").fill(pipelinePath);
   await page.getByRole("button", { name: "Open pipeline" }).click();
-  await page.getByText("Server graph").waitFor({ state: "visible" });
+  await page.getByText("实际流程").waitFor({ state: "visible" });
   const node = page.locator('.react-flow__node[data-id="table-input"]');
   await node.waitFor({ state: "visible" });
   await node.click();
