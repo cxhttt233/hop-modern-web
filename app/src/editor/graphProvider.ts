@@ -1,5 +1,6 @@
 import type { HopGraphDocument } from "@hop-modern/contracts";
 import type { ConfigDescriptor } from "./GenericConfigPanel";
+import { workbenchFetch } from "../workbenchTransport";
 
 export type GraphSource =
   | { kind: "sample"; reason?: string }
@@ -8,14 +9,18 @@ export type GraphSource =
 
 async function graphResponse(response: Response, action: string): Promise<HopGraphDocument> {
   if (!response.ok) {
+    if (response.status === 401) throw new Error("Workbench 登录会话已过期。请重新登录工作台后再打开流程。");
+    if (response.status === 403) throw new Error("当前 Workbench 账号缺少流程访问权限，请检查用户角色。");
+    if (response.status === 404) throw new Error("找不到该流程文件，请刷新项目文件列表。");
+    if (response.status === 400) throw new Error("项目名称或文件路径无效。");
     const detail = await response.text().catch(() => "");
-    throw new Error(`${action} failed (${response.status})${detail ? `: ${detail}` : ""}`);
+    throw new Error(action + " failed (" + response.status + ")" + (detail ? ": " + detail : ""));
   }
   return (await response.json()) as HopGraphDocument;
 }
 
 export async function openPipelineGraph(path: string, signal?: AbortSignal): Promise<HopGraphDocument> {
-  const response = await fetch("/api/pipelines/open", {
+  const response = await workbenchFetch("/api/pipelines/open", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ path }),
@@ -25,7 +30,7 @@ export async function openPipelineGraph(path: string, signal?: AbortSignal): Pro
 }
 
 export async function movePipelineTransforms(documentId: string, nodeIds: string[], dx: number, dy: number): Promise<HopGraphDocument> {
-  const response = await fetch(`/api/pipelines/${encodeURIComponent(documentId)}/move`, {
+  const response = await workbenchFetch(`/api/pipelines/${encodeURIComponent(documentId)}/move`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ nodeIds, dx: Math.round(dx), dy: Math.round(dy) }),
@@ -41,7 +46,7 @@ export interface AddTransformRequest {
 }
 
 async function editPipelineGraph(documentId: string, action: string, body?: unknown): Promise<HopGraphDocument> {
-  const response = await fetch(`/api/pipelines/${encodeURIComponent(documentId)}/${action}`, {
+  const response = await workbenchFetch(`/api/pipelines/${encodeURIComponent(documentId)}/${action}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -73,6 +78,20 @@ export function savePipeline(documentId: string): Promise<HopGraphDocument> {
   return editPipelineGraph(documentId, "save");
 }
 
+/** Workbench save is owned by its authenticated product API, backed by the independent Modern Hop engine. */
+export async function saveWorkbenchGraph(path: string, document: HopGraphDocument): Promise<HopGraphDocument> {
+  const response = await workbenchFetch(`/api/pipelines/${encodeURIComponent(document.id)}/save`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      path, expectedRevision: document.revision, nodes: document.nodes, edges: document.edges,
+    }),
+  });
+  if (response.status === 409) throw new Error("该流程已被其他窗口或 Hop Web 修改。请重新打开并核对，当前改动未覆盖原文件。");
+  if (response.status === 403) throw new Error("当前 Workbench 账号缺少流程编辑权限，请检查工作台角色。");
+  return graphResponse(response, "Pipeline save");
+}
+
 export interface TransformConfigDocument {
   nodeId: string;
   pluginId: string;
@@ -89,7 +108,7 @@ async function configResponse(response: Response, action: string): Promise<Trans
 }
 
 export async function readPipelineTransformConfig(documentId: string, nodeId: string): Promise<TransformConfigDocument> {
-  const response = await fetch(`/api/pipelines/${encodeURIComponent(documentId)}/config/read`, {
+  const response = await workbenchFetch(`/api/pipelines/${encodeURIComponent(documentId)}/config/read`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ nodeId }),
@@ -102,7 +121,7 @@ export async function writePipelineTransformConfig(
   nodeId: string,
   config: Record<string, unknown>,
 ): Promise<TransformConfigDocument> {
-  const response = await fetch(`/api/pipelines/${encodeURIComponent(documentId)}/config/write`, {
+  const response = await workbenchFetch(`/api/pipelines/${encodeURIComponent(documentId)}/config/write`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ nodeId, config }),

@@ -60,6 +60,9 @@ public final class ModernWebServer {
         .register(openResource)
         .register(configResource)
         .register(editResource)
+        // Workbench's authenticated Spring API invokes this stateless Hop
+        // engine with a server-only token, independent from Hop Web images.
+        .register(new org.apache.hop.modern.web.document.WorkbenchEngineResource())
         .register(JacksonFeature.class);
   }
 }
