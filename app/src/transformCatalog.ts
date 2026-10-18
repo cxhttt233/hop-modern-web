@@ -54,14 +54,18 @@ export function transformMeta(pluginId: string) {
 type GraphNode = HopGraphDocument["nodes"][number];
 
 export function transformPrimaryName(node: GraphNode): string {
+  // Hop transform names are user-authored identities, not just plugin types.
+  // Show them prominently when they differ from the generated node ID.
+  const name = (node.name ?? "").trim();
+  if (name && name !== node.id) return name;
   if (node.pluginId === "Dummy" && node.id === "source") return "输入";
   if (node.pluginId === "Dummy" && node.id === "sink") return "输出";
   return transformMeta(node.pluginId ?? "Unknown").name;
 }
 
 export function transformSecondaryName(node: GraphNode): string {
-  const name = (node.name ?? "").trim();
-  const generated = !name || name === node.id || /-\d+$/.test(name);
-  // Preserve a user-authored Hop name, but keep localized type primary.
-  return generated || name === transformPrimaryName(node) ? (node.pluginId ?? "Unknown") : name;
+  const typeName = transformMeta(node.pluginId ?? "Unknown").name;
+  // Keep the type readable in Chinese beneath a user-defined Hop name.
+  // For generated names, expose the technical plugin ID as a secondary cue.
+  return transformPrimaryName(node) === typeName ? (node.pluginId ?? "Unknown") : typeName;
 }
