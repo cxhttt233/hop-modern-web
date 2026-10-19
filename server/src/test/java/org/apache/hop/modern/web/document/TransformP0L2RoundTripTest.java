@@ -114,6 +114,74 @@ class TransformP0L2RoundTripTest {
         + " enums=" + nestedEnums + " listElements=" + listElements);
   }
 
+
+  @Test
+  void checkSumEnumCodesSurviveConfigWriteAndRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "CheckSum");
+    assertNotNull(plugin, "production CheckSum plugin missing");
+
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    Property checksumType = property(descriptor, "checksumtype");
+    Property resultType = property(descriptor, "resultType");
+    assertEquals(Shape.ENUM, checksumType.shape());
+    assertEquals(Shape.ENUM, resultType.shape());
+    assertTrue(checksumType.storeWithCode());
+    assertTrue(resultType.storeWithCode());
+    assertTrue(checksumType.options().stream().anyMatch(
+        o -> o.label().equals("SHA256") && o.value().equals("SHA-256")));
+    assertTrue(resultType.options().stream().anyMatch(
+        o -> o.label().equals("HEXADECIMAL") && o.value().equals("hexadecimal")));
+
+    org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider provider =
+        new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider();
+    org.apache.hop.core.variables.Variables variables =
+        new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("checksum-enum-roundtrip.hpl");
+    org.apache.hop.pipeline.PipelineMeta pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("checksum-enum-roundtrip");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "CheckSum", "checksum-node", meta));
+    store.save(hpl, pipeline);
+    org.apache.hop.pipeline.PipelineMeta loaded = store.open(hpl);
+
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("checksum-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    jakarta.ws.rs.core.Response read = resource.read(
+        "checksum-doc", new PipelineConfigResource.ReadRequest("checksum-node"));
+    assertEquals(200, read.getStatus());
+    PipelineConfigResource.ConfigResponse initial =
+        (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals("CRC32", initial.config().path("checksumtype").asText());
+    assertEquals("string", initial.config().path("resultType").asText());
+
+    com.fasterxml.jackson.databind.node.ObjectNode changed =
+        ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("checksumtype", "SHA-256");
+    changed.put("resultType", "hexadecimal");
+    changed.put("separator", "|雪<&>");
+    jakarta.ws.rs.core.Response write = resource.write(
+        "checksum-doc", new PipelineConfigResource.WriteRequest("checksum-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    org.apache.hop.pipeline.PipelineMeta diskReopened = store.open(hpl);
+    org.apache.hop.pipeline.transform.TransformMeta diskTransform =
+        diskReopened.findTransform("checksum-node");
+    assertNotNull(diskTransform);
+    com.fasterxml.jackson.databind.JsonNode diskJson =
+        org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+            diskTransform.getTransform(), provider);
+    assertEquals("SHA-256", diskJson.path("checksumtype").asText());
+    assertEquals("hexadecimal", diskJson.path("resultType").asText());
+    assertEquals("|雪<&>", diskJson.path("separator").asText());
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
