@@ -78,6 +78,13 @@ public final class PipelineConfigResource {
       if (transform == null || transform.getTransform() == null) {
         return error(422, "unknown_transform", "transform was not found");
       }
+      // Hop's SetVariable scope is a closed code set, although its metadata field is String.
+      // Reject invalid codes before replacing the live transform: runtime otherwise silently
+      // skips the requested parent/JVM scope while still logging a successful assignment.
+      if ("SetVariable".equals(transform.getTransformPluginId())
+          && !validSetVariableScopes(request.config())) {
+        return error(422, "invalid_config", "unsupported SetVariable variable_type scope");
+      }
       try {
         ITransformMeta decoded = decode(request.config(), transform.getTransform().getClass());
         // Validate that the complete response can be encoded before mutating live Hop metadata.
@@ -110,6 +117,24 @@ public final class PipelineConfigResource {
   private ITransformMeta decode(JsonNode config, Class<?> type) throws HopException {
     Object decoded = ConfigJsonSerializer.fromJson(config, (Class) type, metadataProvider);
     return (ITransformMeta) decoded;
+  }
+
+  private static boolean validSetVariableScopes(JsonNode config) {
+    JsonNode entries = config.path("fields").path("field");
+    if (entries.isMissingNode()) return true;
+    if (!entries.isArray()) return false;
+    for (JsonNode entry : entries) {
+      JsonNode type = entry.path("variable_type");
+      if (!type.isTextual()) return false;
+      String code = type.textValue();
+      if (!("JVM".equals(code)
+          || "PARENT_WORKFLOW".equals(code)
+          || "GP_WORKFLOW".equals(code)
+          || "ROOT_WORKFLOW".equals(code))) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private static boolean blank(String value) {
