@@ -136,6 +136,31 @@ export function App() {
     runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId, x: Math.round(x), y: Math.round(y) }));
   }, [document, runGraphCommand, source]);
 
+  // Palette buttons must work with mouse clicks and keyboard activation too:
+  // a drag gesture still uses the exact same authoritative /edit/add endpoint.
+  const addTransformFromPalette = useCallback((pluginId: string) => {
+    if (source.kind !== "server" || !flow) return;
+    const bounds = window.document.querySelector(".react-flow")?.getBoundingClientRect();
+    if (!bounds || !bounds.width || !bounds.height) return;
+    const center = flow.screenToFlowPosition({
+      x: bounds.left + bounds.width / 2,
+      y: bounds.top + bounds.height / 2,
+    });
+    // Prefer a free visible position instead of stacking repeated clicks.
+    const offsets = [
+      [0, 0], [-190, 0], [190, 0],
+      [0, -110], [-190, -110], [190, -110],
+      [0, 110], [-190, 110], [190, 110],
+    ];
+    const candidate = offsets.map(([dx, dy]) => ({
+      x: Math.round(center.x + dx - 88),
+      y: Math.round(center.y + dy - 32),
+    })).find(({ x, y }) => !document.nodes.some((node) =>
+      Math.abs(node.x - x) < 170 && Math.abs(node.y - y) < 80));
+    const position = candidate ?? { x: Math.round(center.x - 88), y: Math.round(center.y - 32) };
+    addTransformAt(pluginId, position.x, position.y);
+  }, [addTransformAt, document.nodes, flow, source]);
+
   const onPaletteDragStart = useCallback((event: React.DragEvent, pluginId: string) => {
     event.dataTransfer.setData("application/x-hop-transform", pluginId);
     event.dataTransfer.effectAllowed = "copy";
@@ -293,7 +318,7 @@ export function App() {
             <div className="palette-heading">
               <div>
                 <strong>转换组件</strong>
-                <small>拖到画布中使用</small>
+                <small>拖动放置，或点击添加</small>
               </div>
               <span>{P0_TRANSFORMS.length}</span>
             </div>
@@ -315,7 +340,7 @@ export function App() {
                       {items.map((pluginId) => {
                         const meta = transformMeta(pluginId);
                         return (
-                          <button key={pluginId} type="button" aria-label={pluginId} draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)} title={`${meta.name} · ${pluginId}`}>
+                          <button key={pluginId} type="button" aria-label={pluginId} draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)} onClick={() => addTransformFromPalette(pluginId)} title={`${meta.name} · ${pluginId} · 点击添加或拖动放置`}>
                             <span className={`palette-icon category-${meta.category}`}>{TRANSFORM_ICONS[pluginId] ? <img src={TRANSFORM_ICONS[pluginId]} alt="" /> : meta.glyph}</span>
                             <span className="palette-item-copy">
                               <strong>{meta.name}</strong>
