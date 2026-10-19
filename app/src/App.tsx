@@ -155,7 +155,10 @@ export function App() {
     if (!query) return [...P0_TRANSFORMS];
     return P0_TRANSFORMS.filter((pluginId) => {
       const meta = transformMeta(pluginId);
-      return pluginId.toLowerCase().includes(query) || meta.name.toLowerCase().includes(query);
+      const category = CATEGORY_ORDER.find((entry) => entry.id === meta.category);
+      return pluginId.toLowerCase().includes(query)
+        || meta.name.toLowerCase().includes(query)
+        || Boolean(category?.label.toLowerCase().includes(query));
     });
   }, [paletteQuery]);
 
