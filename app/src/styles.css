@@ -586,3 +586,63 @@ button { cursor: pointer; }
   .canvas-chrome { left: 236px; }
   .transform-palette { width: 220px; }
 }
+
+/* Keep the actual editor usable at the 760px review viewport. The Palette
+   remains searchable/draggable, while the document identity gets its own row. */
+@media (max-width: 800px) {
+  .shell { grid-template-rows: 88px minmax(0, 1fr); }
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 48px 40px;
+    gap: 0 8px;
+    padding: 0 12px;
+  }
+  .product-brand { grid-column: 1; grid-row: 1; }
+  .editor-actions { grid-column: 2; grid-row: 1; gap: 4px; }
+  .editor-actions button { padding: 6px 8px; }
+  .file-identity {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: start;
+    max-width: 100%;
+    padding: 0;
+  }
+  .file-identity strong { max-width: min(70vw, 360px); }
+  .pipeline-open { top: 50px; right: 8px; width: min(430px, calc(100vw - 16px)); }
+  .workspace { grid-template-columns: 184px minmax(0, 1fr); }
+  .transform-palette { width: 184px; }
+  .palette-heading { padding: 12px 10px 8px; }
+  .palette-search { margin: 0 8px 8px; }
+  .transform-list { padding: 0 5px 12px; }
+  .transform-items button {
+    grid-template-columns: 26px minmax(0, 1fr) 12px;
+    gap: 6px;
+    padding: 5px;
+  }
+  .palette-icon { width: 26px; height: 26px; }
+  .palette-icon img { width: 19px; height: 19px; }
+  .canvas-chrome { top: 8px; left: 196px; }
+  .preview-note {
+    left: calc(184px + (100% - 184px) / 2);
+    max-width: calc(100vw - 212px);
+  }
+  .config-panel { width: min(420px, calc(100% - 184px)); padding: 14px; }
+}
+
+/* On narrow handsets, prioritize controls and let configuration use the full
+   viewport rather than squeezing form fields into the remaining canvas strip. */
+@media (max-width: 600px) {
+  .shell { grid-template-rows: 112px minmax(0, 1fr); }
+  .topbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 36px 38px 38px;
+  }
+  .product-brand { grid-column: 1; grid-row: 1; }
+  .editor-actions { grid-column: 1; grid-row: 2; justify-self: start; }
+  .file-identity { grid-column: 1; grid-row: 3; }
+  .workspace { grid-template-columns: 152px minmax(0, 1fr); }
+  .transform-palette { width: 152px; }
+  .canvas-chrome { left: 162px; }
+  .preview-note { left: 50%; max-width: calc(100vw - 24px); }
+  .config-panel { width: 100%; }
+}
