@@ -104,6 +104,48 @@ class WorkflowHttpBoundaryTest {
     }
   }
 
+  @Test void queuedWorkflowStartTimeReflectsWorkerStartOverHttp() throws Exception {
+    var releaseWorker = new java.util.concurrent.CountDownLatch(1);
+    var occupied = new java.util.concurrent.CountDownLatch(1);
+    var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+    executor.submit(() -> {
+      occupied.countDown();
+      try {
+        if (!releaseWorker.await(15, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("test worker gate timed out");
+        }
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    });
+    try {
+      assertTrue(occupied.await(5, TimeUnit.SECONDS));
+      try (WorkflowHttpFixture f = new WorkflowHttpFixture(root,
+          new WorkflowExecutionAdapter(executor, () -> "start-time-test-id"))) {
+        f.writeWorkflow("start-time.hwf", false);
+        var opened = f.open("start-time.hwf", null);
+        String url = "api/v2/documents/" + opened.json().path("docId").asText() + "/executions";
+        var response = f.post(url, null, opened.cookie());
+        assertEquals(202, response.statusCode(), response::body);
+        var accepted = WorkflowHttpFixture.JSON.readTree(response.body());
+        assertTrue(accepted.path("startTime").isNull(),
+            "queued workflow has not started in Hop yet");
+        String id = accepted.path("id").asText();
+        var queued = WorkflowHttpFixture.JSON.readTree(
+            f.get("api/v2/executions/" + id, opened.cookie()).body());
+        assertEquals("starting", queued.path("state").asText());
+        assertTrue(queued.path("startTime").isNull());
+        releaseWorker.countDown();
+        var finished = f.awaitState(id, opened.cookie(), "finished");
+        assertTrue(finished.path("startTime").isTextual(),
+            "actual worker start must be visible once Hop runs");
+      }
+    } finally {
+      releaseWorker.countDown();
+      executor.shutdownNow();
+    }
+  }
+
   @Test void rejectedAsyncSubmissionIsRolledBack() throws Exception {
     WorkflowExecutionAdapter rejected =
         new WorkflowExecutionAdapter(new RejectingExecutor(), () -> "rejected-id");
