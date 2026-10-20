@@ -182,6 +182,93 @@ class TransformP0L2RoundTripTest {
     assertEquals("|雪<&>", diskJson.path("separator").asText());
   }
 
+
+  @Test
+  void concatFieldsNestedObjectAndNumericWireSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "ConcatFields");
+    assertNotNull(plugin, "production ConcatFields plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(Shape.OBJECT, property(descriptor, "ConcatFields").shape());
+    assertEquals(Shape.NUMBER,
+        property(descriptor, "ConcatFields", "targetFieldLength").shape());
+    assertEquals(Shape.BOOLEAN,
+        property(descriptor, "ConcatFields", "removeSelectedFields").shape());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(Shape.NUMBER, property(descriptor, "field", "length").shape());
+
+    org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider provider =
+        new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider();
+    org.apache.hop.core.variables.Variables variables =
+        new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("concatfields-nested-wire.hpl");
+    org.apache.hop.pipeline.PipelineMeta pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("concatfields-nested-wire");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "ConcatFields", "concat-node", meta));
+    store.save(hpl, pipeline);
+    org.apache.hop.pipeline.PipelineMeta loaded = store.open(hpl);
+
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("concat-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    jakarta.ws.rs.core.Response read = resource.read(
+        "concat-doc", new PipelineConfigResource.ReadRequest("concat-node"));
+    assertEquals(200, read.getStatus());
+    PipelineConfigResource.ConfigResponse initial =
+        (PipelineConfigResource.ConfigResponse) read.getEntity();
+    com.fasterxml.jackson.databind.node.ObjectNode changed =
+        ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    com.fasterxml.jackson.databind.node.ObjectNode extra =
+        (com.fasterxml.jackson.databind.node.ObjectNode) changed.path("ConcatFields");
+    assertNotNull(extra, "native ExtraFields object is required");
+    extra.put("targetFieldName", "合并<&>雪");
+    extra.put("targetFieldLength", 137);
+    extra.put("removeSelectedFields", true);
+    changed.put("separator", "|雪<&>");
+    changed.put("force_enclosure", true);
+    com.fasterxml.jackson.databind.node.ArrayNode fields =
+        changed.putObject("fields").putArray("field");
+    com.fasterxml.jackson.databind.node.ObjectNode first = fields.addObject();
+    first.put("name", "source<&>雪");
+    first.put("type", "String");
+    first.put("length", 29);
+    first.put("precision", 3);
+
+    jakarta.ws.rs.core.Response write = resource.write(
+        "concat-doc", new PipelineConfigResource.WriteRequest("concat-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    org.apache.hop.pipeline.PipelineMeta reopened = store.open(hpl);
+    org.apache.hop.pipeline.transform.TransformMeta diskTransform =
+        reopened.findTransform("concat-node");
+    assertNotNull(diskTransform);
+    com.fasterxml.jackson.databind.JsonNode disk =
+        org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+            diskTransform.getTransform(), provider);
+    assertEquals("合并<&>雪", disk.path("ConcatFields").path("targetFieldName").asText());
+    assertTrue(disk.path("ConcatFields").path("targetFieldLength").isIntegralNumber());
+    assertEquals(137, disk.path("ConcatFields").path("targetFieldLength").intValue());
+    assertTrue(disk.path("ConcatFields").path("removeSelectedFields").isBoolean());
+    assertTrue(disk.path("ConcatFields").path("removeSelectedFields").booleanValue());
+    assertEquals("|雪<&>", disk.path("separator").asText());
+    assertTrue(disk.path("force_enclosure").booleanValue());
+    com.fasterxml.jackson.databind.JsonNode diskFields = disk.path("fields").path("field");
+    assertTrue(diskFields.isArray());
+    assertEquals(1, diskFields.size());
+    assertEquals("source<&>雪", diskFields.get(0).path("name").asText());
+    assertTrue(diskFields.get(0).path("length").isIntegralNumber());
+    assertEquals(29, diskFields.get(0).path("length").intValue());
+    assertEquals(3, diskFields.get(0).path("precision").intValue());
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
