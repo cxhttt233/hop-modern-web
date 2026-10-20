@@ -60,6 +60,8 @@ export function App() {
   const [paletteQuery, setPaletteQuery] = useState("");
   const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [showOpenPanel, setShowOpenPanel] = useState(!initialPipelinePath);
 
   useEffect(() => {
@@ -94,7 +96,10 @@ export function App() {
   const edges = useMemo<Edge[]>(() => document.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })), [document]);
   const onNodesChange = useCallback((changes: NodeChange<Node>[]) => setNodes((current) => applyNodeChanges(changes, current)), []);
   const onNodeDragStop = useCallback((_: unknown, node: Node) => {
-    if (source.kind !== "server") return;
+    if (source.kind !== "server" || savingRef.current) {
+      setNodes(graphNodes(document));
+      return;
+    }
     const authoritative = document.nodes.find((candidate) => candidate.id === node.id && candidate.kind === "transform");
     if (!authoritative) {
       setNodes(graphNodes(document));
@@ -120,7 +125,7 @@ export function App() {
   }, []);
 
   const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>) => {
-    if (source.kind !== "server") return;
+    if (source.kind !== "server" || savingRef.current) return;
     command().then((graph) => {
       reconcileGraph(graph);
       setDirty(true);
@@ -131,7 +136,7 @@ export function App() {
   }, [document, reconcileGraph, source]);
 
   const addTransformAt = useCallback((pluginId: string, x: number, y: number) => {
-    if (source.kind !== "server") return;
+    if (source.kind !== "server" || savingRef.current) return;
     const nodeId = uniqueTransformId(pluginId, document);
     runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId, x: Math.round(x), y: Math.round(y) }));
   }, [document, runGraphCommand, source]);
@@ -213,7 +218,7 @@ export function App() {
   }, [document.id, source]);
 
   const applyTransformConfig = useCallback((nodeId: string, value: Record<string, unknown>) => {
-    if (source.kind !== "server") return;
+    if (source.kind !== "server" || savingRef.current) return;
     if (!serverConfig || serverConfig.nodeId !== nodeId) return;
     const generation = ++configRequestGeneration.current;
     setConfigLoading(true);
@@ -236,7 +241,7 @@ export function App() {
   }, [document.id, serverConfig, source]);
 
   const removeTransform = useCallback((nodeId: string) => {
-    if (source.kind !== "server") return;
+    if (source.kind !== "server" || savingRef.current) return;
     // A deleted node must not leave a config dialog that reappears after Undo.
     // Also discard any late config/read response for that node.
     configRequestGeneration.current += 1;
@@ -248,7 +253,10 @@ export function App() {
   }, [document.id, runGraphCommand, source]);
 
   const saveDocument = useCallback(() => {
-    if (source.kind !== "server") return;
+    if (source.kind !== "server" || !dirty || savingRef.current) return;
+    // A fast double-click must never issue two concurrent disk saves.
+    savingRef.current = true;
+    setSaving(true);
     setConfigError(undefined);
     savePipeline(document.id)
       .then((graph) => {
@@ -257,8 +265,12 @@ export function App() {
       })
       .catch((error: unknown) => {
         setConfigError(error instanceof Error ? error.message : "Pipeline save failed");
+      })
+      .finally(() => {
+        savingRef.current = false;
+        setSaving(false);
       });
-  }, [document.id, reconcileGraph, source]);
+  }, [dirty, document.id, reconcileGraph, source]);
 
   const configured = nodes.find((node) => node.id === configId);
   const isRealGraph = source.kind === "server";
@@ -282,11 +294,11 @@ export function App() {
         </div>
 
         <div className="editor-actions">
-          <button type="button" aria-label="Choose pipeline" onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
+          <button type="button" aria-label="Choose pipeline" disabled={saving} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
           {isRealGraph && <>
-            <button type="button" aria-label="Undo" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
-            <button type="button" aria-label="Redo" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
-            <button type="button" aria-label="Save" className="primary-action" disabled={!dirty} onClick={saveDocument}>保存</button>
+            <button type="button" aria-label="Undo" disabled={saving} onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
+            <button type="button" aria-label="Redo" disabled={saving} onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
+            <button type="button" aria-label="Save" aria-busy={saving} className="primary-action" disabled={!dirty || saving} onClick={saveDocument}>{saving ? "保存中…" : "保存"}</button>
           </>}
         </div>
 
@@ -306,7 +318,7 @@ export function App() {
             <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="/workspace/example.hpl" autoFocus />
             <div className="pipeline-open-actions">
               {initialPipelinePath && <button type="button" onClick={() => setShowOpenPanel(false)}>取消</button>}
-              <button type="submit" aria-label="Open pipeline" className="primary-action" disabled={!pipelinePathDraft.trim() || source.kind === "loading"}>打开文件</button>
+              <button type="submit" aria-label="Open pipeline" className="primary-action" disabled={!pipelinePathDraft.trim() || source.kind === "loading" || saving}>打开文件</button>
             </div>
           </form>
         )}
@@ -373,10 +385,10 @@ export function App() {
         <TransformNodeActionsContext.Provider value={{
           configure: openTransformConfig,
           remove: removeTransform,
-          editable: isRealGraph,
-          loading: configLoading,
+          editable: isRealGraph && !saving,
+          loading: configLoading || saving,
         }}>
-        <ReactFlow nodeTypes={NODE_TYPES} nodes={nodes} edges={edges} onInit={setFlow} onDragOver={(event) => { if (isRealGraph) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={onCanvasDrop} onNodesChange={onNodesChange} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} fitView fitViewOptions={{ maxZoom: 1 }} nodesDraggable nodesConnectable={isRealGraph} panOnDrag zoomOnScroll zoomOnPinch>
+        <ReactFlow nodeTypes={NODE_TYPES} nodes={nodes} edges={edges} onInit={setFlow} onDragOver={(event) => { if (isRealGraph) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={onCanvasDrop} onNodesChange={onNodesChange} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} fitView fitViewOptions={{ maxZoom: 1 }} nodesDraggable={!saving} nodesConnectable={isRealGraph && !saving} panOnDrag zoomOnScroll zoomOnPinch>
           <MiniMap pannable zoomable />
           <Controls />
           <Background gap={24} size={1} />
@@ -385,7 +397,7 @@ export function App() {
 
         {configError && <div className="preview-note error-note" role="alert">操作失败：{configError}</div>}
         {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
-          <GenericConfigPanel descriptor={serverConfig.descriptor} config={serverConfig.config} disabled={configLoading}
+          <GenericConfigPanel descriptor={serverConfig.descriptor} config={serverConfig.config} disabled={configLoading || saving}
             onCancel={() => { configRequestGeneration.current += 1; setConfigId(undefined); setServerConfig(undefined); setConfigLoading(false); setConfigError(undefined); }}
             onSave={(value) => applyTransformConfig(configured.id, value)} />
         )}
