@@ -269,6 +269,94 @@ class TransformP0L2RoundTripTest {
     assertEquals(3, diskFields.get(0).path("precision").intValue());
   }
 
+
+  @Test
+  void streamLookupTwoNestedListsAndDuplicateLeafNamesSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "StreamLookup");
+    assertNotNull(plugin, "production StreamLookup plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(Shape.OBJECT, property(descriptor, "lookup").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "key").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "value").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup", "key", "name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup", "value", "name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup", "key", "field").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup", "value", "rename").shape());
+
+    org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider provider =
+        new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider();
+    org.apache.hop.core.variables.Variables variables =
+        new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("streamlookup-nested-lists.hpl");
+    org.apache.hop.pipeline.PipelineMeta pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("streamlookup-nested-lists");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "StreamLookup", "streamlookup-node", meta));
+    store.save(hpl, pipeline);
+    org.apache.hop.pipeline.PipelineMeta loaded = store.open(hpl);
+
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("streamlookup-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    jakarta.ws.rs.core.Response read = resource.read(
+        "streamlookup-doc", new PipelineConfigResource.ReadRequest("streamlookup-node"));
+    assertEquals(200, read.getStatus());
+    PipelineConfigResource.ConfigResponse initial =
+        (PipelineConfigResource.ConfigResponse) read.getEntity();
+    com.fasterxml.jackson.databind.node.ObjectNode changed =
+        ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("input_sorted", true);
+    changed.put("preserve_memory", false);
+
+    com.fasterxml.jackson.databind.node.ObjectNode lookup =
+        (com.fasterxml.jackson.databind.node.ObjectNode) changed.path("lookup");
+    assertNotNull(lookup, "native StreamLookup lookup object is required");
+    com.fasterxml.jackson.databind.node.ArrayNode keys = lookup.putArray("key");
+    keys.addObject().put("name", "主键<&>雪").put("field", "查找A");
+    keys.addObject().put("name", "secondary").put("field", "查找B");
+    com.fasterxml.jackson.databind.node.ArrayNode values = lookup.putArray("value");
+    values.addObject().put("name", "返回<&>雪").put("rename", "结果<&>雪")
+        .put("default", "未命中<&>");
+    values.addObject().put("name", "another").put("rename", "备用")
+        .put("default", "fallback");
+
+    jakarta.ws.rs.core.Response write = resource.write(
+        "streamlookup-doc",
+        new PipelineConfigResource.WriteRequest("streamlookup-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    org.apache.hop.pipeline.PipelineMeta reopened = store.open(hpl);
+    org.apache.hop.pipeline.transform.TransformMeta diskTransform =
+        reopened.findTransform("streamlookup-node");
+    assertNotNull(diskTransform);
+    com.fasterxml.jackson.databind.JsonNode disk =
+        org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+            diskTransform.getTransform(), provider);
+    assertTrue(disk.path("input_sorted").isBoolean());
+    assertTrue(disk.path("input_sorted").booleanValue());
+    assertTrue(disk.path("preserve_memory").isBoolean());
+    assertFalse(disk.path("preserve_memory").booleanValue());
+    assertEquals(2, disk.at("/lookup/key").size());
+    assertEquals(2, disk.at("/lookup/value").size());
+    assertEquals("主键<&>雪", disk.at("/lookup/key/0/name").asText());
+    assertEquals("查找A", disk.at("/lookup/key/0/field").asText());
+    assertEquals("secondary", disk.at("/lookup/key/1/name").asText());
+    assertEquals("查找B", disk.at("/lookup/key/1/field").asText());
+    assertEquals("返回<&>雪", disk.at("/lookup/value/0/name").asText());
+    assertEquals("结果<&>雪", disk.at("/lookup/value/0/rename").asText());
+    assertEquals("未命中<&>", disk.at("/lookup/value/0/default").asText());
+    assertEquals("another", disk.at("/lookup/value/1/name").asText());
+    assertEquals("备用", disk.at("/lookup/value/1/rename").asText());
+    assertEquals("fallback", disk.at("/lookup/value/1/default").asText());
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
