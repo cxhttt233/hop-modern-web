@@ -296,6 +296,7 @@ export function App() {
         <div className="editor-actions">
           <button type="button" aria-label="Choose pipeline" disabled={saving} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
           {isRealGraph && <>
+            <button type="button" aria-label="Fit canvas" disabled={!flow || nodes.length === 0} title="将当前流程的全部节点适配到可见画布" onClick={() => { void flow?.fitView({ padding: 0.18, maxZoom: 1, duration: 250 }); }}>适配画布</button>
             <button type="button" aria-label="Undo" disabled={saving} onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
             <button type="button" aria-label="Redo" disabled={saving} onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
             <button type="button" aria-label="Save" aria-busy={saving} className="primary-action" disabled={!dirty || saving} onClick={saveDocument}>{saving ? "保存中…" : "保存"}</button>
