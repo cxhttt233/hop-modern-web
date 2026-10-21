@@ -318,7 +318,7 @@ export function App() {
             </div>
             <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="/workspace/example.hpl" autoFocus />
             <div className="pipeline-open-actions">
-              {initialPipelinePath && <button type="button" onClick={() => setShowOpenPanel(false)}>取消</button>}
+              {isRealGraph && <button type="button" onClick={() => setShowOpenPanel(false)}>取消</button>}
               <button type="submit" aria-label="Open pipeline" className="primary-action" disabled={!pipelinePathDraft.trim() || source.kind === "loading" || saving}>打开文件</button>
             </div>
           </form>
