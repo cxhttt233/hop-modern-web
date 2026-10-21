@@ -357,6 +357,91 @@ class TransformP0L2RoundTripTest {
     assertEquals("fallback", disk.at("/lookup/value/1/default").asText());
   }
 
+
+  @Test
+  void jsonInputOrderedJsonPathFieldsSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(plugin, "production JsonInput plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(Shape.STRING, property(descriptor, "field", "path").shape());
+    assertEquals(Shape.NUMBER, property(descriptor, "field", "length").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "field", "repeat").shape());
+
+    org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider provider =
+        new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider();
+    PipelineDocumentStore store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    java.nio.file.Path hpl = tempDir.resolve("jsoninput-jsonpath-fields.hpl");
+    org.apache.hop.pipeline.PipelineMeta pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("jsoninput-jsonpath-fields");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "JsonInput", "jsoninput-node", meta));
+    store.save(hpl, pipeline);
+    org.apache.hop.pipeline.PipelineMeta loaded = store.open(hpl);
+
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("jsoninput-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    jakarta.ws.rs.core.Response read = resource.read(
+        "jsoninput-doc", new PipelineConfigResource.ReadRequest("jsoninput-node"));
+    assertEquals(200, read.getStatus());
+    PipelineConfigResource.ConfigResponse initial =
+        (PipelineConfigResource.ConfigResponse) read.getEntity();
+    com.fasterxml.jackson.databind.node.ObjectNode changed =
+        ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("defaultPathLeafToNull", true);
+    changed.put("ignoreMissingPath", false);
+    com.fasterxml.jackson.databind.node.ArrayNode fields =
+        changed.putObject("fields").putArray("field");
+    fields.addObject()
+        .put("name", "名称<&>雪")
+        .put("path", "$.items[0]['雪<&>']")
+        .put("length", 257)
+        .put("repeat", true);
+    fields.addObject()
+        .put("name", "金额")
+        .put("path", "$.items[1].amount")
+        .put("length", 19)
+        .put("repeat", false);
+
+    jakarta.ws.rs.core.Response write = resource.write(
+        "jsoninput-doc", new PipelineConfigResource.WriteRequest("jsoninput-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    org.apache.hop.pipeline.PipelineMeta reopened = store.open(hpl);
+    org.apache.hop.pipeline.transform.TransformMeta diskTransform =
+        reopened.findTransform("jsoninput-node");
+    assertNotNull(diskTransform);
+    com.fasterxml.jackson.databind.JsonNode disk =
+        org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+            diskTransform.getTransform(), provider);
+    assertTrue(disk.path("defaultPathLeafToNull").isBoolean());
+    assertTrue(disk.path("defaultPathLeafToNull").booleanValue());
+    assertTrue(disk.path("ignoreMissingPath").isBoolean());
+    assertFalse(disk.path("ignoreMissingPath").booleanValue());
+    com.fasterxml.jackson.databind.JsonNode diskFields = disk.at("/fields/field");
+    assertTrue(diskFields.isArray());
+    assertEquals(2, diskFields.size());
+    assertEquals("名称<&>雪", disk.at("/fields/field/0/name").asText());
+    assertEquals("$.items[0]['雪<&>']", disk.at("/fields/field/0/path").asText());
+    assertTrue(disk.at("/fields/field/0/length").isIntegralNumber());
+    assertEquals(257, disk.at("/fields/field/0/length").intValue());
+    assertTrue(disk.at("/fields/field/0/repeat").booleanValue());
+    assertEquals("金额", disk.at("/fields/field/1/name").asText());
+    assertEquals("$.items[1].amount", disk.at("/fields/field/1/path").asText());
+    assertEquals(19, disk.at("/fields/field/1/length").intValue());
+    assertTrue(disk.at("/fields/field/1/repeat").isBoolean());
+    assertFalse(disk.at("/fields/field/1/repeat").booleanValue());
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
