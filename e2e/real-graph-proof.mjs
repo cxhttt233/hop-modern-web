@@ -30,6 +30,26 @@ try {
   await edges.first().waitFor({ state: "attached" });
   if ((await nodes.count()) < 2) throw new Error("Expected at least two real graph nodes");
   if ((await edges.count()) < 1) throw new Error("Expected at least one real graph edge");
+  // The Chinese product labels must come from the real Hop graph without
+  // changing persisted node IDs or plugin IDs.
+  for (const [id, label] of [["source", "输入"], ["sink", "输出"]]) {
+    const node = page.locator('.react-flow__node[data-id="' + id + '"]');
+    const displayed = await node.locator(".transform-node-copy strong").innerText();
+    const pluginId = await node.locator(".transform-node-content").getAttribute("data-plugin-id");
+    if (displayed !== label || pluginId !== "Dummy") {
+      throw new Error("Real Hop node localization changed identity: " + id);
+    }
+  }
+  const palette = page.locator('.transform-palette[aria-label="Transform palette"]');
+  const categories = await palette.locator(".transform-group-title > span").allTextContents();
+  const expectedCategories = ["输入与接入", "输出与写入", "字段处理", "流程与关联"];
+  if (JSON.stringify(categories) !== JSON.stringify(expectedCategories)) {
+    throw new Error("Chinese Palette categories do not match the real editor");
+  }
+  const tableInputPalette = await palette.getByRole("button", { name: "TableInput" }).innerText();
+  if (!tableInputPalette.includes("表输入") || !tableInputPalette.includes("TableInput")) {
+    throw new Error("Chinese Palette must retain the immutable Hop plugin ID");
+  }
   const openRequests = requests.filter((url) => url.includes("/api/pipelines/open"));
   if (openRequests.length !== 1) throw new Error("Expected exactly one real pipeline open request");
   // Opening the same real .hpl again must frame its nodes, even after the
@@ -92,6 +112,11 @@ try {
   }
   await page.locator('.file-identity[data-document-name="v4-table-input-proof"]').waitFor({ state: "visible" });
   await page.locator('.react-flow__node[data-id="' + alternate.nodes[0].id + '"]').waitFor({ state: "visible" });
+  const alternateNode = page.locator('.react-flow__node[data-id="' + alternate.nodes[0].id + '"]');
+  if (await alternateNode.locator(".transform-node-copy strong").innerText() !== "表输入" ||
+      await alternateNode.locator(".transform-node-content").getAttribute("data-plugin-id") !== "TableInput") {
+    throw new Error("Real TableInput node lost its Chinese display name or Hop plugin identity");
+  }
   if (await page.locator(".react-flow__node").count() !== 1 ||
       await page.locator(".react-flow__edge").count() !== 0) {
     throw new Error("Switching files retained stale nodes or hops");
