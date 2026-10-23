@@ -64,6 +64,24 @@ export function App() {
   const savingRef = useRef(false);
   const [showOpenPanel, setShowOpenPanel] = useState(!initialPipelinePath);
 
+  // A newly opened .hpl may have nodes far outside the previous file's
+  // viewport. Fit only on a successful open/reopen, never after an edit or
+  // user pan/zoom, so navigation remains predictable.
+  useEffect(() => {
+    if (source.kind !== "server" || !flow || document.nodes.length === 0) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        void flow.fitView({ padding: 0.18, maxZoom: 1, duration: 0 });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+    // Deliberately exclude document revision/nodes: edits must not reset zoom.
+  }, [document.id, flow, pipelineOpenRevision, pipelinePath, source.kind]);
+
   useEffect(() => {
     // A new open attempt must never display the previous file as the current one.
     configRequestGeneration.current += 1;
