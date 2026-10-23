@@ -138,6 +138,11 @@ public final class AutomaticConfigDescriptor {
               "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
               List.of("/keys_1/key", "/keys_2/key"),
               "Both input streams must be sorted ascending by their respective join keys."));
+      case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" ->
+          List.of(new RuntimePrecondition(
+              "SELECT_VALUES_STAGE_SPECIFIC_FIELD_RESOLUTION",
+              List.of("/fields/field", "/fields/remove", "/fields/meta"),
+              "Select & Alter field[*].name resolves against incoming row fields; Remove remove[*].name resolves against the row after selection and renaming; Metadata meta[*].name resolves after removal. A renamed field must be referenced by its new name in later stages. Diagnose each stage against its own row metadata, not only the original input."));
       case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta" ->
           List.of(new RuntimePrecondition(
               "TABLE_INPUT_SPECIFY_FIELDS_REQUIRES_NAMED_OUTPUT_FIELD",
