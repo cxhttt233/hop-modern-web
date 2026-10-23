@@ -626,6 +626,69 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void execSqlNativeInputModeRequiresMatchingIncomingHopTopology() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "ExecSql");
+    assertEquals(Shape.BOOLEAN, property(descriptor, "execute_each_row").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("EXEC_SQL_INPUT_MODE_REQUIRES_MATCHING_HOP_TOPOLOGY"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/execute_each_row"), contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ExecSql");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.getClass().getMethod("setConnection", String.class)
+        .invoke(meta, "missing-t3-execsql-test-connection");
+    var setEachRow = meta.getClass().getMethod("setExecutedEachInputRow", boolean.class);
+    var consumesInput = meta.getClass().getMethod("consumesMainInput");
+    var canStartWithoutInput = meta.getClass().getMethod("canStartWithoutInput");
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "ExecSql", "execsql-topology", meta);
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+    String onceOnlyError = org.apache.hop.core.i18n.BaseMessages.getString(
+        meta.getClass(), "ExecSqlMeta.CheckResult.SQLOnlyExecutedOnce");
+    String onceOnlyOk = org.apache.hop.core.i18n.BaseMessages.getString(
+        meta.getClass(), "ExecSqlMeta.CheckResult.InputReceivedOKForSQLOnlyExecuteOnce");
+    String perRowError = org.apache.hop.core.i18n.BaseMessages.getString(
+        meta.getClass(), "ExecSqlMeta.CheckResult.NoInputReceivedError");
+    String perRowOk = org.apache.hop.core.i18n.BaseMessages.getString(
+        meta.getClass(), "ExecSqlMeta.CheckResult.TransformReceivingInfoOK");
+
+    setEachRow.invoke(meta, false);
+    assertEquals(false, consumesInput.invoke(meta));
+    assertEquals(true, canStartWithoutInput.invoke(meta));
+    meta.check(remarks, pipeline, transform, null, new String[0],
+        new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(x -> x.getText().equals(onceOnlyOk)
+        && x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_OK));
+    remarks.clear();
+    meta.check(remarks, pipeline, transform, null, new String[] {"upstream"},
+        new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(x -> x.getText().equals(onceOnlyError)
+        && x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+
+    setEachRow.invoke(meta, true);
+    assertEquals(true, consumesInput.invoke(meta));
+    assertEquals(false, canStartWithoutInput.invoke(meta));
+    remarks.clear();
+    meta.check(remarks, pipeline, transform, null, new String[0],
+        new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(x -> x.getText().equals(perRowError)
+        && x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    remarks.clear();
+    meta.check(remarks, pipeline, transform, null, new String[] {"upstream"},
+        new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(x -> x.getText().equals(perRowOk)
+        && x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_OK));
+    System.out.println("PROD_P0_EXECSQL_INPUT_MODE_NATIVE_CHECK=PASS");
+  }
+
+  @Test
   void groupByAggregateSubjectPreconditionExemptsCountAnyAndUsesCanonicalGroupedList()
       throws Exception {
     Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "GroupBy");
