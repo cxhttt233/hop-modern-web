@@ -124,10 +124,15 @@ public final class AutomaticConfigDescriptor {
   private static List<RuntimePrecondition> runtimePreconditions(Class<?> type) {
     return switch (type.getName()) {
       case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
-          List.of(new RuntimePrecondition(
-              "GROUP_KEYS_CONTIGUOUS",
-              List.of("/group/field"),
-              "Rows with equal group keys must be contiguous; ascending order is not required."));
+          List.of(
+              new RuntimePrecondition(
+                  "GROUP_KEYS_CONTIGUOUS",
+                  List.of("/group/field"),
+                  "Rows with equal group keys must be contiguous; ascending order is not required."),
+              new RuntimePrecondition(
+                  "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD",
+                  List.of("/fields/field"),
+                  "For every aggregation except COUNT_ANY, fields.field[*].subject must name an incoming row field; COUNT_ANY does not require a subject. Check against upstream row metadata."));
       case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" ->
           List.of(new RuntimePrecondition(
               "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
