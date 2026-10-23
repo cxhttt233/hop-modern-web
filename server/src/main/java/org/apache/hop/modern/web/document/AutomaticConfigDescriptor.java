@@ -213,10 +213,15 @@ public final class AutomaticConfigDescriptor {
               List.of("/fields/field"),
               "Each fields.field[*].in_stream_name must be non-empty and exist in the incoming row as STRING. The native StringCut check rejects missing or non-string source fields, but unlike ReplaceString does not reject repeated source names. out_stream_name is an optional output alias, not an upstream field."));
       case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta" ->
-          List.of(new RuntimePrecondition(
-              "TABLE_INPUT_SPECIFY_FIELDS_REQUIRES_NAMED_OUTPUT_FIELD",
-              List.of("/fields/field"),
-              "When specify_fields is true, fields.field must contain at least one output field with a non-empty name; Hop skips unnamed entries. validate_specified_fields controls JDBC result column/type checks and does not waive this requirement."));
+          List.of(
+              new RuntimePrecondition(
+                  "TABLE_INPUT_SPECIFY_FIELDS_REQUIRES_NAMED_OUTPUT_FIELD",
+                  List.of("/fields/field"),
+                  "When specify_fields is true, fields.field must contain at least one output field with a non-empty name; Hop skips unnamed entries. validate_specified_fields controls JDBC result column/type checks and does not waive this requirement."),
+              new RuntimePrecondition(
+                  "TABLE_INPUT_NAMED_SQL_PARAMETERS_REQUIRE_UPSTREAM_FIELDS",
+                  List.of("/use_named_parameters", "/sql", "/sql_from_file", "/lookup"),
+                  "When use_named_parameters is true, each {fieldName} placeholder in the effective SQL (inline sql or sql_from_file) must resolve to a field in the incoming parameter row, preferring the lookup info stream when present. Named placeholders require incoming rows; Hop ${variable} references and quoted or commented braces are not named parameters. With use_named_parameters false, braces remain literal SQL. Diagnose before execution without treating an unrelated missing database connection as a parameter error."));
       case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
           List.of(new RuntimePrecondition(
               "TABLE_OUTPUT_SPECIFY_FIELDS_REQUIRES_INPUT_STREAM_FIELDS",
