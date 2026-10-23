@@ -35,6 +35,80 @@ class TransformP0L2RoundTripTest {
     }
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
+  @Test void stringCutNativeInputFieldChecksDoNotRequireDistinctSources() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "StringCut");
+    Property fields = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("fields"))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, fields.shape());
+    assertTrue(fields.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("in_stream_name") && p.shape() == Shape.STRING));
+    assertTrue(fields.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("out_stream_name") && p.shape() == Shape.STRING));
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("STRING_CUT_SOURCE_FIELDS_REQUIRE_UPSTREAM_STRINGS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), precondition.keyListPointers());
+    assertTrue(precondition.explanation().contains("repeated source names"));
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "StringCut");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> item = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.stringcut.StringCutField");
+    Object first = item.getConstructor().newInstance();
+    var setName = item.getMethod("setFieldInStream", String.class);
+    setName.invoke(first, "源字段");
+    item.getMethod("setFieldOutStream", String.class).invoke(first, "新字段");
+    item.getMethod("setCutFrom", String.class).invoke(first, "1");
+    item.getMethod("setCutTo", String.class).invoke(first, "3");
+    var setFields = meta.getClass().getMethod("setFields", List.class);
+    setFields.invoke(meta, List.of(first));
+
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("源字段"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaNumber("数字字段"));
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "StringCut", "stringcut-node", meta);
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+
+    Object duplicate = item.getConstructor().newInstance();
+    setName.invoke(duplicate, "源字段");
+    setFields.invoke(meta, List.of(first, duplicate));
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "StringCut native check permits repeated source fields, unlike ReplaceString");
+
+    setFields.invoke(meta, List.of(first));
+    for (String invalidName : List.of("不存在", "数字字段", "")) {
+      setName.invoke(first, invalidName);
+      remarks.clear();
+      meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+          row, new String[] {"source"}, new String[0], null, variables, provider);
+      assertTrue(remarks.stream().anyMatch(
+          r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+          "Expected native StringCut error for: " + invalidName);
+    }
+    setName.invoke(first, "源字段");
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        null, new String[] {"source"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    System.out.println("PROD_P0_STRINGCUT_NATIVE_STRING_INPUT_PRECONDITION=PASS");
+  }
+
   @Test void replaceStringNativeSourceFieldPreconditions() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "ReplaceString");
