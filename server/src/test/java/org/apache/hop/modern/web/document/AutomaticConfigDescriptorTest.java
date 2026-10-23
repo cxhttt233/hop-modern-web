@@ -50,6 +50,25 @@ class AutomaticConfigDescriptorTest {
   }
 
   @Test
+  void groupByAggregateSubjectPreconditionExemptsCountAnyAndUsesCanonicalGroupedList() {
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(
+        org.apache.hop.pipeline.transforms.groupby.GroupByMeta.class);
+    Property aggregations = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("fields"))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, aggregations.shape());
+    assertTrue(aggregations.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("subject") && p.shape() == Shape.STRING));
+    assertEquals(List.of("GROUP_KEYS_CONTIGUOUS",
+            "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD"),
+        descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
+    var precondition = descriptor.runtimePreconditions().get(1);
+    assertEquals(List.of("/fields/field"), precondition.keyListPointers());
+    assertTrue(precondition.explanation().contains("COUNT_ANY"));
+    assertTrue(precondition.explanation().contains("upstream row metadata"));
+  }
+
+  @Test
   void discoversTableInputTextBooleansAndTableShape() {
     Descriptor descriptor = AutomaticConfigDescriptor.describe(TableInputMeta.class);
 
