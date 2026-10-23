@@ -71,6 +71,26 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void groupByAggregateSubjectPreconditionExemptsCountAnyAndUsesCanonicalGroupedList()
+      throws Exception {
+    Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "GroupBy");
+    Property aggregations = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("fields"))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, aggregations.shape());
+    assertTrue(aggregations.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("subject") && p.shape() == Shape.STRING));
+    assertEquals(List.of("GROUP_KEYS_CONTIGUOUS",
+            "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD"),
+        descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
+    var precondition = descriptor.runtimePreconditions().get(1);
+    assertEquals(List.of("/fields/field"), precondition.keyListPointers());
+    assertTrue(precondition.explanation().contains("COUNT_ANY"));
+    assertTrue(precondition.explanation().contains("upstream row metadata"));
+    System.out.println("PROD_P0_GROUPBY_AGGREGATE_SUBJECT_PRECONDITION=PASS");
+  }
+
+  @Test
   void tableOutputExplicitFieldMappingPreconditionMatchesProductionGroupedDescriptor()
       throws Exception {
     Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "TableOutput");
