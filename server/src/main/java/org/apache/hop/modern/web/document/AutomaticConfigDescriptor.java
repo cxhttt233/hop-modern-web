@@ -138,6 +138,11 @@ public final class AutomaticConfigDescriptor {
               "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
               List.of("/keys_1/key", "/keys_2/key"),
               "Both input streams must be sorted ascending by their respective join keys."));
+      case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta" ->
+          List.of(new RuntimePrecondition(
+              "TABLE_INPUT_SPECIFY_FIELDS_REQUIRES_NAMED_OUTPUT_FIELD",
+              List.of("/fields/field"),
+              "When specify_fields is true, fields.field must contain at least one output field with a non-empty name; Hop skips unnamed entries. validate_specified_fields controls JDBC result column/type checks and does not waive this requirement."));
       case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
           List.of(new RuntimePrecondition(
               "TABLE_OUTPUT_SPECIFY_FIELDS_REQUIRES_INPUT_STREAM_FIELDS",
