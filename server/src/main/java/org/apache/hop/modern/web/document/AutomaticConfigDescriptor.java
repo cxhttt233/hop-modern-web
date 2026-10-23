@@ -175,6 +175,10 @@ public final class AutomaticConfigDescriptor {
                   List.of("/group/field"),
                   "Rows with equal group keys must be contiguous; ascending order is not required."),
               new RuntimePrecondition(
+                  "GROUPBY_GROUPING_KEYS_REQUIRE_UPSTREAM_FIELDS",
+                  List.of("/group/field"),
+                  "Each group.field[*].name must resolve to an incoming row field. GroupByMeta.check() only checks whether an input hop exists, not whether grouping keys resolve; with all_rows=false, getFields() silently omits missing grouping fields from output metadata, while GroupBy.processRow() resolves grouping indices against the input row. Diagnose missing keys against upstream row metadata before execution; this is not a save-time validator."),
+              new RuntimePrecondition(
                   "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD",
                   List.of("/fields/field"),
                   "For every aggregation except COUNT_ANY, fields.field[*].subject must name an incoming row field; COUNT_ANY does not require a subject. Check against upstream row metadata."));
