@@ -168,6 +168,11 @@ public final class AutomaticConfigDescriptor {
               "SELECT_VALUES_STAGE_SPECIFIC_FIELD_RESOLUTION",
               List.of("/fields/field", "/fields/remove", "/fields/meta"),
               "Select & Alter field[*].name resolves against incoming row fields; Remove remove[*].name resolves against the row after selection and renaming; Metadata meta[*].name resolves after removal. A renamed field must be referenced by its new name in later stages. Diagnose each stage against its own row metadata, not only the original input."));
+      case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta" ->
+          List.of(new RuntimePrecondition(
+              "STRING_CUT_SOURCE_FIELDS_REQUIRE_UPSTREAM_STRINGS",
+              List.of("/fields/field"),
+              "Each fields.field[*].in_stream_name must be non-empty and exist in the incoming row as STRING. The native StringCut check rejects missing or non-string source fields, but unlike ReplaceString does not reject repeated source names. out_stream_name is an optional output alias, not an upstream field."));
       case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta" ->
           List.of(new RuntimePrecondition(
               "TABLE_INPUT_SPECIFY_FIELDS_REQUIRES_NAMED_OUTPUT_FIELD",
