@@ -177,7 +177,9 @@ export function App() {
     const pluginId = event.dataTransfer.getData("application/x-hop-transform");
     if (!P0_TRANSFORMS.includes(pluginId as (typeof P0_TRANSFORMS)[number])) return;
     const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    addTransformAt(pluginId, point.x, point.y);
+    // Place the node body under the cursor, not its top-left corner.
+    // The same 176 × ~64 canvas footprint is used by click-to-add.
+    addTransformAt(pluginId, point.x - 88, point.y - 32);
   }, [addTransformAt, flow, source]);
 
   const filteredTransforms = useMemo(() => {
