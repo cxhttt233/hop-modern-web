@@ -22,7 +22,7 @@ public final class AutomaticConfigDescriptor {
   }
 
   private static Descriptor describe(Class<?> type, int depth, Set<Class<?>> ancestors) {
-    if (depth > MAX_DEPTH || !ancestors.add(type)) return new Descriptor(type.getName(), List.of());
+    if (depth > MAX_DEPTH || !ancestors.add(type)) return new Descriptor(type.getName(), List.of(), List.of());
     List<Property> properties = new ArrayList<>();
     int order = 0;
     for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
@@ -45,7 +45,7 @@ public final class AutomaticConfigDescriptor {
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD)));
       }
     }
-    return new Descriptor(type.getName(), List.copyOf(properties));
+    return new Descriptor(type.getName(), List.copyOf(properties), runtimePreconditions(type));
   }
 
   private static Class<?> itemType(Field field, HopMetadataProperty metadata) {
@@ -116,10 +116,33 @@ public final class AutomaticConfigDescriptor {
     return Shape.OBJECT;
   }
 
+  /**
+   * Pipeline-level input requirements that cannot be inferred from the fields' Java types.
+   * They are diagnostic contracts, not save-time validators: an upstream source may already
+   * satisfy the requirement without an explicit SortRows transform.
+   */
+  private static List<RuntimePrecondition> runtimePreconditions(Class<?> type) {
+    return switch (type.getName()) {
+      case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
+          List.of(new RuntimePrecondition(
+              "GROUP_KEYS_CONTIGUOUS",
+              List.of("/group/field"),
+              "Rows with equal group keys must be contiguous; ascending order is not required."));
+      case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" ->
+          List.of(new RuntimePrecondition(
+              "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
+              List.of("/keys_1/key", "/keys_2/key"),
+              "Both input streams must be sorted ascending by their respective join keys."));
+      default -> List.of();
+    };
+  }
+
   public enum Shape { STRING, NUMBER, BOOLEAN, ENUM, OBJECT, LIST }
   public enum TextEditorHint { NONE, SQL, SCRIPT, TEMPLATE }
   public enum Presentation { FIELD, TABLE }
-  public record Descriptor(String className, List<Property> properties) {}
+  public record Descriptor(
+      String className, List<Property> properties, List<RuntimePrecondition> runtimePreconditions) {}
+  public record RuntimePrecondition(String code, List<String> keyListPointers, String explanation) {}
   public record Option(String label, String value) {}
   public record LayoutHint(int order, String group, Presentation presentation) {}
   public record Property(String key, String javaField, Shape shape, String javaType, String groupKey,
