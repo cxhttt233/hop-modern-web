@@ -35,6 +35,64 @@ class TransformP0L2RoundTripTest {
     }
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
+  @Test void replaceStringNativeSourceFieldPreconditions() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "ReplaceString");
+    Property fields = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("fields"))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, fields.shape());
+    assertTrue(fields.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("in_stream_name") && p.shape() == Shape.STRING));
+    assertEquals(List.of("/fields/field"),
+        descriptor.runtimePreconditions().stream()
+            .filter(p -> p.code().equals("REPLACE_STRING_SOURCE_FIELDS_MUST_BE_DISTINCT_STRINGS"))
+            .findFirst().orElseThrow().keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ReplaceString");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> item = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta$RSField");
+    Object field = item.getConstructor().newInstance();
+    var setName = item.getMethod("setFieldInStream", String.class);
+    setName.invoke(field, "流量");
+    item.getMethod("setFieldOutStream", String.class).invoke(field, "别名");
+    var setFields = meta.getClass().getMethod("setFields", List.class);
+    setFields.invoke(meta, List.of(field));
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("流量"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaNumber("数值"));
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "ReplaceString", "replace-node", meta);
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    for (String badName : List.of("缺失", "数值")) {
+      remarks.clear();
+      setName.invoke(field, badName);
+      meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+          row, new String[] {"source"}, new String[0], null, variables, provider);
+      assertTrue(remarks.stream().anyMatch(
+          r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    }
+    remarks.clear();
+    setName.invoke(field, "流量");
+    Object duplicate = item.getConstructor().newInstance();
+    setName.invoke(duplicate, "流量");
+    setFields.invoke(meta, List.of(field, duplicate));
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    System.out.println("PROD_P0_REPLACESTRING_SOURCE_STRING_PRECONDITION=PASS");
+  }
+
   @Test void tableInputEditedSqlSurvivesRealXmlReopenWithoutChangingOtherFields() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "TableInput");
