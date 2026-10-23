@@ -763,6 +763,84 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void tableInputNamedSqlParametersResolveOnlyAgainstIncomingRowMetadata() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "TableInput");
+    assertEquals(Shape.BOOLEAN, property(descriptor, "use_named_parameters").shape());
+    assertEquals(TextEditorHint.SQL, property(descriptor, "sql").textEditorHint());
+    assertEquals(Shape.STRING, property(descriptor, "sql_from_file").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("TABLE_INPUT_NAMED_SQL_PARAMETERS_REQUIRE_UPSTREAM_FIELDS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/use_named_parameters", "/sql", "/sql_from_file", "/lookup"),
+        contract.keyListPointers());
+
+    String sqlWithEscapes = "SELECT '{literal}' AS quoted, ${SCHEMA}.orders "
+        + "WHERE id={订单号} AND parent={订单号} /* {ignored} */";
+    var parsed = org.apache.hop.pipeline.transforms.tableinput.TableInputSql.parse(sqlWithEscapes);
+    assertEquals(List.of("订单号", "订单号"), parsed.getNamedParameters());
+    assertEquals("SELECT '{literal}' AS quoted, ${SCHEMA}.orders "
+        + "WHERE id=? AND parent=? /* {ignored} */", parsed.getJdbcSql());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "TableInput");
+    assertNotNull(plugin);
+    var meta = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+        registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.setConnection("t3-missing-tableinput-connection");
+    meta.setSql("SELECT id FROM orders WHERE id = {订单号}");
+    meta.setUseNamedParameters(true);
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableInput", "tableinput-named-sql", meta);
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+    String needsIncoming = org.apache.hop.i18n.BaseMessages.getString(
+        meta.getClass(), "TableInputMeta.CheckResult.NamedParametersNeedIncoming");
+    String namedOk = org.apache.hop.i18n.BaseMessages.getString(
+        meta.getClass(), "TableInputMeta.CheckResult.NamedParametersOk", "1");
+    String namedMissing = org.apache.hop.i18n.BaseMessages.getString(
+        meta.getClass(), "TableInputMeta.CheckResult.NamedParametersMissing", "订单号");
+
+    meta.check(remarks, pipeline, transform, null, new String[0],
+        new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(r -> r.getText().equals(needsIncoming)
+        && r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Named SQL fields require incoming rows even without a database connection");
+
+    var matching = new org.apache.hop.core.row.RowMeta();
+    matching.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("订单号"));
+    remarks.clear();
+    meta.check(remarks, pipeline, transform, matching, new String[] {"source"},
+        new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(r -> r.getText().equals(namedOk)
+        && r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_OK),
+        "The native check accepts a named SQL parameter found in incoming row metadata");
+
+    var mismatching = new org.apache.hop.core.row.RowMeta();
+    mismatching.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("other"));
+    remarks.clear();
+    meta.check(remarks, pipeline, transform, mismatching, new String[] {"source"},
+        new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(r -> r.getText().equals(namedMissing)
+        && r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "The native check rejects a named SQL parameter absent from incoming row metadata");
+
+    meta.setUseNamedParameters(false);
+    remarks.clear();
+    meta.check(remarks, pipeline, transform, null, new String[0],
+        new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(r -> r.getText().equals(needsIncoming)),
+        "Disabled named binding must not require incoming rows for brace literals");
+    assertEquals(meta.getSql(),
+        org.apache.hop.pipeline.transforms.tableinput.TableInputSql.prepare(
+            false, meta.getSql(), null, null).getJdbcSql());
+    System.out.println("PROD_P0_TABLEINPUT_NAMED_SQL_SOURCE_BINDING=PASS");
+  }
+
+  @Test
   void tableInputSpecifiedFieldsPreconditionMatchesRealPluginMetadataBehavior()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
