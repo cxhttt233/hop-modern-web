@@ -763,6 +763,81 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_SELECTVALUES_STAGED_FIELD_RESOLUTION=PASS");
   }
 
+  @Test
+  void filterRowsNestedConditionReferencesMatchNativeOrphanFieldChecks()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "FilterRows");
+    assertEquals(Shape.OBJECT, property(descriptor, "compare", "condition").shape());
+    assertEquals(Shape.STRING, property(descriptor, "compare", "condition", "leftvalue").shape());
+    assertEquals(Shape.STRING, property(descriptor, "compare", "condition", "rightvalue").shape());
+    assertEquals(Shape.LIST,
+        property(descriptor, "compare", "condition", "conditions", "condition").shape());
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "FILTER_ROWS_NESTED_CONDITION_FIELDS_REQUIRE_UPSTREAM_FIELDS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/compare/condition", "/compare/condition/conditions/condition"),
+        precondition.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "FilterRows");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var root = new org.apache.hop.core.Condition();
+    root.addCondition(new org.apache.hop.core.Condition(
+        "水位", org.apache.hop.core.Condition.Function.EQUAL, null, null));
+    var nested = new org.apache.hop.core.Condition();
+    nested.addCondition(new org.apache.hop.core.Condition(
+        "流量", org.apache.hop.core.Condition.Function.EQUAL, "阈值", null));
+    nested.addCondition(new org.apache.hop.core.Condition(
+        "字段乙", org.apache.hop.core.Condition.Function.EQUAL, null, null));
+    root.addCondition(nested);
+    meta.getClass().getMethod("setCondition", org.apache.hop.core.Condition.class)
+        .invoke(meta, root);
+
+    var upstream = new org.apache.hop.core.row.RowMeta();
+    for (String field : List.of("水位", "流量", "阈值", "字段乙")) {
+      upstream.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString(field));
+    }
+    var orphanMethod = meta.getClass().getMethod("getOrphanFields",
+        org.apache.hop.core.Condition.class, org.apache.hop.core.row.IRowMeta.class);
+    assertEquals(List.of(), orphanMethod.invoke(meta, root, upstream));
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "FilterRows", "filter-native", meta);
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "All nested left and right field references resolve against upstream metadata");
+
+    nested.getCondition(1).setLeftValueName("缺失的深层字段");
+    assertEquals(List.of("缺失的深层字段"), orphanMethod.invoke(meta, root, upstream));
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "An unknown field in a nested child must fail native validation");
+
+    nested.getCondition(1).setLeftValueName("字段乙");
+    nested.getCondition(0).setRightValueName("缺失右字段");
+    assertEquals(List.of("缺失右字段"), orphanMethod.invoke(meta, root, upstream));
+    nested.getCondition(0).setRightValueName("阈值");
+    meta.getClass().getMethod("setCondition", org.apache.hop.core.Condition.class)
+        .invoke(meta, new org.apache.hop.core.Condition());
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "An empty condition is a native error even when input fields exist");
+    System.out.println("PROD_P0_FILTERROWS_NESTED_FIELD_REFERENCES=PASS");
+  }
+
   @Test void nestedAndSensitiveProductionDescriptorsStayTyped() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor json = descriptorFor(registry, "JsonInput");
