@@ -155,7 +155,7 @@ try {
   await page.locator("form.generic-config").getByRole("button", { name: "Cancel" }).click();
   let activationGraph = reopened;
   const activated = [];
-  for (const [pluginId, method] of [["DataGrid", "click"], ["CheckSum", "Enter"]]) {
+  for (const [pluginId, method] of [["TableInput", "click"], ["SelectValues", "Enter"]]) {
     const beforeIds = new Set(activationGraph.nodes.map(node => node.id));
     const countAdds = () => requests.filter(({ url, method: verb }) =>
       verb === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
@@ -201,7 +201,7 @@ try {
   });
   if (rap.length) throw new Error("RAP /ui entered");
 
-  console.log("V6 Palette authoritative proof passed: drag TableInput/SelectValues/FilterRows; click DataGrid; Enter CheckSum; disk reopen");
+  console.log("V6 Palette authoritative proof passed: drag TableInput/SelectValues/FilterRows; click TableInput; Enter SelectValues; disk reopen");
 } finally {
   await browser.close();
 }
