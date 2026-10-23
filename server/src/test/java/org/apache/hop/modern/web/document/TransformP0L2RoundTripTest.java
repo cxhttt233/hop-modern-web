@@ -91,6 +91,52 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void tableInputSpecifiedFieldsPreconditionMatchesRealPluginMetadataBehavior()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "TableInput");
+    Property declaredFields = property(descriptor, "field");
+    assertEquals(Shape.LIST, declaredFields.shape());
+    assertEquals("fields", declaredFields.groupKey());
+    assertTrue(declaredFields.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("name") && p.shape() == Shape.STRING));
+    assertTrue(declaredFields.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("type") && p.shape() == Shape.NUMBER));
+    assertEquals(Shape.BOOLEAN, property(descriptor, "specify_fields").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "validate_specified_fields").shape());
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("TABLE_INPUT_SPECIFY_FIELDS_REQUIRES_NAMED_OUTPUT_FIELD"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), precondition.keyListPointers());
+    assertTrue(precondition.explanation().contains("non-empty name"));
+    assertTrue(precondition.explanation().contains("validate_specified_fields"));
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "TableInput");
+    assertNotNull(plugin);
+    var meta = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+        registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.setSpecifyFields(true);
+    var unnamed = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    unnamed.setName("");
+    meta.setFields(List.of(unnamed));
+    assertThrows(org.apache.hop.core.exception.HopTransformException.class,
+        () -> meta.createSpecifiedRowMeta("TableInput", null));
+
+    var named = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    named.setName("流量");
+    named.setType(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER);
+    named.setLength(18);
+    meta.setFields(List.of(unnamed, named));
+    var output = meta.createSpecifiedRowMeta("TableInput", null);
+    assertEquals(1, output.size());
+    assertEquals("流量", output.getValueMeta(0).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER,
+        output.getValueMeta(0).getType());
+    System.out.println("PROD_P0_TABLEINPUT_SPECIFIED_FIELDS_PRECONDITION=PASS");
+  }
+
+  @Test
   void tableOutputExplicitFieldMappingPreconditionMatchesProductionGroupedDescriptor()
       throws Exception {
     Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "TableOutput");
