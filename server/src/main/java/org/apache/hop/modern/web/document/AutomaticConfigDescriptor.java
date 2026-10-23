@@ -123,6 +123,16 @@ public final class AutomaticConfigDescriptor {
    */
   private static List<RuntimePrecondition> runtimePreconditions(Class<?> type) {
     return switch (type.getName()) {
+      case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta" ->
+          List.of(
+              new RuntimePrecondition(
+                  "CHECKSUM_RESULT_FIELD_REQUIRED",
+                  List.of("/resultfieldName"),
+                  "resultfieldName must be non-empty; the native CheckSum check reports ERROR when the result field name is missing."),
+              new RuntimePrecondition(
+                  "CHECKSUM_SELECTED_FIELDS_REQUIRE_UPSTREAM_FIELDS",
+                  List.of("/fields/field"),
+                  "Each fields.field[*].name must exist in incoming row metadata. Missing selected fields are errors; an empty selection is a warning, not an unknown-field error."));
       case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
           List.of(
               new RuntimePrecondition(
