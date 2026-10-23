@@ -153,6 +153,61 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEOUTPUT_INPUT_MAPPING_PRECONDITION=PASS");
   }
 
+  @Test
+  void selectValuesStageSpecificFieldResolutionMatchesRealPluginAndCanonicalPaths()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "SelectValues");
+    assertEquals(Shape.OBJECT, property(descriptor, "fields").shape());
+    for (String stage : List.of("field", "remove", "meta")) {
+      Property list = property(descriptor, "fields", stage);
+      assertEquals(Shape.LIST, list.shape(), stage);
+      assertTrue(list.elementProperties().stream()
+          .anyMatch(p -> p.key().equals("name") && p.shape() == Shape.STRING), stage);
+    }
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("SELECT_VALUES_STAGE_SPECIFIC_FIELD_RESOLUTION"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field", "/fields/remove", "/fields/meta"),
+        precondition.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(plugin);
+    var meta = (org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta)
+        registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var first = new org.apache.hop.pipeline.transforms.selectvalues.SelectField();
+    first.setName("input_甲");
+    first.setRename("stage_甲");
+    var second = new org.apache.hop.pipeline.transforms.selectvalues.SelectField();
+    second.setName("input_乙");
+    second.setRename("stage_乙");
+    meta.getSelectOption().setSelectFields(List.of(first, second));
+    var remove = new org.apache.hop.pipeline.transforms.selectvalues.DeleteField();
+    remove.setName("stage_乙");
+    meta.getSelectOption().setDeleteName(List.of(remove));
+    var change = new org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange();
+    change.setName("stage_甲");
+    change.setRename("final_甲");
+    change.setStorageType(null);
+    meta.getSelectOption().setMeta(List.of(change));
+
+    org.apache.hop.core.row.IRowMeta row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("input_甲"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("input_乙"));
+    meta.getSelectFields(row, "SelectValues");
+    assertEquals(2, row.size());
+    assertEquals("stage_甲", row.getValueMeta(0).getName());
+    assertEquals("stage_乙", row.getValueMeta(1).getName());
+    meta.getDeleteFields(row);
+    assertEquals(1, row.size());
+    assertEquals("stage_甲", row.getValueMeta(0).getName());
+    meta.getMetadataFields(row, "SelectValues", null);
+    assertEquals(1, row.size());
+    assertEquals("final_甲", row.getValueMeta(0).getName());
+    System.out.println("PROD_P0_SELECTVALUES_STAGED_FIELD_RESOLUTION=PASS");
+  }
+
   @Test void nestedAndSensitiveProductionDescriptorsStayTyped() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor json = descriptorFor(registry, "JsonInput");
