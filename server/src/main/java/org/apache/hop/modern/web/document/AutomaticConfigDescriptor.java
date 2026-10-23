@@ -123,6 +123,16 @@ public final class AutomaticConfigDescriptor {
    */
   private static List<RuntimePrecondition> runtimePreconditions(Class<?> type) {
     return switch (type.getName()) {
+      case "org.apache.hop.pipeline.transforms.concatfields.ConcatFieldsMeta" ->
+          List.of(
+              new RuntimePrecondition(
+                  "CONCAT_FIELDS_TARGET_NAME_REQUIRED_LENGTH_WARNING",
+                  List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
+                  "ConcatFields requires a non-empty ConcatFields.targetFieldName: native check reports ERROR and getFields fails when it is empty. A targetFieldLength of zero or less is only a native WARNING for fast data dump, not a save-time error."),
+              new RuntimePrecondition(
+                  "CONCAT_FIELDS_SELECTED_SOURCE_FIELDS_REQUIRE_UPSTREAM_FIELDS",
+                  List.of("/fields/field"),
+                  "When fields.field contains selected source names, each fields.field[*].name must exist in incoming row metadata. An empty selection means concatenate all incoming fields and is allowed; native check does not require an explicit selection."));
       case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta" ->
           List.of(
               new RuntimePrecondition(
