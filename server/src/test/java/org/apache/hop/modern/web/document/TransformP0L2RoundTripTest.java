@@ -35,6 +35,70 @@ class TransformP0L2RoundTripTest {
     }
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
+  @Test void httpDynamicUrlFieldNativeCheckFalsePositiveIsDocumentedByProductionDescriptor()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "Http");
+    assertEquals(Shape.BOOLEAN, property(descriptor, "urlInField").shape());
+    assertEquals(Shape.STRING, property(descriptor, "urlField").shape());
+    assertEquals(Shape.STRING, property(descriptor, "url").shape());
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("HTTP_DYNAMIC_URL_NATIVE_CHECK_FALSE_POSITIVE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/urlInField", "/urlField", "/url"),
+        precondition.keyListPointers());
+    assertTrue(precondition.explanation().contains("native-check false positive"));
+    assertTrue(precondition.explanation().contains("incoming row field"));
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "Http");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    metadataField(meta.getClass(), "url").set(meta, "https://example.invalid/");
+    metadataField(meta.getClass(), "urlInField").setBoolean(meta, false);
+    var urlField = metadataField(meta.getClass(), "urlField");
+    urlField.set(meta, "endpoint_甲");
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "Http", "http-node", meta);
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("endpoint_甲"));
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertEquals(2, remarks.size());
+    assertTrue(remarks.stream().allMatch(
+        x -> x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_OK),
+        "Static HTTP URL with an incoming stream must pass the native check");
+
+    metadataField(meta.getClass(), "urlInField").setBoolean(meta, true);
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertEquals(2, remarks.size());
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_OK, remarks.get(0).getType());
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR, remarks.get(1).getType(),
+        "Native HttpMeta.check incorrectly marks a present URL field as ERROR");
+
+    urlField.set(meta, "");
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertEquals(2, remarks.size());
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR, remarks.get(1).getType(),
+        "An empty URL field is a genuine native-check error");
+
+    urlField.set(meta, "endpoint_甲");
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[0], new String[0], null, variables, provider);
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR, remarks.get(0).getType(),
+        "HTTP requires an incoming stream even with a valid URL field");
+    System.out.println("PROD_P0_HTTP_DYNAMIC_URL_NATIVE_CHECK_COMPATIBILITY=PASS");
+  }
+
   @Test void restDynamicMethodNativeCheckFalsePositiveIsDocumentedByProductionDescriptor()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
