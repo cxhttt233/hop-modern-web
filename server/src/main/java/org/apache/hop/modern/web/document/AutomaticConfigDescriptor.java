@@ -188,6 +188,11 @@ public final class AutomaticConfigDescriptor {
               "SELECT_VALUES_STAGE_SPECIFIC_FIELD_RESOLUTION",
               List.of("/fields/field", "/fields/remove", "/fields/meta"),
               "Select & Alter field[*].name resolves against incoming row fields; Remove remove[*].name resolves against the row after selection and renaming; Metadata meta[*].name resolves after removal. A renamed field must be referenced by its new name in later stages. Diagnose each stage against its own row metadata, not only the original input."));
+      case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" ->
+          List.of(new RuntimePrecondition(
+              "SORT_ROWS_KEYS_AND_TEMP_DIRECTORY_NATIVE_CHECK",
+              List.of("/fields/field", "/directory"),
+              "Native SortRowsMeta.check() requires a non-empty fields.field list, with each fields.field[*].name present in incoming row metadata. The resolved directory must exist and be a directory for temporary sort files; missing upstream fields or input hops are separate native errors. Diagnose against upstream metadata and resolved variables, not just the JSON field types."));
       case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta" ->
           List.of(new RuntimePrecondition(
               "STRING_CUT_SOURCE_FIELDS_REQUIRE_UPSTREAM_STRINGS",
