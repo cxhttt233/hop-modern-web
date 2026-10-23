@@ -71,6 +71,61 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void checkSumPreconditionsMatchNativeCheckResultAndGroupedFieldWire() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "CheckSum");
+    Property selected = property(descriptor, "field");
+    assertEquals(Shape.LIST, selected.shape());
+    assertEquals("fields", selected.groupKey());
+    assertTrue(selected.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("name") && p.shape() == Shape.STRING));
+    assertEquals(Shape.STRING, property(descriptor, "resultfieldName").shape());
+    assertEquals(List.of("CHECKSUM_RESULT_FIELD_REQUIRED",
+            "CHECKSUM_SELECTED_FIELDS_REQUIRE_UPSTREAM_FIELDS"),
+        descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
+    assertEquals(List.of("/resultfieldName"),
+        descriptor.runtimePreconditions().get(0).keyListPointers());
+    assertEquals(List.of("/fields/field"),
+        descriptor.runtimePreconditions().get(1).keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "CheckSum");
+    assertNotNull(plugin);
+    var meta = (org.apache.hop.pipeline.transforms.checksum.CheckSumMeta)
+        registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "CheckSum", "checksum-node", meta);
+    var upstream = new org.apache.hop.core.row.RowMeta();
+    upstream.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("流量"));
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+
+    meta.setResultFieldName("digest");
+    meta.setFields(List.of(new org.apache.hop.pipeline.transforms.checksum.Field("流量")));
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    remarks.clear();
+
+    meta.setFields(List.of(new org.apache.hop.pipeline.transforms.checksum.Field("缺失")));
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    remarks.clear();
+
+    meta.setFields(List.of(new org.apache.hop.pipeline.transforms.checksum.Field("流量")));
+    meta.setResultFieldName("");
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    System.out.println("PROD_P0_CHECKSUM_NATIVE_CHECK_PRECONDITIONS=PASS");
+  }
+
+  @Test
   void groupByAggregateSubjectPreconditionExemptsCountAnyAndUsesCanonicalGroupedList()
       throws Exception {
     Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "GroupBy");
