@@ -58,6 +58,8 @@ export function App() {
   const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
   const [paletteQuery, setPaletteQuery] = useState("");
+  // Keep only successfully opened server paths, in memory for this editor session.
+  const [recentPipelinePaths, setRecentPipelinePaths] = useState<string[]>([]);
   const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -103,6 +105,7 @@ export function App() {
       setDocument(graph);
       setNodes(graphNodes(graph));
       setSource({ kind: "server", path: pipelinePath });
+      setRecentPipelinePaths((current) => [pipelinePath, ...current.filter((path) => path !== pipelinePath)].slice(0, 4));
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       setSource({ kind: "sample", reason: error instanceof Error ? error.message : "无法打开流程" });
@@ -337,6 +340,18 @@ export function App() {
               <small>输入服务器上的 .hpl 文件路径</small>
             </div>
             <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="/workspace/example.hpl" autoFocus />
+            {recentPipelinePaths.length > 0 && (
+              <div className="pipeline-open-actions" role="group" aria-label="最近打开的流程" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
+                <small style={{ alignSelf: "center" }}>最近打开</small>
+                {recentPipelinePaths.map((path) => (
+                  <button key={path} type="button" title={path} aria-label={`填入最近流程：${path}`}
+                    disabled={saving || source.kind === "loading"} onClick={() => setPipelinePathDraft(path)}
+                    style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {path.split(/[\\/]/).pop() || path}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="pipeline-open-actions">
               {isRealGraph && <button type="button" onClick={() => setShowOpenPanel(false)}>取消</button>}
               <button type="submit" aria-label="Open pipeline" className="primary-action" disabled={!pipelinePathDraft.trim() || source.kind === "loading" || saving}>打开文件</button>
