@@ -149,13 +149,59 @@ try {
   const reopenedConfig = await (await pending).json();
   if (reopenedConfig.config?.sql !== sql) throw new Error("disk reopen lost authoritative config");
 
+  // Native Palette buttons also support pointer clicks and keyboard Enter.
+  // Each activation must make exactly one authoritative add request and
+  // survive a real disk save/reopen, not merely create a local canvas node.
+  await page.locator("form.generic-config").getByRole("button", { name: "Cancel" }).click();
+  let activationGraph = reopened;
+  const activated = [];
+  for (const [pluginId, method] of [["DataGrid", "click"], ["CheckSum", "Enter"]]) {
+    const beforeIds = new Set(activationGraph.nodes.map(node => node.id));
+    const countAdds = () => requests.filter(({ url, method: verb }) =>
+      verb === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
+    const beforeCount = countAdds();
+    pending = post("/edit/add");
+    const button = page.getByRole("button", { name: pluginId, exact: true });
+    if (method === "click") await button.click();
+    else {
+      await button.focus();
+      await page.keyboard.press("Enter");
+    }
+    const response = await pending;
+    if (!response.ok()) throw new Error(`Palette ${method} add ${pluginId} HTTP ${response.status()}`);
+    activationGraph = await response.json();
+    const node = activationGraph.nodes.find(candidate => !beforeIds.has(candidate.id));
+    if (!node || node.pluginId !== pluginId || activationGraph.nodes.length !== beforeIds.size + 1) {
+      throw new Error(`Palette ${method} did not add exactly one real ${pluginId} node`);
+    }
+    await rf(node.id).waitFor({ state: "visible" });
+    if (countAdds() !== beforeCount + 1) {
+      throw new Error(`Palette ${method} issued duplicate /edit/add requests for ${pluginId}`);
+    }
+    activated.push(node);
+  }
+
+  pending = post("/save");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const activatedSaved = await (await pending).json();
+  pending = post("/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const activatedReopened = await (await pending).json();
+  for (const node of activated) {
+    if (!activatedSaved.nodes.some(candidate => candidate.id === node.id && candidate.pluginId === node.pluginId) ||
+        !activatedReopened.nodes.some(candidate => candidate.id === node.id && candidate.pluginId === node.pluginId)) {
+      throw new Error(`Palette click/Enter node ${node.pluginId} missing after real save/reopen`);
+    }
+  }
+
   const rap = requests.filter(({ url }) => {
     const pathname = new URL(url).pathname;
     return pathname === "/ui" || pathname.startsWith("/ui/");
   });
   if (rap.length) throw new Error("RAP /ui entered");
 
-  console.log("V6 Palette authoritative proof passed: TableInput, SelectValues, FilterRows");
+  console.log("V6 Palette authoritative proof passed: drag TableInput/SelectValues/FilterRows; click DataGrid; Enter CheckSum; disk reopen");
 } finally {
   await browser.close();
 }
