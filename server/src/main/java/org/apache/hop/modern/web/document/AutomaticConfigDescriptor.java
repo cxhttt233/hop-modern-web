@@ -133,6 +133,11 @@ public final class AutomaticConfigDescriptor {
               "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
               List.of("/keys_1/key", "/keys_2/key"),
               "Both input streams must be sorted ascending by their respective join keys."));
+      case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
+          List.of(new RuntimePrecondition(
+              "TABLE_OUTPUT_SPECIFY_FIELDS_REQUIRES_INPUT_STREAM_FIELDS",
+              List.of("/fields/field"),
+              "When specify_fields is true, each fields.field[*].stream_name must exist in the incoming row; column_name is the database target. Check against upstream row metadata."));
       default -> List.of();
     };
   }
