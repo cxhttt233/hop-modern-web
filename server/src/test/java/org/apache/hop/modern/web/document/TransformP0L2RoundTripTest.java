@@ -35,6 +35,66 @@ class TransformP0L2RoundTripTest {
     }
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
+  @Test void restDynamicMethodNativeCheckFalsePositiveIsDocumentedByProductionDescriptor()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "Rest");
+    assertEquals(Shape.BOOLEAN, property(descriptor, "dynamicMethod").shape());
+    assertEquals(Shape.STRING, property(descriptor, "methodFieldName").shape());
+    assertEquals(Shape.STRING, property(descriptor, "method").shape());
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("REST_DYNAMIC_METHOD_NATIVE_CHECK_FALSE_POSITIVE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/dynamicMethod", "/methodFieldName", "/method"),
+        precondition.keyListPointers());
+    assertTrue(precondition.explanation().contains("native-check false positive"));
+    assertTrue(precondition.explanation().contains("incoming row field"));
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    metadataField(meta.getClass(), "url").set(meta, "https://example.invalid/");
+    metadataField(meta.getClass(), "urlInField").setBoolean(meta, false);
+    metadataField(meta.getClass(), "method").set(meta, "GET");
+    metadataField(meta.getClass(), "dynamicMethod").setBoolean(meta, false);
+    var methodField = metadataField(meta.getClass(), "methodFieldName");
+    methodField.set(meta, "method_甲");
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-node", meta);
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("method_甲"));
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertEquals(3, remarks.size());
+    assertTrue(remarks.stream().allMatch(
+        x -> x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_OK),
+        "A valid static REST method and URL must pass the native check");
+
+    metadataField(meta.getClass(), "dynamicMethod").setBoolean(meta, true);
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertEquals(3, remarks.size());
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_OK, remarks.get(0).getType());
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_OK, remarks.get(1).getType());
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR, remarks.get(2).getType(),
+        "Hop native RestMeta.check marks a present dynamic method field as ERROR");
+
+    methodField.set(meta, "");
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertEquals(3, remarks.size());
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR, remarks.get(2).getType(),
+        "A missing dynamic method field is a genuine native-check error");
+    System.out.println("PROD_P0_REST_DYNAMIC_METHOD_NATIVE_CHECK_COMPATIBILITY=PASS");
+  }
+
   @Test void stringCutNativeInputFieldChecksDoNotRequireDistinctSources() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "StringCut");
