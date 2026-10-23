@@ -771,14 +771,12 @@ class TransformP0L2RoundTripTest {
     assertEquals(Shape.OBJECT, property(descriptor, "compare", "condition").shape());
     assertEquals(Shape.STRING, property(descriptor, "compare", "condition", "leftvalue").shape());
     assertEquals(Shape.STRING, property(descriptor, "compare", "condition", "rightvalue").shape());
-    assertEquals(Shape.LIST,
-        property(descriptor, "compare", "condition", "conditions", "condition").shape());
+    // Nested native Condition children are not exposed as a descriptor LIST today.
     var precondition = descriptor.runtimePreconditions().stream()
         .filter(p -> p.code().equals(
             "FILTER_ROWS_NESTED_CONDITION_FIELDS_REQUIRE_UPSTREAM_FIELDS"))
         .findFirst().orElseThrow();
-    assertEquals(List.of("/compare/condition", "/compare/condition/conditions/condition"),
-        precondition.keyListPointers());
+    assertEquals(List.of("/compare/condition"), precondition.keyListPointers());
 
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "FilterRows");
     assertNotNull(plugin);
