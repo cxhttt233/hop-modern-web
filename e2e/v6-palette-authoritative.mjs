@@ -46,6 +46,24 @@ try {
     if (!node.id || before.has(node.id)) throw new Error(`node id not unique for ${plugins[i]}`);
     added.push(node);
     await rf(node.id).waitFor();
+
+    // The authoritative node must be visually centered on the actual drop
+    // point, not positioned with its top-left corner under the cursor.
+    // Measure the real rendered React Flow node after the server has replied.
+    const paneBox = await canvas.boundingBox();
+    const nodeBox = await rf(node.id).boundingBox();
+    if (!paneBox || !nodeBox) throw new Error("Palette drop lacks visible canvas/node geometry");
+    const dropX = paneBox.x + positions[i].x;
+    const dropY = paneBox.y + positions[i].y;
+    const nodeCenterX = nodeBox.x + nodeBox.width / 2;
+    const nodeCenterY = nodeBox.y + nodeBox.height / 2;
+    // The transform footprint is 176px wide and about 50px high; the
+    // placement uses a 176x64 anchor, leaving a small vertical difference.
+    if (Math.abs(nodeCenterX - dropX) > 18 || Math.abs(nodeCenterY - dropY) > 22) {
+      throw new Error(
+        `Palette drop center mismatch for ${plugins[i]}: drop=(${dropX},${dropY}), nodeCenter=(${nodeCenterX},${nodeCenterY})`
+      );
+    }
   }
 
   async function connect(from, to) {
