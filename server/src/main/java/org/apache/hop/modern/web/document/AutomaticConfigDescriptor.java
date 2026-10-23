@@ -161,8 +161,8 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.filterrows.FilterRowsMeta" ->
           List.of(new RuntimePrecondition(
               "FILTER_ROWS_NESTED_CONDITION_FIELDS_REQUIRE_UPSTREAM_FIELDS",
-              List.of("/compare/condition", "/compare/condition/conditions/condition"),
-              "FilterRows requires a non-empty compare.condition and incoming rows. Native FilterRowsMeta.check() recursively collects both leftvalue and rightvalue field references from nested conditions and reports missing upstream fields as ERROR. Literal right-side values are not upstream field references; true/false target transforms are separate graph references, not condition fields."));
+              List.of("/compare/condition"),
+              "FilterRows requires a non-empty compare.condition and incoming rows. Native FilterRowsMeta.check() recursively collects both leftvalue and rightvalue field references from nested conditions and reports missing upstream fields as ERROR. Literal right-side values are not upstream field references; true/false target transforms are separate graph references, not condition fields. The canonical pointer anchors the condition object; recursive child pointers are not exposed by the current descriptor."));
       case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
           List.of(
               new RuntimePrecondition(
