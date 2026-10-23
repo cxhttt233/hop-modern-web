@@ -242,6 +242,91 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REST_DYNAMIC_METHOD_NATIVE_CHECK_COMPATIBILITY=PASS");
   }
 
+  @Test
+  void sortRowsNativeCheckRequiresKnownKeysAndExistingTemporaryDirectory() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "SortRows");
+    Property sortKeys = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("fields"))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, sortKeys.shape());
+    assertTrue(sortKeys.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("name") && p.shape() == Shape.STRING));
+    assertEquals(Shape.STRING, property(descriptor, "directory").shape());
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("SORT_ROWS_KEYS_AND_TEMP_DIRECTORY_NATIVE_CHECK"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field", "/directory"), precondition.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "SortRows");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> fieldClass = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.sort.SortRowsField");
+    Object key = fieldClass.getConstructor().newInstance();
+    var setKeyName = fieldClass.getMethod("setFieldName", String.class);
+    setKeyName.invoke(key, "水位");
+    var setSortFields = meta.getClass().getMethod("setSortFields", List.class);
+    var setDirectory = meta.getClass().getMethod("setDirectory", String.class);
+    setSortFields.invoke(meta, List.of(key));
+    String existingDirectory = System.getProperty("java.io.tmpdir");
+    assertTrue(new java.io.File(existingDirectory).isDirectory());
+    setDirectory.invoke(meta, existingDirectory);
+
+    var upstream = new org.apache.hop.core.row.RowMeta();
+    upstream.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("水位"));
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "SortRows", "sort-native", meta);
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Known sort key, upstream input and existing directory must pass native checks");
+
+    setSortFields.invoke(meta, List.of());
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "An empty sort key list is a native error");
+
+    setSortFields.invoke(meta, List.of(key));
+    setKeyName.invoke(key, "不存在的字段");
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Sort key must resolve against incoming row metadata");
+
+    setKeyName.invoke(key, "水位");
+    String missingDirectory = existingDirectory + java.io.File.separator
+        + "hop-modern-web-sort-missing-" + java.util.UUID.randomUUID();
+    assertFalse(new java.io.File(missingDirectory).exists());
+    setDirectory.invoke(meta, missingDirectory);
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[] {"source"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Temporary sort directory must exist");
+
+    setDirectory.invoke(meta, existingDirectory);
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        upstream, new String[0], new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Missing upstream hop must be reported by the native check");
+    System.out.println("PROD_P0_SORTROWS_KEYS_TEMP_DIRECTORY_NATIVE_CHECK=PASS");
+  }
+
   @Test void stringCutNativeInputFieldChecksDoNotRequireDistinctSources() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "StringCut");
