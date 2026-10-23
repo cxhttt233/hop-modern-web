@@ -129,6 +129,79 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void jsonInputSourceModeAndOutputFieldsPreconditionsMatchNativePluginCheck()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "JsonInput");
+    Property fields = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("fields"))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, fields.shape());
+    assertTrue(fields.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("path") && p.shape() == Shape.STRING));
+    assertEquals(Shape.BOOLEAN, property(descriptor, "IsInFields").shape());
+    assertEquals(Shape.STRING, property(descriptor, "valueField").shape());
+    assertEquals(List.of("JSON_INPUT_OUTPUT_FIELDS_REQUIRED",
+            "JSON_INPUT_FIELD_SOURCE_REQUIRES_INCOMING_HOP_AND_NAME"),
+        descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
+    assertEquals(List.of("/fields/field"),
+        descriptor.runtimePreconditions().get(0).keyListPointers());
+    assertEquals(List.of("/IsInFields", "/valueField"),
+        descriptor.runtimePreconditions().get(1).keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    ClassLoader loader = meta.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField");
+    Object output = fieldType.getConstructor(String.class).newInstance("流量");
+    fieldType.getMethod("setPath", String.class).invoke(output, "$.flow");
+    var setFields = meta.getClass().getMethod("setInputFields", List.class);
+    var setInFields = meta.getClass().getMethod("setInFields", boolean.class);
+    var setFieldValue = meta.getClass().getMethod("setFieldValue", String.class);
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "JsonInput", "json-node", meta);
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("payload"));
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+
+    setInFields.invoke(meta, true);
+    setFieldValue.invoke(meta, "payload");
+    setFields.invoke(meta, List.of(output));
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"upstream"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    remarks.clear();
+
+    setFields.invoke(meta, List.of());
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"upstream"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    remarks.clear();
+
+    setFields.invoke(meta, List.of(output));
+    setFieldValue.invoke(meta, "");
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"upstream"}, new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    remarks.clear();
+
+    setFieldValue.invoke(meta, "payload");
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[0], new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    System.out.println("PROD_P0_JSONINPUT_SOURCE_MODE_NATIVE_CHECK=PASS");
+  }
+
+  @Test
   void groupByAggregateSubjectPreconditionExemptsCountAnyAndUsesCanonicalGroupedList()
       throws Exception {
     Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "GroupBy");
