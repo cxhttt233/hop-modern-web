@@ -689,6 +689,59 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void groupByMissingGroupingKeysAreSilentlyOmittedByNativeMetadataProjection()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "GroupBy");
+    Property grouping = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("group"))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, grouping.shape());
+    assertTrue(grouping.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("name") && p.shape() == Shape.STRING));
+    var requirement = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("GROUPBY_GROUPING_KEYS_REQUIRE_UPSTREAM_FIELDS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/group/field"), requirement.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> groupingClass = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.groupby.GroupingField");
+    Object key = groupingClass.getConstructor(String.class).newInstance("地区");
+    meta.getClass().getMethod("setGroupingFields", List.class).invoke(meta, List.of(key));
+
+    var input = new org.apache.hop.core.row.RowMeta();
+    input.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("地区"));
+    input.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("数量"));
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    var validOutput = new org.apache.hop.core.row.RowMeta();
+    validOutput.addRowMeta(input);
+    meta.getFields(validOutput, "groupby-native", null, null, variables, provider);
+    assertEquals(1, validOutput.size());
+    assertEquals("地区", validOutput.getValueMeta(0).getName());
+
+    groupingClass.getMethod("setName", String.class).invoke(key, "不存在的分组字段");
+    var invalidOutput = new org.apache.hop.core.row.RowMeta();
+    invalidOutput.addRowMeta(input);
+    meta.getFields(invalidOutput, "groupby-native", null, null, variables, provider);
+    assertEquals(0, invalidOutput.size(),
+        "Native getFields silently drops a missing grouping key when all_rows=false");
+
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(),
+        new org.apache.hop.pipeline.transform.TransformMeta("GroupBy", "groupby-native", meta),
+        input, new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        x -> x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Native GroupByMeta.check only checks the input hop, not grouping key existence");
+    System.out.println("PROD_P0_GROUPBY_MISSING_GROUP_KEY_METADATA_GAP=PASS");
+  }
+
+  @Test
   void groupByAggregateSubjectPreconditionExemptsCountAnyAndUsesCanonicalGroupedList()
       throws Exception {
     Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "GroupBy");
@@ -699,9 +752,10 @@ class TransformP0L2RoundTripTest {
     assertTrue(aggregations.elementProperties().stream()
         .anyMatch(p -> p.key().equals("subject") && p.shape() == Shape.STRING));
     assertEquals(List.of("GROUP_KEYS_CONTIGUOUS",
+            "GROUPBY_GROUPING_KEYS_REQUIRE_UPSTREAM_FIELDS",
             "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
-    var precondition = descriptor.runtimePreconditions().get(1);
+    var precondition = descriptor.runtimePreconditions().get(2);
     assertEquals(List.of("/fields/field"), precondition.keyListPointers());
     assertTrue(precondition.explanation().contains("COUNT_ANY"));
     assertTrue(precondition.explanation().contains("upstream row metadata"));
