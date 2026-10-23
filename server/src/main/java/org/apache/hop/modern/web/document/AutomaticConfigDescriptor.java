@@ -158,6 +158,11 @@ public final class AutomaticConfigDescriptor {
                   "JSON_INPUT_FIELD_SOURCE_REQUIRES_INCOMING_HOP_AND_NAME",
                   List.of("/IsInFields", "/valueField"),
                   "When IsInFields is true, an incoming hop and non-empty valueField are required. Resolve the source field against upstream row metadata at runtime; native check only checks the name is non-empty. When IsInFields is false, source files must resolve through the file input configuration."));
+      case "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta" ->
+          List.of(new RuntimePrecondition(
+              "EXEC_SQL_INPUT_MODE_REQUIRES_MATCHING_HOP_TOPOLOGY",
+              List.of("/execute_each_row"),
+              "When execute_each_row is true, ExecSql consumes the main input and its native check requires at least one incoming hop. When false, it can start without input and the native check reports an ERROR if an incoming hop is connected, because SQL is executed only once. Diagnose input topology independently from SQL text and database connection availability; this is not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.filterrows.FilterRowsMeta" ->
           List.of(new RuntimePrecondition(
               "FILTER_ROWS_NESTED_CONDITION_FIELDS_REQUIRE_UPSTREAM_FIELDS",
