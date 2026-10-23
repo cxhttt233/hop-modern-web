@@ -127,10 +127,19 @@ try {
     }
   }
 
-  // Switching back must recover the original disk graph, not the other file's
-  // in-memory document. No mock graph or RAP /ui route is involved.
+  // The Chinese recent-file chooser remembers only successful real .hpl
+  // opens. Choosing a shortcut fills the path; the user still explicitly opens.
+  // Switching back must recover the original disk graph, not in-memory state.
   await page.getByRole("button", { name: "Choose pipeline" }).click();
-  await page.getByLabel("Server-visible pipeline path").fill(pipelinePath);
+  const recent = page.getByRole("group", { name: "最近打开的流程" });
+  const recentChoices = recent.getByRole("button");
+  if (await recentChoices.count() !== 2) {
+    throw new Error("Recent real pipelines must contain two distinct successful opens");
+  }
+  await recent.getByRole("button", { name: `填入最近流程：${pipelinePath}` }).click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== pipelinePath) {
+    throw new Error("Recent pipeline selection did not fill the original server path");
+  }
   const returnPending = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
     new URL(response.url()).pathname === "/api/pipelines/open");
