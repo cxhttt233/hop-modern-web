@@ -51,6 +51,33 @@ try {
   if (await connection.inputValue() !== "Warehouse") throw new Error("Connection not preserved");
   const writes = requests.filter(({url,method}) => method === "POST" && new URL(url).pathname.endsWith("/config/write"));
   if (writes.length !== 1) throw new Error("Expected exactly one config/write");
+  // Deleting the sole real Hop transform must reveal the Chinese empty-flow
+  // guidance; undo must restore the authoritative node and hide the guidance.
+  await panel.getByRole("button", { name: "Cancel" }).click();
+  await node.click();
+  const deletePending = page.waitForResponse(r => match(r, "/edit/delete"));
+  await page.getByRole("button", { name: "Delete" }).click();
+  const deleteResponse = await deletePending;
+  const deleted = await deleteResponse.json();
+  if (!deleteResponse.ok() || deleted.nodes?.length !== 0) {
+    throw new Error("Deleting the sole real transform did not yield an empty graph");
+  }
+  const hint = page.locator(".empty-graph-hint");
+  await hint.waitFor({ state: "visible" });
+  if (!(await hint.innerText()).includes("从左侧拖入组件") ||
+      await page.locator(".react-flow__node").count() !== 0) {
+    throw new Error("Real empty graph lacks actionable Chinese guidance");
+  }
+  const undoPending = page.waitForResponse(r => match(r, "/edit/undo"));
+  await page.getByRole("button", { name: "Undo" }).click();
+  const undoResponse = await undoPending;
+  const restored = await undoResponse.json();
+  if (!undoResponse.ok() || !restored.nodes?.some(n => n.id === "table-input")) {
+    throw new Error("Undo failed to restore the real TableInput transform");
+  }
+  await node.waitFor({ state: "visible" });
+  await hint.waitFor({ state: "hidden" });
+
   const rap = requests.filter(({url}) => { const p = new URL(url).pathname; return p === "/ui" || p.startsWith("/ui/"); });
   if (rap.length) throw new Error("RAP /ui must not be entered");
   console.log("V4 generic config proof passed");
