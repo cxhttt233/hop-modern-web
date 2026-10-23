@@ -35,6 +35,89 @@ class TransformP0L2RoundTripTest {
     }
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
+  @Test
+  void concatFieldsTargetAndSelectedSourceNativeChecksRespectErrorWarningDistinction()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "ConcatFields");
+    assertEquals(Shape.STRING, property(descriptor, "ConcatFields", "targetFieldName").shape());
+    assertEquals(Shape.NUMBER, property(descriptor, "ConcatFields", "targetFieldLength").shape());
+    Property selected = property(descriptor, "field");
+    assertEquals(Shape.LIST, selected.shape());
+    assertEquals("fields", selected.groupKey());
+    assertTrue(selected.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("name") && p.shape() == Shape.STRING));
+    assertEquals(List.of(
+            "CONCAT_FIELDS_TARGET_NAME_REQUIRED_LENGTH_WARNING",
+            "CONCAT_FIELDS_SELECTED_SOURCE_FIELDS_REQUIRE_UPSTREAM_FIELDS"),
+        descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
+    assertEquals(List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
+        descriptor.runtimePreconditions().get(0).keyListPointers());
+    assertEquals(List.of("/fields/field"),
+        descriptor.runtimePreconditions().get(1).keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ConcatFields");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Object extra = meta.getClass().getMethod("getExtraFields").invoke(meta);
+    var setTargetName = extra.getClass().getMethod("setTargetFieldName", String.class);
+    var setTargetLength = extra.getClass().getMethod("setTargetFieldLength", int.class);
+    var setOutputFields = meta.getClass().getMethod("setOutputFields", List.class);
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "ConcatFields", "concat-native", meta);
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("字段甲"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("字段乙"));
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertEquals(1, remarks.stream().filter(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR).count(),
+        "Missing target name must be an ERROR");
+    assertEquals(1, remarks.stream().filter(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_WARNING).count(),
+        "Zero target length must be a WARNING, not an ERROR");
+
+    setTargetName.invoke(extra, "合并字段");
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "An empty selection means all input fields, not a missing selection error");
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_WARNING));
+
+    setTargetLength.invoke(extra, 128);
+    Class<?> fieldClass = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.concatfields.ConcatField");
+    Object selectedField = fieldClass.getConstructor().newInstance();
+    var setSourceName = fieldClass.getMethod("setName", String.class);
+    setSourceName.invoke(selectedField, "字段甲");
+    setOutputFields.invoke(meta, List.of(selectedField));
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() != org.apache.hop.core.ICheckResult.TYPE_RESULT_OK),
+        "Valid target, length and selected upstream field must pass native checks");
+
+    setSourceName.invoke(selectedField, "不存在的字段");
+    remarks.clear();
+    meta.check(remarks, new org.apache.hop.pipeline.PipelineMeta(), transform,
+        row, new String[] {"source"}, new String[0], null, variables, provider);
+    assertEquals(1, remarks.stream().filter(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR).count(),
+        "Unknown selected upstream field must be an ERROR");
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_WARNING));
+    System.out.println("PROD_P0_CONCATFIELDS_TARGET_AND_SOURCE_NATIVE_CHECK=PASS");
+  }
+
   @Test void httpDynamicUrlFieldNativeCheckFalsePositiveIsDocumentedByProductionDescriptor()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
