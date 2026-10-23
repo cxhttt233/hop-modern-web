@@ -70,6 +70,23 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEINPUT_SQL_XML_REOPEN_UTF8=PASS cases=" + sqlCases.length);
   }
 
+  @Test
+  void tableOutputExplicitFieldMappingPreconditionMatchesProductionGroupedDescriptor()
+      throws Exception {
+    Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "TableOutput");
+    Property mapping = property(descriptor, "field");
+    assertEquals(Shape.LIST, mapping.shape());
+    assertEquals("fields", mapping.groupKey());
+    assertEquals(List.of("stream_name", "column_name"),
+        mapping.elementProperties().stream().map(Property::key).toList());
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("TABLE_OUTPUT_SPECIFY_FIELDS_REQUIRES_INPUT_STREAM_FIELDS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), precondition.keyListPointers());
+    assertTrue(precondition.explanation().contains("specify_fields"));
+    System.out.println("PROD_P0_TABLEOUTPUT_INPUT_MAPPING_PRECONDITION=PASS");
+  }
+
   @Test void nestedAndSensitiveProductionDescriptorsStayTyped() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor json = descriptorFor(registry, "JsonInput");
