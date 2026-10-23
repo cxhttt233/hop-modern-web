@@ -133,6 +133,16 @@ public final class AutomaticConfigDescriptor {
                   "CHECKSUM_SELECTED_FIELDS_REQUIRE_UPSTREAM_FIELDS",
                   List.of("/fields/field"),
                   "Each fields.field[*].name must exist in incoming row metadata. Missing selected fields are errors; an empty selection is a warning, not an unknown-field error."));
+      case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
+          List.of(
+              new RuntimePrecondition(
+                  "JSON_INPUT_OUTPUT_FIELDS_REQUIRED",
+                  List.of("/fields/field"),
+                  "JsonInput requires at least one fields.field output JsonPath definition; native check reports ERROR when the list is empty."),
+              new RuntimePrecondition(
+                  "JSON_INPUT_FIELD_SOURCE_REQUIRES_INCOMING_HOP_AND_NAME",
+                  List.of("/IsInFields", "/valueField"),
+                  "When IsInFields is true, an incoming hop and non-empty valueField are required. Resolve the source field against upstream row metadata at runtime; native check only checks the name is non-empty. When IsInFields is false, source files must resolve through the file input configuration."));
       case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
           List.of(
               new RuntimePrecondition(
