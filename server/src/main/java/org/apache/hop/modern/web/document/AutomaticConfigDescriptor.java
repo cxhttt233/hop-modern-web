@@ -133,6 +133,11 @@ public final class AutomaticConfigDescriptor {
                   "CHECKSUM_SELECTED_FIELDS_REQUIRE_UPSTREAM_FIELDS",
                   List.of("/fields/field"),
                   "Each fields.field[*].name must exist in incoming row metadata. Missing selected fields are errors; an empty selection is a warning, not an unknown-field error."));
+      case "org.apache.hop.pipeline.transforms.http.HttpMeta" ->
+          List.of(new RuntimePrecondition(
+              "HTTP_DYNAMIC_URL_NATIVE_CHECK_FALSE_POSITIVE",
+              List.of("/urlInField", "/urlField", "/url"),
+              "When urlInField is true, urlField must be non-empty and resolve to an incoming row field. Native HttpMeta.check() reports ERROR with UrlfieldOk even when the URL field name is present; this is a native-check false positive, not grounds to reject an otherwise valid dynamic URL configuration. At runtime the resolved URL field must exist in upstream row metadata. When urlInField is false, url must be non-empty."));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           List.of(
               new RuntimePrecondition(
