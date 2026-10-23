@@ -158,6 +158,11 @@ public final class AutomaticConfigDescriptor {
                   "JSON_INPUT_FIELD_SOURCE_REQUIRES_INCOMING_HOP_AND_NAME",
                   List.of("/IsInFields", "/valueField"),
                   "When IsInFields is true, an incoming hop and non-empty valueField are required. Resolve the source field against upstream row metadata at runtime; native check only checks the name is non-empty. When IsInFields is false, source files must resolve through the file input configuration."));
+      case "org.apache.hop.pipeline.transforms.filterrows.FilterRowsMeta" ->
+          List.of(new RuntimePrecondition(
+              "FILTER_ROWS_NESTED_CONDITION_FIELDS_REQUIRE_UPSTREAM_FIELDS",
+              List.of("/compare/condition", "/compare/condition/conditions/condition"),
+              "FilterRows requires a non-empty compare.condition and incoming rows. Native FilterRowsMeta.check() recursively collects both leftvalue and rightvalue field references from nested conditions and reports missing upstream fields as ERROR. Literal right-side values are not upstream field references; true/false target transforms are separate graph references, not condition fields."));
       case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
           List.of(
               new RuntimePrecondition(
