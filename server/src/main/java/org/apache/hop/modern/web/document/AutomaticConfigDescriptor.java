@@ -158,6 +158,11 @@ public final class AutomaticConfigDescriptor {
               "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
               List.of("/keys_1/key", "/keys_2/key"),
               "Both input streams must be sorted ascending by their respective join keys."));
+      case "org.apache.hop.pipeline.transforms.rest.RestMeta" ->
+          List.of(new RuntimePrecondition(
+              "REST_DYNAMIC_METHOD_NATIVE_CHECK_FALSE_POSITIVE",
+              List.of("/dynamicMethod", "/methodFieldName", "/method"),
+              "When dynamicMethod is true, methodFieldName must be non-empty and resolve to an incoming row field. The native RestMeta.check() incorrectly reports ERROR even when the field name is present (MethodFieldOk); this is a native-check false positive, not a reason to reject an otherwise valid dynamic-method configuration. Runtime also validates each incoming HTTP method token. When dynamicMethod is false, method must be a valid non-empty HTTP method token."));
       case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta" ->
           List.of(new RuntimePrecondition(
               "REPLACE_STRING_SOURCE_FIELDS_MUST_BE_DISTINCT_STRINGS",
