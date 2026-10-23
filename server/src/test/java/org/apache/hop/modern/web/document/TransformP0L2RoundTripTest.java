@@ -650,13 +650,13 @@ class TransformP0L2RoundTripTest {
     var variables = new org.apache.hop.core.variables.Variables();
     var provider = new MemoryMetadataProvider();
     List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
-    String onceOnlyError = org.apache.hop.core.i18n.BaseMessages.getString(
+    String onceOnlyError = org.apache.hop.i18n.BaseMessages.getString(
         meta.getClass(), "ExecSqlMeta.CheckResult.SQLOnlyExecutedOnce");
-    String onceOnlyOk = org.apache.hop.core.i18n.BaseMessages.getString(
+    String onceOnlyOk = org.apache.hop.i18n.BaseMessages.getString(
         meta.getClass(), "ExecSqlMeta.CheckResult.InputReceivedOKForSQLOnlyExecuteOnce");
-    String perRowError = org.apache.hop.core.i18n.BaseMessages.getString(
+    String perRowError = org.apache.hop.i18n.BaseMessages.getString(
         meta.getClass(), "ExecSqlMeta.CheckResult.NoInputReceivedError");
-    String perRowOk = org.apache.hop.core.i18n.BaseMessages.getString(
+    String perRowOk = org.apache.hop.i18n.BaseMessages.getString(
         meta.getClass(), "ExecSqlMeta.CheckResult.TransformReceivingInfoOK");
 
     setEachRow.invoke(meta, false);
