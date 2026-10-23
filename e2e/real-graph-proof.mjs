@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { fileURLToPath } from "node:url";
 
 const pipelinePath = process.env.REAL_HPL_PATH;
 if (!pipelinePath) throw new Error("REAL_HPL_PATH is required");
@@ -71,6 +72,59 @@ try {
   }
   if (requests.filter((url) => url.includes("/api/pipelines/open")).length !== 2) {
     throw new Error("Expected exactly one additional real open on reopen");
+  }
+
+  // Switching between two different real .hpl files must replace the graph
+  // and document identity, not leak nodes or hops from the previous file.
+  const alternatePath = fileURLToPath(new URL("./fixtures/v4-table-input-proof.hpl", import.meta.url));
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(alternatePath);
+  const alternatePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const alternateResponse = await alternatePending;
+  if (!alternateResponse.ok()) throw new Error("Alternate real pipeline open failed");
+  const alternate = await alternateResponse.json();
+  if (alternate.name !== "v4-table-input-proof" || alternate.nodes?.length !== 1 ||
+      alternate.edges?.length !== 0) {
+    throw new Error("Unexpected authoritative alternate pipeline graph");
+  }
+  await page.locator('.file-identity[data-document-name="v4-table-input-proof"]').waitFor({ state: "visible" });
+  await page.locator('.react-flow__node[data-id="' + alternate.nodes[0].id + '"]').waitFor({ state: "visible" });
+  if (await page.locator(".react-flow__node").count() !== 1 ||
+      await page.locator(".react-flow__edge").count() !== 0) {
+    throw new Error("Switching files retained stale nodes or hops");
+  }
+  for (const previous of graph.nodes) {
+    if (await page.locator('.react-flow__node[data-id="' + previous.id + '"]').count()) {
+      throw new Error("Previous pipeline node leaked after file switch");
+    }
+  }
+
+  // Switching back must recover the original disk graph, not the other file's
+  // in-memory document. No mock graph or RAP /ui route is involved.
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(pipelinePath);
+  const returnPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const returnResponse = await returnPending;
+  if (!returnResponse.ok()) throw new Error("Original real pipeline return failed");
+  const returned = await returnResponse.json();
+  if (returned.name !== graph.name || returned.nodes?.length !== graph.nodes.length ||
+      returned.edges?.length !== graph.edges.length) {
+    throw new Error("Original disk graph changed after switching files");
+  }
+  await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
+  for (const original of graph.nodes) {
+    await page.locator('.react-flow__node[data-id="' + original.id + '"]').waitFor({ state: "visible" });
+  }
+  if (await page.locator(".react-flow__node").count() !== graph.nodes.length ||
+      await page.locator(".react-flow__edge").count() !== graph.edges.length ||
+      requests.filter((url) => url.includes("/api/pipelines/open")).length !== 4) {
+    throw new Error("Real file-switch round trip failed to restore the authoritative graph");
   }
 
   const rapRequests = requests.filter((url) => {
