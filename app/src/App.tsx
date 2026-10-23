@@ -402,6 +402,11 @@ export function App() {
             {source.kind === "loading" ? "正在打开流程…" : source.reason ? `流程打开失败：${source.reason}` : "打开服务器上的 .hpl 文件后开始编辑"}
           </div>
         )}
+        {isRealGraph && document.nodes.length === 0 && (
+          <div className="preview-note empty-graph-hint" role="status" style={{ pointerEvents: "none" }}>
+            当前流程还没有转换组件。请从左侧拖入组件，或点击组件添加。
+          </div>
+        )}
 
         <TransformNodeActionsContext.Provider value={{
           configure: openTransformConfig,
