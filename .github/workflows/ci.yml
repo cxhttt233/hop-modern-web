@@ -81,7 +81,9 @@ jobs:
       - name: Install source-derived production P0 Transform modules
         working-directory: hop
         shell: bash
-        run: ./mvnw -q -pl "lib,$P0_MAVEN_PL" -am -DskipTests install
+        # SortRows is a priority T3 native-check fixture outside the 20-item P0 catalog.
+        # Install its pinned source module instead of resolving a cached SNAPSHOT jar.
+        run: ./mvnw -q -pl "lib,plugins/transforms/sort,$P0_MAVEN_PL" -am -DskipTests install
       - name: Prove production P0 Transform runtime L0/L1/L2 and emit descriptors
         working-directory: modern/server
         run: mvn -q -Dtest=TransformCatalogProbeTest,TransformP0L2RoundTripTest -DprodP0Expected=true -Dp0DescriptorFixture=../docs/p0-transform-descriptors.generated.json test
