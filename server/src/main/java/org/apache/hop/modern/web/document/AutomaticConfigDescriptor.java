@@ -158,6 +158,11 @@ public final class AutomaticConfigDescriptor {
               "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
               List.of("/keys_1/key", "/keys_2/key"),
               "Both input streams must be sorted ascending by their respective join keys."));
+      case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta" ->
+          List.of(new RuntimePrecondition(
+              "REPLACE_STRING_SOURCE_FIELDS_MUST_BE_DISTINCT_STRINGS",
+              List.of("/fields/field"),
+              "Each fields.field[*].in_stream_name must be non-empty, distinct and present in incoming row metadata as STRING. The native ReplaceString check reports errors for missing, non-string or repeated source fields. out_stream_name is an optional output alias, not an upstream field."));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" ->
           List.of(new RuntimePrecondition(
               "SELECT_VALUES_STAGE_SPECIFIC_FIELD_RESOLUTION",
