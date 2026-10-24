@@ -104,7 +104,8 @@ class TransformP0L2RoundTripTest {
         .anyMatch(p -> p.key().equals("name") && p.shape() == Shape.STRING));
     assertEquals(List.of(
             "CONCAT_FIELDS_TARGET_NAME_REQUIRED_LENGTH_WARNING",
-            "CONCAT_FIELDS_SELECTED_SOURCE_FIELDS_REQUIRE_UPSTREAM_FIELDS"),
+            "CONCAT_FIELDS_SELECTED_SOURCE_FIELDS_REQUIRE_UPSTREAM_FIELDS",
+            "CONCAT_FIELDS_REMOVE_SELECTED_FIELDS_CHANGES_OUTPUT_SCHEMA"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     assertEquals(List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
         descriptor.runtimePreconditions().get(0).keyListPointers());
