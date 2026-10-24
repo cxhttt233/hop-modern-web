@@ -11,7 +11,11 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.container.ContainerResponseContext;
+import jakarta.ws.rs.container.ContainerResponseFilter;
 import jakarta.ws.rs.ext.ContextResolver;
+import java.io.IOException;
 import java.net.URI;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.plugins.PluginRegistry;
@@ -72,9 +76,22 @@ public final class ModernWebServer {
         .register(configResource)
         .register(editResource)
         .register(executionResource)
+        .register(new NoStoreApiResponseFilter())
         .register(new JavaTimeObjectMapperProvider())
         .register(JacksonFeature.class);
   }
+  /** Prevent shared browser and intermediary caches from retaining pipeline state or execution data. */
+  private static final class NoStoreApiResponseFilter implements ContainerResponseFilter {
+    @Override
+    public void filter(ContainerRequestContext request, ContainerResponseContext response)
+        throws IOException {
+      String path = request.getUriInfo().getPath();
+      if (path.equals("api") || path.startsWith("api/")) {
+        response.getHeaders().putSingle("Cache-Control", "no-store");
+      }
+    }
+  }
+
   private static final class JavaTimeObjectMapperProvider implements ContextResolver<ObjectMapper> {
     private final ObjectMapper mapper =
         new ObjectMapper()
