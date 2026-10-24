@@ -2200,6 +2200,69 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REPLACESTRING_ALIAS_OUTPUT_SCHEMA=PASS");
   }
 
+  @Test
+  void selectValuesUnspecifiedFieldsFollowSelectedOrderThenAlphabeticalExtras() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "SelectValues");
+    assertEquals(Shape.OBJECT, property(descriptor, "fields").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "fields", "select_unspecified").shape());
+    assertEquals(Shape.LIST, property(descriptor, "fields", "field").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SELECT_VALUES_UNSPECIFIED_FIELDS_SORT_AFTER_EXPLICIT_SELECTION"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/select_unspecified", "/fields/field"),
+        contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(plugin, "production SelectValues plugin missing");
+    var meta = (org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta)
+        registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var selected = new org.apache.hop.pipeline.transforms.selectvalues.SelectField();
+    selected.setName("黄河流量");
+    selected.setRename("选中_流量");
+    meta.getSelectOption().setSelectFields(List.of(selected));
+
+    var input = new org.apache.hop.core.row.RowMeta();
+    for (String field : List.of("zeta", "beta", "黄河流量", "alpha")) {
+      input.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString(field));
+    }
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+
+    meta.getSelectOption().setSelectingAndSortingUnspecifiedFields(true);
+    var withExtras = new org.apache.hop.core.row.RowMeta();
+    withExtras.addRowMeta(input);
+    meta.getFields(withExtras, "select-values", null, null, variables, provider);
+    assertEquals(4, withExtras.size());
+    assertEquals(List.of("选中_流量", "alpha", "beta", "zeta"),
+        List.of(withExtras.getValueMeta(0).getName(), withExtras.getValueMeta(1).getName(),
+            withExtras.getValueMeta(2).getName(), withExtras.getValueMeta(3).getName()),
+        "explicit selection comes first; unspecified fields are alphabetized");
+
+    meta.getSelectOption().setSelectingAndSortingUnspecifiedFields(false);
+    var selectedOnly = new org.apache.hop.core.row.RowMeta();
+    selectedOnly.addRowMeta(input);
+    meta.getFields(selectedOnly, "select-values", null, null, variables, provider);
+    assertEquals(1, selectedOnly.size());
+    assertEquals("选中_流量", selectedOnly.getValueMeta(0).getName());
+
+    meta.getSelectOption().setSelectFields(List.of());
+    meta.getSelectOption().setSelectingAndSortingUnspecifiedFields(true);
+    var noExplicitSelection = new org.apache.hop.core.row.RowMeta();
+    noExplicitSelection.addRowMeta(input);
+    meta.getFields(noExplicitSelection, "select-values", null, null, variables, provider);
+    assertEquals(4, noExplicitSelection.size());
+    assertEquals(List.of("zeta", "beta", "黄河流量", "alpha"),
+        List.of(noExplicitSelection.getValueMeta(0).getName(),
+            noExplicitSelection.getValueMeta(1).getName(),
+            noExplicitSelection.getValueMeta(2).getName(),
+            noExplicitSelection.getValueMeta(3).getName()),
+        "without an explicit select list, the sort-unspecified flag is a no-op");
+    System.out.println("PROD_P0_SELECTVALUES_UNSPECIFIED_OUTPUT_ORDER=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
