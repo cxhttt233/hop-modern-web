@@ -172,6 +172,40 @@ class ModernWebServerExecutionHttpTest {
     assertEquals(200, after.statusCode(), after.body());
   }
 
+  @Test
+  void pipelineAndExecutionHttpResponsesCannotBeCached() throws Exception {
+    Path pipelineFile = tempDir.resolve("no-store.hpl");
+    PipelineDocumentStore writer =
+        new PipelineDocumentStore(
+            mock(IHopMetadataProvider.class), Variables.getADefaultVariableSpace());
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("no-store");
+    writer.save(pipelineFile, pipeline);
+
+    URI base = startServer();
+    HttpResponse<String> opened =
+        postJson(
+            base.resolve("api/pipelines/open"),
+            JSON.writeValueAsString(new OpenRequest(pipelineFile.toString())));
+    assertEquals(200, opened.statusCode(), opened.body());
+    assertEquals("no-store", opened.headers().firstValue("Cache-Control").orElse(null));
+
+    String documentId = JSON.readTree(opened.body()).path("id").asText();
+    HttpResponse<String> started =
+        postNoBody(base.resolve("api/executions/pipelines/" + documentId));
+    assertEquals(202, started.statusCode(), started.body());
+    assertEquals("no-store", started.headers().firstValue("Cache-Control").orElse(null));
+
+    String executionId = JSON.readTree(started.body()).path("id").asText();
+    HttpResponse<String> status = get(base.resolve("api/executions/" + executionId));
+    assertEquals(200, status.statusCode(), status.body());
+    assertEquals("no-store", status.headers().firstValue("Cache-Control").orElse(null));
+
+    HttpResponse<String> missing = get(base.resolve("api/executions/missing-execution"));
+    assertEquals(404, missing.statusCode(), missing.body());
+    assertEquals("no-store", missing.headers().firstValue("Cache-Control").orElse(null));
+  }
+
   private URI startServer() throws Exception {
     server =
         GrizzlyHttpServerFactory.createHttpServer(
