@@ -256,10 +256,15 @@ public final class AutomaticConfigDescriptor {
                   List.of("/fields/select_unspecified", "/fields/field"),
                   "When fields.field contains an explicit selection, SelectValuesMeta.getFields() emits selected fields in configured list order (using their output rename), then, only if fields.select_unspecified is true, appends all unselected incoming fields sorted by original field name rather than input order. When the flag is false, unselected fields are omitted. With an empty fields.field list, native selection is skipped and the original input order remains unchanged regardless of select_unspecified. Diagnose downstream column order from both settings; do not reject draft saves."));
       case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" ->
-          List.of(new RuntimePrecondition(
-              "SORT_ROWS_KEYS_AND_TEMP_DIRECTORY_NATIVE_CHECK",
-              List.of("/fields/field", "/directory"),
-              "Native SortRowsMeta.check() requires a non-empty fields.field list, with each fields.field[*].name present in incoming row metadata. The resolved directory must exist and be a directory for temporary sort files; missing upstream fields or input hops are separate native errors. Diagnose against upstream metadata and resolved variables, not just the JSON field types."));
+          List.of(
+              new RuntimePrecondition(
+                  "SORT_ROWS_KEYS_AND_TEMP_DIRECTORY_NATIVE_CHECK",
+                  List.of("/fields/field", "/directory"),
+                  "Native SortRowsMeta.check() requires a non-empty fields.field list, with each fields.field[*].name present in incoming row metadata. The resolved directory must exist and be a directory for temporary sort files; missing upstream fields or input hops are separate native errors. Diagnose against upstream metadata and resolved variables, not just the JSON field types."),
+              new RuntimePrecondition(
+                  "SORT_ROWS_GETFIELDS_PROPAGATES_SORT_FLAGS_AND_NORMALIZES_STORAGE",
+                  List.of("/fields/field"),
+                  "SortRowsMeta.getFields() preserves incoming field names, types and positions but annotates each resolved fields.field[*].name with sortedDescending = !ascending, caseInsensitive = !case_sensitive, collatorDisabled = !collator_enabled and collatorStrength from collator_strength. Selected keys are also normalized to STORAGE_TYPE_NORMAL with null storage metadata; unselected or unknown fields are left untouched. The presorted flag does not change this getFields metadata propagation. This is a downstream row-metadata compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" ->
           List.of(
               new RuntimePrecondition(
