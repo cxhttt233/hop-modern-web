@@ -36,6 +36,82 @@ class TransformP0L2RoundTripTest {
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
   @Test
+  void dataGridDeclaredFieldFormatsAndPrecisionPropagateToNativeOutputMetadata()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "DataGrid");
+    Property fields = property(descriptor, "field");
+    assertEquals(Shape.LIST, fields.shape());
+    assertEquals("fields", fields.groupKey());
+    for (String key : List.of("name", "type", "format", "currency", "group", "decimal")) {
+      assertEquals(Shape.STRING, property(descriptor, "field", key).shape(), key);
+    }
+    for (String key : List.of("length", "precision")) {
+      assertEquals(Shape.NUMBER, property(descriptor, "field", key).shape(), key);
+    }
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "DATA_GRID_DECLARED_FIELD_FORMATS_PROPAGATE_TO_OUTPUT_METADATA"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "DataGrid");
+    assertNotNull(plugin, "production DataGrid plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> fieldClass = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Object flow = fieldClass.getConstructor().newInstance();
+    fieldClass.getMethod("setName", String.class).invoke(flow, "流量<&>雪");
+    fieldClass.getMethod("setType", String.class).invoke(flow,
+        org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
+            org.apache.hop.core.row.IValueMeta.TYPE_NUMBER));
+    fieldClass.getMethod("setLenght", int.class).invoke(flow, 18);
+    fieldClass.getMethod("setPrecision", int.class).invoke(flow, 3);
+    fieldClass.getMethod("setFormat", String.class).invoke(flow, "#,##0.000");
+    fieldClass.getMethod("setCurrency", String.class).invoke(flow, "¥");
+    fieldClass.getMethod("setGroup", String.class).invoke(flow, ",");
+    fieldClass.getMethod("setDecimal", String.class).invoke(flow, ".");
+
+    Object literalName = fieldClass.getConstructor().newInstance();
+    fieldClass.getMethod("setName", String.class).invoke(literalName, "${GRID_NAME}");
+    fieldClass.getMethod("setType", String.class).invoke(literalName,
+        org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
+            org.apache.hop.core.row.IValueMeta.TYPE_STRING));
+    fieldClass.getMethod("setLenght", int.class).invoke(literalName, 64);
+    meta.getClass().getMethod("setDataGridFields", List.class)
+        .invoke(meta, List.of(flow, literalName));
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("GRID_NAME", "解析后的名字");
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("已有字段"));
+    meta.getFields(row, "data-grid-output", null, null,
+        variables, new MemoryMetadataProvider());
+
+    assertEquals(3, row.size());
+    assertEquals("已有字段", row.getValueMeta(0).getName());
+    var number = row.getValueMeta(1);
+    assertEquals("流量<&>雪", number.getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER, number.getType());
+    assertEquals(18, number.getLength());
+    assertEquals(3, number.getPrecision());
+    assertEquals("#,##0.000", number.getConversionMask());
+    assertEquals("¥", number.getCurrencySymbol());
+    assertEquals(",", number.getGroupingSymbol());
+    assertEquals(".", number.getDecimalSymbol());
+    assertEquals("data-grid-output", number.getOrigin());
+
+    var string = row.getValueMeta(2);
+    assertEquals("${GRID_NAME}", string.getName(),
+        "DataGrid output names remain literal even when variables are defined");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING, string.getType());
+    assertEquals(64, string.getLength());
+    assertEquals("data-grid-output", string.getOrigin());
+    System.out.println("PROD_P0_DATAGRID_DECLARED_FORMAT_OUTPUT_META=PASS");
+  }
+
+  @Test
   void dataGridUnknownDeclaredFieldTypesFallbackToStringAndUnnamedFieldsAreSkipped()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
