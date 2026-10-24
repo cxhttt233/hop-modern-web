@@ -20,6 +20,19 @@ function uniqueTransformId(pluginId: string, document: HopGraphDocument): string
   return candidate;
 }
 
+// Keep duplicate .hpl basenames distinguishable in the session-only recent list.
+// Use the shortest unique path suffix; full paths remain available in title/aria-label.
+function recentPathLabel(path: string, paths: string[]): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  if (!parts.length) return path;
+  for (let depth = 1; depth <= parts.length; depth++) {
+    const suffix = parts.slice(-depth).join(" / ");
+    if (paths.every((other) => other === path ||
+      other.split(/[\\/]/).filter(Boolean).slice(-depth).join(" / ") !== suffix)) return suffix;
+  }
+  return path;
+}
+
 const emptyDocument: HopGraphDocument = {
   id: "", name: "", revision: "", nodes: [], edges: [],
 };
@@ -347,7 +360,7 @@ export function App() {
                   <button key={path} type="button" title={path} aria-label={`填入最近流程：${path}`}
                     disabled={saving || source.kind === "loading"} onClick={() => setPipelinePathDraft(path)}
                     style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {path.split(/[\\/]/).pop() || path}
+                    {recentPathLabel(path, recentPipelinePaths)}
                   </button>
                 ))}
               </div>
