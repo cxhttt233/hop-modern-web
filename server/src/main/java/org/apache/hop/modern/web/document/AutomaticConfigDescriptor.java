@@ -212,6 +212,11 @@ public final class AutomaticConfigDescriptor {
               "SORT_ROWS_KEYS_AND_TEMP_DIRECTORY_NATIVE_CHECK",
               List.of("/fields/field", "/directory"),
               "Native SortRowsMeta.check() requires a non-empty fields.field list, with each fields.field[*].name present in incoming row metadata. The resolved directory must exist and be a directory for temporary sort files; missing upstream fields or input hops are separate native errors. Diagnose against upstream metadata and resolved variables, not just the JSON field types."));
+      case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" ->
+          List.of(new RuntimePrecondition(
+              "STREAM_LOOKUP_TWO_INPUTS_AND_STAGE_SPECIFIC_FIELDS",
+              List.of("/from", "/lookup/key", "/lookup/value"),
+              "StreamLookup needs a selected lookup-source transform and at least two incoming hops: the main stream and the lookup/info stream. Each lookup.key[*].name must resolve in the main incoming row, whereas lookup.key[*].field and lookup.value[*].name must resolve in lookup/info row metadata. Native StreamLookupMeta.check() checks these separately, including missing source and missing input hops. A return value's rename is an output alias, not a lookup input field. Diagnose graph and row-metadata prerequisites without rejecting draft saves."));
       case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta" ->
           List.of(new RuntimePrecondition(
               "STRING_CUT_SOURCE_FIELDS_REQUIRE_UPSTREAM_STRINGS",
