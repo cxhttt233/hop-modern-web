@@ -1494,7 +1494,8 @@ class TransformP0L2RoundTripTest {
     assertEquals(List.of("GROUP_KEYS_CONTIGUOUS",
             "GROUPBY_GROUPING_KEYS_REQUIRE_UPSTREAM_FIELDS",
             "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD",
-            "GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME"),
+            "GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME",
+            "GROUPBY_AGGREGATE_OUTPUT_TYPES_FOLLOW_OPERATION_AND_SUBJECT"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     var precondition = descriptor.runtimePreconditions().get(2);
     assertEquals(List.of("/fields/field"), precondition.keyListPointers());
@@ -2517,6 +2518,116 @@ class TransformP0L2RoundTripTest {
     assertEquals(19, disk.at("/fields/field/1/length").intValue());
     assertTrue(disk.at("/fields/field/1/repeat").isBoolean());
     assertFalse(disk.at("/fields/field/1/repeat").booleanValue());
+  }
+
+  @Test
+  void groupByAggregateOutputTypesFollowNativeOperationAndSubjectMetadata() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "GroupBy");
+    Property aggregationFields = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("fields"))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, aggregationFields.shape());
+    assertEquals(Shape.STRING, aggregationFields.elementProperties().stream()
+        .filter(p -> p.key().equals("type")).findFirst().orElseThrow().shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "GROUPBY_AGGREGATE_OUTPUT_TYPES_FOLLOW_OPERATION_AND_SUBJECT"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field", "/group/field", "/all_rows"),
+        contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(plugin, "production GroupBy plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    ClassLoader loader = meta.getClass().getClassLoader();
+    Class<?> groupingClass = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.groupby.GroupingField");
+    Object grouping = groupingClass.getConstructor(String.class).newInstance("地区");
+    meta.getClass().getMethod("setGroupingFields", List.class)
+        .invoke(meta, List.of(grouping));
+
+    Class<?> aggregationClass = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.groupby.Aggregation");
+    var setField = aggregationClass.getMethod("setField", String.class);
+    var setSubject = aggregationClass.getMethod("setSubject", String.class);
+    var setTypeLabel = aggregationClass.getMethod("setTypeLabel", String.class);
+    String[][] rules = {
+        {"任意计数", null, "COUNT_ANY"},
+        {"总行数", "整数", "COUNT_ALL"},
+        {"字符求和", "类别", "SUM"},
+        {"累计均值", "整数", "CUM_AVG"},
+        {"首次日期", "事件日期", "FIRST"},
+        {"拼接类别", "类别", "CONCAT_COMMA"},
+        {"标准差", "流量", "STD_DEV"},
+        {"不存在的聚合", "缺失字段", "SUM"}
+    };
+    List<Object> aggregates = new ArrayList<>();
+    for (String[] rule : rules) {
+      Object aggregate = aggregationClass.getConstructor().newInstance();
+      setField.invoke(aggregate, rule[0]);
+      setSubject.invoke(aggregate, rule[1]);
+      setTypeLabel.invoke(aggregate, rule[2]);
+      aggregates.add(aggregate);
+    }
+    meta.getClass().getMethod("setAggregations", List.class).invoke(meta, aggregates);
+    meta.getClass().getMethod("setPassAllRows", boolean.class).invoke(meta, false);
+
+    var incoming = new org.apache.hop.core.row.RowMeta();
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("地区"));
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("类别"));
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("整数"));
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaNumber("流量"));
+    var date = new org.apache.hop.core.row.value.ValueMetaDate("事件日期");
+    date.setConversionMask("yyyy-MM-dd");
+    incoming.addValueMeta(date);
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+
+    var grouped = new org.apache.hop.core.row.RowMeta();
+    grouped.addRowMeta(incoming);
+    meta.getFields(grouped, "groupby-aggregate-output", null, null, variables, provider);
+    assertEquals(8, grouped.size(), "one grouping key and seven valid aggregates");
+    assertEquals("地区", grouped.getValueMeta(0).getName());
+    String[] expectedNames = {
+        "任意计数", "总行数", "字符求和", "累计均值",
+        "首次日期", "拼接类别", "标准差"
+    };
+    int[] expectedTypes = {
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        org.apache.hop.core.row.IValueMeta.TYPE_NUMBER,
+        org.apache.hop.core.row.IValueMeta.TYPE_NUMBER,
+        org.apache.hop.core.row.IValueMeta.TYPE_DATE,
+        org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        org.apache.hop.core.row.IValueMeta.TYPE_NUMBER
+    };
+    for (int i = 0; i < expectedNames.length; i++) {
+      assertEquals(expectedNames[i], grouped.getValueMeta(i + 1).getName());
+      assertEquals(expectedTypes[i], grouped.getValueMeta(i + 1).getType(),
+          "native aggregate output type: " + expectedNames[i]);
+    }
+    assertEquals(org.apache.hop.core.row.IValueMeta.DEFAULT_INTEGER_LENGTH,
+        grouped.getValueMeta(1).getLength());
+    assertEquals(0, grouped.getValueMeta(1).getPrecision());
+    assertEquals("yyyy-MM-dd", grouped.getValueMeta(5).getConversionMask());
+    assertEquals(-1, grouped.indexOfValue("不存在的聚合"),
+        "missing subjects are omitted from projected metadata");
+
+    meta.getClass().getMethod("setPassAllRows", boolean.class).invoke(meta, true);
+    var passThrough = new org.apache.hop.core.row.RowMeta();
+    passThrough.addRowMeta(incoming);
+    meta.getFields(passThrough, "groupby-aggregate-output", null, null, variables, provider);
+    assertEquals(incoming.size() + expectedNames.length, passThrough.size());
+    for (int i = 0; i < incoming.size(); i++) {
+      assertEquals(incoming.getValueMeta(i).getName(),
+          passThrough.getValueMeta(i).getName());
+    }
+    for (int i = 0; i < expectedNames.length; i++) {
+      assertEquals(expectedNames[i], passThrough.getValueMeta(incoming.size() + i).getName());
+    }
+    System.out.println("PROD_P0_GROUPBY_AGGREGATE_OUTPUT_TYPES=PASS");
   }
 
   @Test
