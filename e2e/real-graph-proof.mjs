@@ -221,7 +221,7 @@ try {
   const savePending = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
     new RegExp("/api/pipelines/[^/]+/save$").test(new URL(response.url()).pathname));
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
   const saveResponse = await savePending;
   if (!saveResponse.ok()) throw new Error("Real Unicode-path .hpl disk save failed");
   await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
