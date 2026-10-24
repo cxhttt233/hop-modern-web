@@ -148,6 +148,30 @@ class ModernWebServerExecutionHttpTest {
     assertEquals(200, after.statusCode(), after.body());
   }
 
+  @Test
+  void rejectsDuplicateJsonFieldsOnPipelineOpenWithoutBreakingNextRequest() throws Exception {
+    Path pipelineFile = tempDir.resolve("duplicate-json.hpl");
+    PipelineDocumentStore writer =
+        new PipelineDocumentStore(
+            mock(IHopMetadataProvider.class), Variables.getADefaultVariableSpace());
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("duplicate-json");
+    writer.save(pipelineFile, pipeline);
+
+    URI endpoint = startServer().resolve("api/pipelines/open");
+    String quotedPath = JSON.writeValueAsString(pipelineFile.toString());
+    String valid = "{\"path\":" + quotedPath + "}";
+    String duplicate = "{\"path\":" + quotedPath + ",\"path\":" + quotedPath + "}";
+
+    HttpResponse<String> before = postJson(endpoint, valid);
+    HttpResponse<String> ambiguous = postJson(endpoint, duplicate);
+    HttpResponse<String> after = postJson(endpoint, valid);
+
+    assertEquals(200, before.statusCode(), before.body());
+    assertEquals(400, ambiguous.statusCode(), ambiguous.body());
+    assertEquals(200, after.statusCode(), after.body());
+  }
+
   private URI startServer() throws Exception {
     server =
         GrizzlyHttpServerFactory.createHttpServer(
