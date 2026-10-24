@@ -120,7 +120,7 @@ try {
   const waitForSourcePosition = async ({ x, y }) => {
     await page.waitForFunction(({ x, y }) => {
       const node = document.querySelector('.react-flow__node[data-id="source"]');
-      const match = /translate\\(([-\\d.]+)px,\\s*([-\\d.]+)px\\)/.exec(node?.getAttribute("style") ?? "");
+      const match = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(node?.getAttribute("style") ?? "");
       return !!match && Math.abs(Number(match[1]) - x) < 0.01 &&
         Math.abs(Number(match[2]) - y) < 0.01;
     }, { x, y });
