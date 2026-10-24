@@ -388,7 +388,7 @@ export function App() {
                       {items.map((pluginId) => {
                         const meta = transformMeta(pluginId);
                         return (
-                          <button key={pluginId} type="button" aria-label={pluginId} draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)} onClick={() => addTransformFromPalette(pluginId)} title={`${meta.name} · ${pluginId} · 点击添加或拖动放置`}>
+                          <button key={pluginId} type="button" aria-label={`${meta.name}（${pluginId}）`} draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)} onClick={() => addTransformFromPalette(pluginId)} title={`${meta.name} · ${pluginId} · 点击添加或拖动放置`}>
                             <span className={`palette-icon category-${meta.category}`}>{TRANSFORM_ICONS[pluginId] ? <img src={TRANSFORM_ICONS[pluginId]} alt="" /> : meta.glyph}</span>
                             <span className="palette-item-copy">
                               <strong>{meta.name}</strong>
