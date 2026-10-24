@@ -2073,6 +2073,65 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_GROUPBY_LINE_NUMBER_OUTPUT_SCHEMA=PASS");
   }
 
+  @Test
+  void replaceStringOutputAliasAddsVariableResolvedStringColumnWithoutDroppingSource()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "ReplaceString");
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals(Shape.STRING, property(descriptor, "field", "out_stream_name").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "REPLACE_STRING_OUTPUT_ALIAS_APPENDS_VARIABLE_RESOLVED_STRING_FIELD"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ReplaceString");
+    assertNotNull(plugin, "production ReplaceString plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> item = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta$RSField");
+    Object rule = item.getConstructor().newInstance();
+    item.getMethod("setFieldInStream", String.class).invoke(rule, "上游原字段");
+    var setAlias = item.getMethod("setFieldOutStream", String.class);
+    var setRules = meta.getClass().getMethod("setFields", List.class);
+    setRules.invoke(meta, List.of(rule));
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("RS_OUTPUT_ALIAS", "替换结果_黄河");
+    var provider = new MemoryMetadataProvider();
+    var incoming = new org.apache.hop.core.row.RowMeta();
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("上游原字段"));
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaNumber("流量"));
+
+    setAlias.invoke(rule, "${RS_OUTPUT_ALIAS}");
+    var aliased = new org.apache.hop.core.row.RowMeta();
+    aliased.addRowMeta(incoming);
+    meta.getFields(aliased, "replace-string", null, null, variables, provider);
+    assertEquals(3, aliased.size(), "an alias must append rather than replace the source");
+    assertEquals("上游原字段", aliased.getValueMeta(0).getName());
+    assertEquals("流量", aliased.getValueMeta(1).getName());
+    assertEquals("替换结果_黄河", aliased.getValueMeta(2).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        aliased.getValueMeta(2).getType());
+
+    setAlias.invoke(rule, "");
+    var inPlace = new org.apache.hop.core.row.RowMeta();
+    inPlace.addRowMeta(incoming);
+    meta.getFields(inPlace, "replace-string", null, null, variables, provider);
+    assertEquals(2, inPlace.size(), "blank alias must not add an output column");
+    assertEquals("上游原字段", inPlace.getValueMeta(0).getName());
+
+    setAlias.invoke(rule, "上游原字段");
+    var duplicate = new org.apache.hop.core.row.RowMeta();
+    duplicate.addRowMeta(incoming);
+    meta.getFields(duplicate, "replace-string", null, null, variables, provider);
+    assertEquals(3, duplicate.size(),
+        "native metadata projection does not reject an alias colliding with input");
+    assertEquals("上游原字段", duplicate.getValueMeta(2).getName());
+    System.out.println("PROD_P0_REPLACESTRING_ALIAS_OUTPUT_SCHEMA=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
