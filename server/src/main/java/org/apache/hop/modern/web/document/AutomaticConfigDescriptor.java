@@ -252,10 +252,15 @@ public final class AutomaticConfigDescriptor {
               List.of("/from", "/lookup/key", "/lookup/value"),
               "StreamLookup needs a selected lookup-source transform and at least two incoming hops: the main stream and the lookup/info stream. Each lookup.key[*].name must resolve in the main incoming row, whereas lookup.key[*].field and lookup.value[*].name must resolve in lookup/info row metadata. Native StreamLookupMeta.check() checks these separately, including missing source and missing input hops. A return value's rename is an output alias, not a lookup input field. Diagnose graph and row-metadata prerequisites without rejecting draft saves."));
       case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta" ->
-          List.of(new RuntimePrecondition(
-              "STRING_CUT_SOURCE_FIELDS_REQUIRE_UPSTREAM_STRINGS",
-              List.of("/fields/field"),
-              "Each fields.field[*].in_stream_name must be non-empty and exist in the incoming row as STRING. The native StringCut check rejects missing or non-string source fields, but unlike ReplaceString does not reject repeated source names. out_stream_name is an optional output alias, not an upstream field."));
+          List.of(
+              new RuntimePrecondition(
+                  "STRING_CUT_SOURCE_FIELDS_REQUIRE_UPSTREAM_STRINGS",
+                  List.of("/fields/field"),
+                  "Each fields.field[*].in_stream_name must be non-empty and exist in the incoming row as STRING. The native StringCut check rejects missing or non-string source fields, but unlike ReplaceString does not reject repeated source names. out_stream_name is an optional output alias, not an upstream field."),
+              new RuntimePrecondition(
+                  "STRING_CUT_ALIAS_APPENDS_VARIABLE_RESOLVED_FIXED_LENGTH_STRING",
+                  List.of("/fields/field"),
+                  "For each fields.field[*], StringCutMeta.getFields() preserves incoming columns and appends a STRING field of length 100 only when out_stream_name is non-empty. The appended name resolves Hop variables; a blank alias updates the original field in place without appending a column. Multiple rules can reference the same input field, and their non-empty output aliases append in rule order. Diagnose downstream field names, order, and length without blocking draft saves."));
       case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta" ->
           List.of(
               new RuntimePrecondition(
