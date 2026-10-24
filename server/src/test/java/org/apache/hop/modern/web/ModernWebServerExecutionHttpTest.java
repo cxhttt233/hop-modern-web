@@ -124,6 +124,30 @@ class ModernWebServerExecutionHttpTest {
     assertEquals("execution_not_found", JSON.readTree(missingExecution.body()).path("code").asText());
   }
 
+  @Test
+  void rejectsTrailingJsonTokensOnPipelineOpenWithoutBreakingNextRequest() throws Exception {
+    Path pipelineFile = tempDir.resolve("strict-json.hpl");
+    PipelineDocumentStore writer =
+        new PipelineDocumentStore(
+            mock(IHopMetadataProvider.class), Variables.getADefaultVariableSpace());
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("strict-json");
+    writer.save(pipelineFile, pipeline);
+
+    URI endpoint = startServer().resolve("api/pipelines/open");
+    String valid = JSON.writeValueAsString(new OpenRequest(pipelineFile.toString()));
+
+    HttpResponse<String> before = postJson(endpoint, valid);
+    HttpResponse<String> concatenated = postJson(endpoint, valid + valid);
+    HttpResponse<String> garbage = postJson(endpoint, valid + " NOT_JSON");
+    HttpResponse<String> after = postJson(endpoint, valid);
+
+    assertEquals(200, before.statusCode(), before.body());
+    assertEquals(400, concatenated.statusCode(), concatenated.body());
+    assertEquals(400, garbage.statusCode(), garbage.body());
+    assertEquals(200, after.statusCode(), after.body());
+  }
+
   private URI startServer() throws Exception {
     server =
         GrizzlyHttpServerFactory.createHttpServer(
