@@ -284,7 +284,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "TABLE_INPUT_NAMED_SQL_PARAMETERS_REQUIRE_UPSTREAM_FIELDS",
                   List.of("/use_named_parameters", "/sql", "/sql_from_file", "/lookup"),
-                  "When use_named_parameters is true, each {fieldName} placeholder in the effective SQL (inline sql or sql_from_file) must resolve to a field in the incoming parameter row, preferring the lookup info stream when present. Named placeholders require incoming rows; Hop ${variable} references and quoted or commented braces are not named parameters. With use_named_parameters false, braces remain literal SQL. Diagnose before execution without treating an unrelated missing database connection as a parameter error."));
+                  "When use_named_parameters is true, each {fieldName} placeholder in the effective SQL (inline sql or sql_from_file) must resolve to a field in the incoming parameter row, preferring the lookup info stream when present. Named placeholders require incoming rows; Hop ${variable} references and quoted or commented braces are not named parameters. With use_named_parameters false, braces remain literal SQL. Diagnose before execution without treating an unrelated missing database connection as a parameter error."),
+               new RuntimePrecondition(
+                   "TABLE_INPUT_SPECIFIED_FIELDS_MAP_JDBC_COLUMNS_BY_RESOLVED_NAME",
+                   List.of("/specify_fields", "/validate_specified_fields", "/fields/field"),
+                   "With specify_fields true, TableInputMeta.getFields() clears the incoming row metadata and emits the non-empty fields.field entries in configured order, resolving variables in each field name and preserving the declared Hop type, length and precision. TableInputMeta.createSpecifiedMapping() then matches each declared output name to JDBC columns by name, not JDBC position. Missing JDBC columns fail regardless of validate_specified_fields; JDBC type mismatches fail only when validate_specified_fields is true (otherwise values are converted). Diagnose this mapping before execution without blocking draft saves."));
       case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
           List.of(
               new RuntimePrecondition(
