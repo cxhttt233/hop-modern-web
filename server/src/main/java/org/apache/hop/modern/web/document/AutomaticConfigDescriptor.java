@@ -186,7 +186,11 @@ public final class AutomaticConfigDescriptor {
           List.of(new RuntimePrecondition(
               "EXEC_SQL_INPUT_MODE_REQUIRES_MATCHING_HOP_TOPOLOGY",
               List.of("/execute_each_row"),
-              "When execute_each_row is true, ExecSql consumes the main input and its native check requires at least one incoming hop. When false, it can start without input and the native check reports an ERROR if an incoming hop is connected, because SQL is executed only once. Diagnose input topology independently from SQL text and database connection availability; this is not a save-time validator."));
+              "When execute_each_row is true, ExecSql consumes the main input and its native check requires at least one incoming hop. When false, it can start without input and the native check reports an ERROR if an incoming hop is connected, because SQL is executed only once. Diagnose input topology independently from SQL text and database connection availability; this is not a save-time validator."),
+              new RuntimePrecondition(
+                  "EXEC_SQL_RESULT_COUNTER_FIELDS_APPEND_FIXED_ORDER_INTEGERS",
+                  List.of("/update_field", "/insert_field", "/delete_field", "/read_field"),
+                  "ExecSqlMeta.getFields() appends one INTEGER output column for each non-empty configured update_field, insert_field, delete_field, and read_field, always in that order (update, insert, delete, read), regardless of the annotation declaration order. ExecSql.getResultRow() uses the configured counter names literally, without resolving Hop variables; the columns have default integer length. In execute_each_row mode these counters follow the input row, while once-only execution emits only counter fields. Derive downstream output metadata from the four names and execution mode; this is a diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.filterrows.FilterRowsMeta" ->
           List.of(new RuntimePrecondition(
               "FILTER_ROWS_NESTED_CONDITION_FIELDS_REQUIRE_UPSTREAM_FIELDS",
