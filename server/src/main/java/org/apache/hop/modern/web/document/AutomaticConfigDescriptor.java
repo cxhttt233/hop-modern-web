@@ -257,7 +257,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "REPLACE_STRING_OUTPUT_ALIAS_APPENDS_VARIABLE_RESOLVED_STRING_FIELD",
                   List.of("/fields/field"),
-                  "For each fields.field[*], a non-empty out_stream_name is resolved through Hop variables and appended as a new STRING output field while the original in_stream_name column remains. A blank out_stream_name changes the original field in place without appending a column. When an alias collides with an existing output field name, Hop RowMeta automatically disambiguates the appended field (for example, name becomes name_1); do not assume the requested alias is the final downstream name. Diagnose the resulting row schema before execution, without blocking draft saves."));
+                  "For each fields.field[*], a non-empty out_stream_name is resolved through Hop variables and appended as a new STRING output field while the original in_stream_name column remains. A blank out_stream_name changes the original field in place without appending a column. When an alias collides with an existing output field name, Hop RowMeta automatically disambiguates the appended field (for example, name becomes name_1); do not assume the requested alias is the final downstream name. Diagnose the resulting row schema before execution, without blocking draft saves."),
+              new RuntimePrecondition(
+                  "REPLACE_STRING_OUTPUT_ENCODING_FOLLOWS_SOURCE_AND_INPLACE_NORMALIZES_STORAGE",
+                  List.of("/fields/field"),
+                  "ReplaceStringMeta.getFields() copies the source field's string encoding onto a newly appended STRING field when fields.field[*].out_stream_name is non-empty and the source field exists. With an empty out_stream_name, it does not append a field; it normalizes the matched input field's storage type to STORAGE_TYPE_NORMAL, leaving unrelated fields unchanged. A missing source is silently skipped in this metadata projection for in-place rules, although native check reports an error; do not treat getFields() success as validation. This is a downstream field-metadata compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" ->
           List.of(
               new RuntimePrecondition(
