@@ -238,10 +238,15 @@ public final class AutomaticConfigDescriptor {
                   List.of("/use_named_parameters", "/sql", "/sql_from_file", "/lookup"),
                   "When use_named_parameters is true, each {fieldName} placeholder in the effective SQL (inline sql or sql_from_file) must resolve to a field in the incoming parameter row, preferring the lookup info stream when present. Named placeholders require incoming rows; Hop ${variable} references and quoted or commented braces are not named parameters. With use_named_parameters false, braces remain literal SQL. Diagnose before execution without treating an unrelated missing database connection as a parameter error."));
       case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
-          List.of(new RuntimePrecondition(
-              "TABLE_OUTPUT_SPECIFY_FIELDS_REQUIRES_INPUT_STREAM_FIELDS",
-              List.of("/fields/field"),
-              "When specify_fields is true, each fields.field[*].stream_name must exist in the incoming row; column_name is the database target. Check against upstream row metadata."));
+          List.of(
+              new RuntimePrecondition(
+                  "TABLE_OUTPUT_SPECIFY_FIELDS_REQUIRES_INPUT_STREAM_FIELDS",
+                  List.of("/fields/field"),
+                  "When specify_fields is true, each fields.field[*].stream_name must exist in the incoming row; column_name is the database target. Check against upstream row metadata."),
+              new RuntimePrecondition(
+                  "TABLE_OUTPUT_RETURN_KEYS_REQUIRES_RETURN_FIELD_FOR_ROW_SCHEMA",
+                  List.of("/return_keys", "/return_field"),
+                  "When return_keys is true, return_field must resolve to a non-empty output field name. Native TableOutputMeta.getFields() adds an INTEGER field only when both conditions hold, but TableOutput may append the generated key to successful output rows whenever return_keys is true. An empty return_field therefore risks row-data/metadata width mismatch. The output field name is variable-resolved; diagnose this before execution without blocking draft saves."));
       default -> List.of();
     };
   }
