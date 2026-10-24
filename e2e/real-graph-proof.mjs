@@ -248,6 +248,48 @@ try {
   }
   console.log("Unicode disk write proof passed: real .hpl move -> save -> disk reopen with Chinese/spaced path.");
 
+  // The session-only recent-file list has a four-file limit. Open two
+  // additional distinct, valid Hop .hpl files and verify the oldest path is
+  // evicted, while the other entries remain in true most-recent-first order.
+  // These are real fixture copies in the disposable CI directory, not mocks.
+  const extraPaths = [
+    join(unicodeDirectory, "最近流程 甲.hpl"),
+    join(unicodeDirectory, "最近流程 乙.hpl"),
+  ];
+  for (const extraPath of extraPaths) {
+    await copyFile(pipelinePath, extraPath);
+    await page.getByRole("button", { name: "Choose pipeline" }).click();
+    await page.getByLabel("Server-visible pipeline path").fill(extraPath);
+    const extraPending = page.waitForResponse((response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/pipelines/open");
+    await page.getByRole("button", { name: "Open pipeline" }).click();
+    const extraResponse = await extraPending;
+    const extraRequest = extraResponse.request().postDataJSON();
+    const extraGraph = await extraResponse.json();
+    if (!extraResponse.ok() || extraRequest?.path !== extraPath ||
+        extraGraph.name !== graph.name ||
+        extraGraph.nodes?.length !== graph.nodes.length ||
+        extraGraph.edges?.length !== graph.edges.length) {
+      throw new Error("Recent-file capacity proof failed to open a distinct real .hpl");
+    }
+    await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
+  }
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  const cappedRecent = page.getByRole("group", { name: "最近打开的流程" });
+  const expectedRecent = [extraPaths[1], extraPaths[0], unicodePath, pipelinePath];
+  await cappedRecent.getByRole("button", { name: `填入最近流程：${extraPaths[1]}` }).waitFor({ state: "visible" });
+  const actualRecent = await cappedRecent.getByRole("button").evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute("aria-label")));
+  if (JSON.stringify(actualRecent) !== JSON.stringify(expectedRecent.map((path) => `填入最近流程：${path}`)) ||
+      actualRecent.some((name) => name?.includes(alternatePath))) {
+    throw new Error("Four-entry recent-file capacity or most-recent-first eviction failed");
+  }
+  if (requests.filter((url) => url.includes("/api/pipelines/open")).length !== 8) {
+    throw new Error("Recent-file capacity proof issued unexpected real open requests");
+  }
+  console.log("Recent-file capacity proof passed: four real .hpl paths in recency order, oldest evicted.");
+
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
     return path === "/ui" || path.startsWith("/ui/");
