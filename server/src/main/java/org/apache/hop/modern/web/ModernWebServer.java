@@ -6,6 +6,7 @@
  */
 package org.apache.hop.modern.web;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -77,6 +78,8 @@ public final class ModernWebServer {
     private final ObjectMapper mapper =
         new ObjectMapper()
             .registerModule(new JavaTimeModule())
+            // A request body must contain exactly one JSON value, never trailing tokens.
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     @Override
