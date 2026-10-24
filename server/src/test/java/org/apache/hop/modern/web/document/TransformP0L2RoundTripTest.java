@@ -1497,6 +1497,74 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_UNIQUEROWS_HASHSET_MISSING_COMPARE_FIELD_NATIVE_GAP=PASS");
   }
 
+  @Test
+  void concatFieldsRemoveSelectedFieldsProjectsNativeOutputSchemaForSelectedAndEmptyLists()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "ConcatFields");
+    assertEquals(Shape.BOOLEAN,
+        property(descriptor, "ConcatFields", "removeSelectedFields").shape());
+    assertEquals(Shape.STRING,
+        property(descriptor, "ConcatFields", "targetFieldName").shape());
+    Property selected = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && "fields".equals(p.groupKey()))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, selected.shape());
+    var requirement = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "CONCAT_FIELDS_REMOVE_SELECTED_FIELDS_CHANGES_OUTPUT_SCHEMA"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/ConcatFields/removeSelectedFields", "/fields/field",
+        "/ConcatFields/targetFieldName"), requirement.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ConcatFields");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Object extra = meta.getClass().getMethod("getExtraFields").invoke(meta);
+    extra.getClass().getMethod("setTargetFieldName", String.class)
+        .invoke(extra, "合并<&>字段");
+    Class<?> fieldClass = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.concatfields.ConcatField");
+    Object selectedField = fieldClass.getConstructor().newInstance();
+    fieldClass.getMethod("setName", String.class).invoke(selectedField, "订单<&>号");
+    meta.getClass().getMethod("setOutputFields", List.class)
+        .invoke(meta, List.of(selectedField));
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    var kept = new org.apache.hop.core.row.RowMeta();
+    kept.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("订单<&>号"));
+    kept.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("地区"));
+    kept.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("数量"));
+    meta.getFields(kept, "concat-native", null, null, variables, provider);
+    assertEquals(List.of("订单<&>号", "地区", "数量", "合并<&>字段"),
+        kept.getValueMetaList().stream().map(v -> v.getName()).toList());
+
+    extra.getClass().getMethod("setRemoveSelectedFields", boolean.class)
+        .invoke(extra, true);
+    var removed = new org.apache.hop.core.row.RowMeta();
+    removed.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("订单<&>号"));
+    removed.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("地区"));
+    removed.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("数量"));
+    meta.getFields(removed, "concat-native", null, null, variables, provider);
+    assertEquals(List.of("地区", "数量", "合并<&>字段"),
+        removed.getValueMetaList().stream().map(v -> v.getName()).toList());
+
+    meta.getClass().getMethod("setOutputFields", List.class)
+        .invoke(meta, List.of());
+    var cleared = new org.apache.hop.core.row.RowMeta();
+    cleared.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("订单<&>号"));
+    cleared.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("地区"));
+    cleared.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("数量"));
+    meta.getFields(cleared, "concat-native", null, null, variables, provider);
+    assertEquals(1, cleared.size());
+    assertEquals("合并<&>字段", cleared.getValueMeta(0).getName());
+    assertEquals(org.apache.hop.core.row.value.ValueMetaString.TYPE_STRING,
+        cleared.getValueMeta(0).getType());
+    System.out.println("PROD_P0_CONCATFIELDS_REMOVE_SELECTED_OUTPUT_SCHEMA=PASS");
+  }
+
   @Test void nestedAndSensitiveProductionDescriptorsStayTyped() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor json = descriptorFor(registry, "JsonInput");
