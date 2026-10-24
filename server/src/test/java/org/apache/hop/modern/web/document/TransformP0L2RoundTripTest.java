@@ -2127,8 +2127,9 @@ class TransformP0L2RoundTripTest {
     duplicate.addRowMeta(incoming);
     meta.getFields(duplicate, "replace-string", null, null, variables, provider);
     assertEquals(3, duplicate.size(),
-        "native metadata projection does not reject an alias colliding with input");
-    assertEquals("上游原字段", duplicate.getValueMeta(2).getName());
+        "native metadata projection appends a column even when the alias collides");
+    assertEquals("上游原字段_1", duplicate.getValueMeta(2).getName(),
+        "Hop RowMeta disambiguates a colliding appended alias with a numeric suffix");
     System.out.println("PROD_P0_REPLACESTRING_ALIAS_OUTPUT_SCHEMA=PASS");
   }
 
