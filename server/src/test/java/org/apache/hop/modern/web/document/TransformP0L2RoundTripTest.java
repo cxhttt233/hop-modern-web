@@ -1245,7 +1245,8 @@ class TransformP0L2RoundTripTest {
     assertEquals(Shape.BOOLEAN, property(descriptor, "IsInFields").shape());
     assertEquals(Shape.STRING, property(descriptor, "valueField").shape());
     assertEquals(List.of("JSON_INPUT_OUTPUT_FIELDS_REQUIRED",
-            "JSON_INPUT_FIELD_SOURCE_REQUIRES_INCOMING_HOP_AND_NAME"),
+            "JSON_INPUT_FIELD_SOURCE_REQUIRES_INCOMING_HOP_AND_NAME",
+            "JSON_INPUT_SOURCE_REMOVAL_AND_AUXILIARY_OUTPUT_COLUMNS"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     assertEquals(List.of("/fields/field"),
         descriptor.runtimePreconditions().get(0).keyListPointers());
