@@ -6,6 +6,7 @@
  */
 package org.apache.hop.modern.web;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -80,6 +81,8 @@ public final class ModernWebServer {
             .registerModule(new JavaTimeModule())
             // A request body must contain exactly one JSON value, never trailing tokens.
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            // Reject ambiguous duplicate JSON fields before binding to Pipeline API records.
+            .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     @Override
