@@ -1194,6 +1194,64 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_FILTERROWS_NESTED_FIELD_REFERENCES=PASS");
   }
 
+  @Test
+  void mergeJoinNativeCheckDoesNotValidateJoinTypeOrUnequalKeyArity()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "MergeJoin");
+    assertEquals(Shape.STRING, property(descriptor, "join_type").shape());
+    List<Property> groupedKeys = descriptor.properties().stream()
+        .filter(p -> p.key().equals("key")).toList();
+    assertEquals(List.of("keys_1", "keys_2"),
+        groupedKeys.stream().map(Property::groupKey).toList());
+    assertTrue(groupedKeys.stream().allMatch(p -> p.shape() == Shape.LIST));
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "MERGE_JOIN_NATIVE_CHECK_DOES_NOT_VALIDATE_JOIN_TYPE_OR_KEY_ARITY"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/join_type", "/keys_1/key", "/keys_2/key",
+        "/transform1", "/transform2"), precondition.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "MergeJoin");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> metaClass = meta.getClass();
+    assertArrayEquals(new String[] {"INNER", "LEFT OUTER", "RIGHT OUTER", "FULL OUTER"},
+        (String[]) metaClass.getField("joinTypes").get(null));
+    assertEquals(2, meta.getTransformIOMeta().getInfoStreams().size());
+
+    metaClass.getMethod("setJoinType", String.class).invoke(meta, "INVALID_JOIN");
+    metaClass.getMethod("setKeyFields1", List.class)
+        .invoke(meta, List.of("left_a", "left_b"));
+    metaClass.getMethod("setKeyFields2", List.class)
+        .invoke(meta, List.of("right_a"));
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "MergeJoin", "join-native", meta);
+    var upstream = new org.apache.hop.core.row.RowMeta();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    meta.check(remarks, pipeline, transform, upstream,
+        new String[] {"left", "right"}, new String[0], null, variables, provider);
+    assertEquals(1, remarks.size());
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_WARNING,
+        remarks.get(0).getType(),
+        "Native check fails to reject invalid join type and unequal key arity");
+
+    metaClass.getMethod("setJoinType", String.class).invoke(meta, "INNER");
+    metaClass.getMethod("setKeyFields1", List.class).invoke(meta, List.of("left_a"));
+    remarks.clear();
+    meta.check(remarks, pipeline, transform, upstream,
+        new String[] {"left", "right"}, new String[0], null, variables, provider);
+    assertEquals(1, remarks.size());
+    assertEquals(org.apache.hop.core.ICheckResult.TYPE_RESULT_WARNING,
+        remarks.get(0).getType(),
+        "Native check also returns the same warning for valid join type and key arity");
+    System.out.println("PROD_P0_MERGEJOIN_UNCHECKED_JOIN_TYPE_KEY_ARITY=PASS");
+  }
+
   @Test void nestedAndSensitiveProductionDescriptorsStayTyped() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor json = descriptorFor(registry, "JsonInput");
