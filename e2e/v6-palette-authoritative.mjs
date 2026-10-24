@@ -24,18 +24,20 @@ try {
   if (!openResponse.ok() || !graph.name || graph.nodes?.length < 2 || graph.edges?.length < 1) {
     throw new Error(`Unexpected authoritative Palette graph: ${JSON.stringify(graph)}`);
   }
-  await page.getByText(graph.name, { exact: true }).waitFor({ state: "visible" });
+  await page.locator(`.file-identity[data-document-name="${graph.name}"]`).waitFor({ state: "visible" });
   await page.locator(".react-flow").waitFor({ state: "visible" });
 
   const canvas = page.locator(".react-flow__pane");
   const added = [];
   const plugins = ["TableInput", "SelectValues", "FilterRows"];
+  const chineseNames = { TableInput: "表输入", SelectValues: "选择字段", FilterRows: "过滤记录" };
+  const accessibleName = pluginId => `${chineseNames[pluginId]}（${pluginId}）`;
   const positions = [{ x: 560, y: 260 }, { x: 760, y: 360 }, { x: 960, y: 260 }];
 
   for (let i = 0; i < plugins.length; i++) {
     const before = new Set(graph.nodes.map(node => node.id));
     pending = post("/edit/add");
-    await page.getByRole("button", { name: plugins[i] }).dragTo(canvas, { targetPosition: positions[i] });
+    await page.getByRole("button", { name: accessibleName(plugins[i]), exact: true }).dragTo(canvas, { targetPosition: positions[i] });
     const response = await pending;
     if (!response.ok()) throw new Error(`add ${plugins[i]} HTTP ${response.status()}: ${await response.text()}`);
     graph = await response.json();
@@ -46,18 +48,37 @@ try {
     if (!node.id || before.has(node.id)) throw new Error(`node id not unique for ${plugins[i]}`);
     added.push(node);
     await rf(node.id).waitFor();
+
+    // The authoritative node must be visually centered on the actual drop
+    // point, not positioned with its top-left corner under the cursor.
+    // Measure the real rendered React Flow node after the server has replied.
+    const paneBox = await canvas.boundingBox();
+    const nodeBox = await rf(node.id).boundingBox();
+    if (!paneBox || !nodeBox) throw new Error("Palette drop lacks visible canvas/node geometry");
+    const dropX = paneBox.x + positions[i].x;
+    const dropY = paneBox.y + positions[i].y;
+    const nodeCenterX = nodeBox.x + nodeBox.width / 2;
+    const nodeCenterY = nodeBox.y + nodeBox.height / 2;
+    // The transform footprint is 176px wide and about 50px high; the
+    // placement uses a 176x64 anchor, leaving a small vertical difference.
+    if (Math.abs(nodeCenterX - dropX) > 18 || Math.abs(nodeCenterY - dropY) > 22) {
+      throw new Error(
+        `Palette drop center mismatch for ${plugins[i]}: drop=(${dropX},${dropY}), nodeCenter=(${nodeCenterX},${nodeCenterY})`
+      );
+    }
   }
 
   async function connect(from, to) {
     pending = post("/edit/connect");
     const sourceHandle = rf(from).locator(".react-flow__handle.source");
     const targetHandle = rf(to).locator(".react-flow__handle.target");
-    const sourceBox = await sourceHandle.boundingBox();
-    const targetBox = await targetHandle.boundingBox();
-    if (!sourceBox || !targetBox) throw new Error(`connect handles missing for ${from}->${to}`);
-    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+    await sourceHandle.waitFor({ state: "visible" });
+    await targetHandle.waitFor({ state: "visible" });
+    await sourceHandle.hover({ force: true });
     await page.mouse.down();
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 12 });
+    await page.waitForTimeout(80);
+    await targetHandle.hover({ force: true });
+    await page.waitForTimeout(120);
     await page.mouse.up();
     const response = await pending;
     const body = await response.text();
@@ -112,6 +133,7 @@ try {
   }
 
   pending = post("/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
   await page.getByRole("button", { name: "Open pipeline" }).click();
   const reopened = await (await pending).json();
   for (const node of added) {
@@ -129,13 +151,69 @@ try {
   const reopenedConfig = await (await pending).json();
   if (reopenedConfig.config?.sql !== sql) throw new Error("disk reopen lost authoritative config");
 
+  // Native Palette buttons also support pointer clicks and keyboard Enter.
+  // A Chinese search must find the localized transform and the result must
+  // still add the original technical pluginId through the real Hop API.
+  // Each activation must make exactly one authoritative add request and
+  // survive a real disk save/reopen, not merely create a local canvas node.
+  await page.locator("form.generic-config").getByRole("button", { name: "Cancel" }).click();
+  const paletteSearch = page.getByRole("textbox", { name: "Search transforms" });
+  await paletteSearch.fill("表输入");
+  if (!(await page.getByRole("button", { name: accessibleName("TableInput"), exact: true }).isVisible()) ||
+      await page.getByRole("button", { name: accessibleName("SelectValues"), exact: true }).count() !== 0) {
+    throw new Error("Chinese Palette search did not filter to TableInput");
+  }
+  let activationGraph = reopened;
+  const activated = [];
+  for (const [pluginId, method] of [["TableInput", "click"], ["SelectValues", "Enter"]]) {
+    const beforeIds = new Set(activationGraph.nodes.map(node => node.id));
+    const countAdds = () => requests.filter(({ url, method: verb }) =>
+      verb === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
+    const beforeCount = countAdds();
+    pending = post("/edit/add");
+    const button = page.getByRole("button", { name: accessibleName(pluginId), exact: true });
+    if (method === "click") await button.click();
+    else {
+      await button.focus();
+      await page.keyboard.press("Enter");
+    }
+    const response = await pending;
+    if (!response.ok()) throw new Error(`Palette ${method} add ${pluginId} HTTP ${response.status()}`);
+    activationGraph = await response.json();
+    const node = activationGraph.nodes.find(candidate => !beforeIds.has(candidate.id));
+    if (!node || node.pluginId !== pluginId || activationGraph.nodes.length !== beforeIds.size + 1) {
+      throw new Error(`Palette ${method} did not add exactly one real ${pluginId} node`);
+    }
+    await rf(node.id).waitFor({ state: "visible" });
+    if (countAdds() !== beforeCount + 1) {
+      throw new Error(`Palette ${method} issued duplicate /edit/add requests for ${pluginId}`);
+    }
+    activated.push(node);
+    // Restore the full Palette before the next keyboard activation.
+    if (method === "click") await paletteSearch.fill("");
+  }
+
+  pending = post("/save");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const activatedSaved = await (await pending).json();
+  pending = post("/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const activatedReopened = await (await pending).json();
+  for (const node of activated) {
+    if (!activatedSaved.nodes.some(candidate => candidate.id === node.id && candidate.pluginId === node.pluginId) ||
+        !activatedReopened.nodes.some(candidate => candidate.id === node.id && candidate.pluginId === node.pluginId)) {
+      throw new Error(`Palette click/Enter node ${node.pluginId} missing after real save/reopen`);
+    }
+  }
+
   const rap = requests.filter(({ url }) => {
     const pathname = new URL(url).pathname;
     return pathname === "/ui" || pathname.startsWith("/ui/");
   });
   if (rap.length) throw new Error("RAP /ui entered");
 
-  console.log("V6 Palette authoritative proof passed: TableInput, SelectValues, FilterRows");
+  console.log("V6 Palette authoritative proof passed: drag TableInput/SelectValues/FilterRows; click TableInput; Enter SelectValues; disk reopen");
 } finally {
   await browser.close();
 }

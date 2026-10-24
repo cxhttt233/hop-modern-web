@@ -1,4 +1,7 @@
 import { chromium } from "playwright";
+import { fileURLToPath } from "node:url";
+import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 const pipelinePath = process.env.REAL_HPL_PATH;
 if (!pipelinePath) throw new Error("REAL_HPL_PATH is required");
@@ -6,6 +9,7 @@ if (!pipelinePath) throw new Error("REAL_HPL_PATH is required");
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 const requests = [];
+let unicodeDirectory;
 page.on("request", (request) => requests.push(request.url()));
 
 try {
@@ -21,7 +25,7 @@ try {
   if (graph.name !== "real-graph-proof" || graph.nodes?.length < 2 || graph.edges?.length < 1) {
     throw new Error(`Unexpected authoritative graph payload: ${JSON.stringify(graph)}`);
   }
-  await page.getByText("real-graph-proof", { exact: true }).waitFor({ state: "visible" });
+  await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
   await page.locator(".react-flow").waitFor({ state: "visible" });
   const nodes = page.locator(".react-flow__node");
   const edges = page.locator(".react-flow__edge");
@@ -29,8 +33,318 @@ try {
   await edges.first().waitFor({ state: "attached" });
   if ((await nodes.count()) < 2) throw new Error("Expected at least two real graph nodes");
   if ((await edges.count()) < 1) throw new Error("Expected at least one real graph edge");
+  // The Chinese product labels must come from the real Hop graph without
+  // changing persisted node IDs or plugin IDs.
+  for (const [id, label] of [["source", "输入"], ["sink", "输出"]]) {
+    const node = page.locator('.react-flow__node[data-id="' + id + '"]');
+    const displayed = await node.locator(".transform-node-copy strong").innerText();
+    const pluginId = await node.locator(".transform-node-content").getAttribute("data-plugin-id");
+    if (displayed !== label || pluginId !== "Dummy") {
+      throw new Error("Real Hop node localization changed identity: " + id);
+    }
+  }
+  const palette = page.locator('.transform-palette[aria-label="Transform palette"]');
+  const categories = await palette.locator(".transform-group-title > span").allTextContents();
+  const expectedCategories = ["输入与接入", "输出与写入", "字段处理", "流程与关联"];
+  if (JSON.stringify(categories) !== JSON.stringify(expectedCategories)) {
+    throw new Error("Chinese Palette categories do not match the real editor");
+  }
+  const tableInputPalette = await palette.getByRole("button", { name: "TableInput" }).innerText();
+  if (!tableInputPalette.includes("表输入") || !tableInputPalette.includes("TableInput")) {
+    throw new Error("Chinese Palette must retain the immutable Hop plugin ID");
+  }
   const openRequests = requests.filter((url) => url.includes("/api/pipelines/open"));
   if (openRequests.length !== 1) throw new Error("Expected exactly one real pipeline open request");
+  // Opening the same real .hpl again must frame its nodes, even after the
+  // user has zoomed in. This exercises automatic open/reopen navigation,
+  // not the separate manual Fit canvas action.
+  const viewportScale = () => page.locator(".react-flow__viewport").evaluate((element) =>
+    new DOMMatrixReadOnly(getComputedStyle(element).transform).a);
+  const zoomIn = page.locator(".react-flow__controls-zoomin");
+  for (let attempt = 0; attempt < 8 && (await viewportScale()) <= 1.2; attempt++) {
+    await zoomIn.click();
+    await page.waitForTimeout(240);
+  }
+  if ((await viewportScale()) <= 1.2) throw new Error("Could not zoom real graph before reopen");
+  const reopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const reopenedResponse = await reopenPending;
+  if (!reopenedResponse.ok()) throw new Error("Real pipeline reopen failed");
+  const reopened = await reopenedResponse.json();
+  if (reopened.name !== graph.name || reopened.nodes.length !== graph.nodes.length) {
+    throw new Error("Reopen changed the authoritative real graph");
+  }
+  await page.waitForFunction(() => {
+    const viewport = document.querySelector(".react-flow__viewport");
+    const file = document.querySelector('.file-identity[data-document-name="real-graph-proof"]');
+    return Boolean(viewport && file &&
+      new DOMMatrixReadOnly(getComputedStyle(viewport).transform).a <= 1.01);
+  }, null, { timeout: 8000 });
+  const paneBox = await page.locator(".react-flow__pane").boundingBox();
+  if (!paneBox) throw new Error("No visible pane after real reopen");
+  for (const node of reopened.nodes) {
+    const box = await page.locator('.react-flow__node[data-id="' + node.id + '"]').boundingBox();
+    if (!box || box.x < paneBox.x - 2 || box.y < paneBox.y - 2 ||
+        box.x + box.width > paneBox.x + paneBox.width + 2 ||
+        box.y + box.height > paneBox.y + paneBox.height + 2) {
+      throw new Error("Reopened node outside visible pane: " + node.id);
+    }
+  }
+  if (requests.filter((url) => url.includes("/api/pipelines/open")).length !== 2) {
+    throw new Error("Expected exactly one additional real open on reopen");
+  }
+
+  // Switching between two different real .hpl files must replace the graph
+  // and document identity, not leak nodes or hops from the previous file.
+  const alternatePath = fileURLToPath(new URL("./fixtures/v4-table-input-proof.hpl", import.meta.url));
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(alternatePath);
+  const alternatePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const alternateResponse = await alternatePending;
+  if (!alternateResponse.ok()) throw new Error("Alternate real pipeline open failed");
+  const alternate = await alternateResponse.json();
+  if (alternate.name !== "v4-table-input-proof" || alternate.nodes?.length !== 1 ||
+      alternate.edges?.length !== 0) {
+    throw new Error("Unexpected authoritative alternate pipeline graph");
+  }
+  await page.locator('.file-identity[data-document-name="v4-table-input-proof"]').waitFor({ state: "visible" });
+  await page.locator('.react-flow__node[data-id="' + alternate.nodes[0].id + '"]').waitFor({ state: "visible" });
+  const alternateNode = page.locator('.react-flow__node[data-id="' + alternate.nodes[0].id + '"]');
+  if (await alternateNode.locator(".transform-node-copy strong").innerText() !== "表输入" ||
+      await alternateNode.locator(".transform-node-content").getAttribute("data-plugin-id") !== "TableInput") {
+    throw new Error("Real TableInput node lost its Chinese display name or Hop plugin identity");
+  }
+  if (await page.locator(".react-flow__node").count() !== 1 ||
+      await page.locator(".react-flow__edge").count() !== 0) {
+    throw new Error("Switching files retained stale nodes or hops");
+  }
+  for (const previous of graph.nodes) {
+    if (await page.locator('.react-flow__node[data-id="' + previous.id + '"]').count()) {
+      throw new Error("Previous pipeline node leaked after file switch");
+    }
+  }
+
+  // The Chinese recent-file chooser remembers only successful real .hpl
+  // opens. Choosing a shortcut fills the path; the user still explicitly opens.
+  // Switching back must recover the original disk graph, not in-memory state.
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  const recent = page.getByRole("group", { name: "最近打开的流程" });
+  const recentChoices = recent.getByRole("button");
+  if (await recentChoices.count() !== 2) {
+    throw new Error("Recent real pipelines must contain two distinct successful opens");
+  }
+  await recent.getByRole("button", { name: `填入最近流程：${pipelinePath}` }).click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== pipelinePath) {
+    throw new Error("Recent pipeline selection did not fill the original server path");
+  }
+  const returnPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const returnResponse = await returnPending;
+  if (!returnResponse.ok()) throw new Error("Original real pipeline return failed");
+  const returned = await returnResponse.json();
+  if (returned.name !== graph.name || returned.nodes?.length !== graph.nodes.length ||
+      returned.edges?.length !== graph.edges.length) {
+    throw new Error("Original disk graph changed after switching files");
+  }
+  await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
+  for (const original of graph.nodes) {
+    await page.locator('.react-flow__node[data-id="' + original.id + '"]').waitFor({ state: "visible" });
+  }
+  if (await page.locator(".react-flow__node").count() !== graph.nodes.length ||
+      await page.locator(".react-flow__edge").count() !== graph.edges.length ||
+      requests.filter((url) => url.includes("/api/pipelines/open")).length !== 4) {
+    throw new Error("Real file-switch round trip failed to restore the authoritative graph");
+  }
+
+  // A Chinese filename containing spaces must survive the browser JSON request,
+  // the server-side real .hpl open, and React Flow rendering without path mangling.
+  // Use a disposable copy of the real fixture, not a mock graph or Hop Core edit.
+  unicodeDirectory = await mkdtemp(join(dirname(pipelinePath), "黄河 路径-"));
+  const unicodePath = join(unicodeDirectory, "中文 流程.hpl");
+  await copyFile(pipelinePath, unicodePath);
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(unicodePath);
+  const unicodePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const unicodeResponse = await unicodePending;
+  const unicodeRequest = unicodeResponse.request().postDataJSON();
+  const unicodeGraph = await unicodeResponse.json();
+  if (!unicodeResponse.ok() || unicodeRequest?.path !== unicodePath ||
+      unicodeGraph.name !== graph.name ||
+      unicodeGraph.nodes?.length !== graph.nodes.length ||
+      unicodeGraph.edges?.length !== graph.edges.length ||
+      !unicodeGraph.nodes.every((node) => graph.nodes.some(
+        (original) => original.id === node.id && original.pluginId === node.pluginId))) {
+    throw new Error("Chinese and space-containing .hpl path did not round-trip through real Hop");
+  }
+  if (requests.filter((url) => url.includes("/api/pipelines/open")).length !== 5) {
+    throw new Error("Unicode real .hpl path must issue exactly one additional open request");
+  }
+
+  // Unicode disk write proof: the same Chinese/space-containing server path
+  // must survive a real semantic node move, save, and disk reopen. V3/V5
+  // exercise ordinary fixture paths; this checks a distinct filesystem path
+  // boundary using only the disposable .hpl copy created above.
+  const unicodeSource = page.locator('.react-flow__node[data-id="source"]');
+  await unicodeSource.waitFor({ state: "visible" });
+  const originalSource = unicodeGraph.nodes.find((node) => node.id === "source");
+  if (!originalSource) throw new Error("Unicode real .hpl is missing its source transform");
+  const iconBox = await unicodeSource.locator(".transform-node-icon").boundingBox();
+  if (!iconBox) throw new Error("Unicode source drag handle is not visible");
+  const start = { x: iconBox.x + iconBox.width / 2, y: iconBox.y + iconBox.height / 2 };
+  const movePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/move$").test(new URL(response.url()).pathname));
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + 48, start.y + 32, { steps: 12 });
+  await page.mouse.up();
+  const moveResponse = await movePending;
+  const moved = await moveResponse.json();
+  const movedSource = moved.nodes?.find((node) => node.id === "source");
+  if (!moveResponse.ok() || !movedSource ||
+      (movedSource.x === originalSource.x && movedSource.y === originalSource.y) ||
+      moved.revision === unicodeGraph.revision) {
+    throw new Error("Real semantic move failed for Unicode-path .hpl");
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const savePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/save$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const saveResponse = await savePending;
+  if (!saveResponse.ok()) throw new Error("Real Unicode-path .hpl disk save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const unicodeReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== unicodePath) {
+    throw new Error("Unicode path identity changed before disk reopen");
+  }
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const unicodeReopenResponse = await unicodeReopenPending;
+  const unicodeReopened = await unicodeReopenResponse.json();
+  const diskSource = unicodeReopened.nodes?.find((node) => node.id === "source");
+  if (!unicodeReopenResponse.ok() || !diskSource ||
+      diskSource.x !== movedSource.x || diskSource.y !== movedSource.y ||
+      unicodeReopened.edges?.length !== unicodeGraph.edges.length) {
+    throw new Error("Unicode-path .hpl disk reopen lost saved node position or hops");
+  }
+  await unicodeSource.waitFor({ state: "visible" });
+  if (requests.filter((url) => url.includes("/api/pipelines/open")).length !== 6 ||
+      requests.filter((url) => new RegExp("/api/pipelines/[^/]+/save$").test(new URL(url).pathname)).length !== 1) {
+    throw new Error("Unicode-path move/save/reopen issued unexpected backend requests");
+  }
+  console.log("Unicode disk write proof passed: real .hpl move -> save -> disk reopen with Chinese/spaced path.");
+
+  // The session-only recent-file list has a four-file limit. Open two
+  // additional distinct, valid Hop .hpl files and verify the oldest path is
+  // evicted, while the other entries remain in true most-recent-first order.
+  // These are real fixture copies in the disposable CI directory, not mocks.
+  const extraPaths = [
+    join(unicodeDirectory, "最近流程 甲.hpl"),
+    join(unicodeDirectory, "最近流程 乙.hpl"),
+  ];
+  for (const extraPath of extraPaths) {
+    await copyFile(pipelinePath, extraPath);
+    await page.getByRole("button", { name: "Choose pipeline" }).click();
+    await page.getByLabel("Server-visible pipeline path").fill(extraPath);
+    const extraPending = page.waitForResponse((response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/pipelines/open");
+    await page.getByRole("button", { name: "Open pipeline" }).click();
+    const extraResponse = await extraPending;
+    const extraRequest = extraResponse.request().postDataJSON();
+    const extraGraph = await extraResponse.json();
+    if (!extraResponse.ok() || extraRequest?.path !== extraPath ||
+        extraGraph.name !== graph.name ||
+        extraGraph.nodes?.length !== graph.nodes.length ||
+        extraGraph.edges?.length !== graph.edges.length) {
+      throw new Error("Recent-file capacity proof failed to open a distinct real .hpl");
+    }
+    await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
+  }
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  const cappedRecent = page.getByRole("group", { name: "最近打开的流程" });
+  const expectedRecent = [extraPaths[1], extraPaths[0], unicodePath, pipelinePath];
+  await cappedRecent.getByRole("button", { name: `填入最近流程：${extraPaths[1]}` }).waitFor({ state: "visible" });
+  const actualRecent = await cappedRecent.getByRole("button").evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute("aria-label")));
+  if (JSON.stringify(actualRecent) !== JSON.stringify(expectedRecent.map((path) => `填入最近流程：${path}`)) ||
+      actualRecent.some((name) => name?.includes(alternatePath))) {
+    throw new Error("Four-entry recent-file capacity or most-recent-first eviction failed");
+  }
+  if (requests.filter((url) => url.includes("/api/pipelines/open")).length !== 8) {
+    throw new Error("Recent-file capacity proof issued unexpected real open requests");
+  }
+  console.log("Recent-file capacity proof passed: four real .hpl paths in recency order, oldest evicted.");
+
+  // Two different real .hpl paths can share a filename. Their recent shortcuts
+  // must show unique visible path suffixes, not indistinguishable basenames.
+  const sharedName = "同名流程.hpl";
+  const duplicateDirs = [join(unicodeDirectory, "甲目录"), join(unicodeDirectory, "乙目录")];
+  const duplicatePaths = duplicateDirs.map((dir) => join(dir, sharedName));
+  for (let i = 0; i < duplicatePaths.length; i++) {
+    await mkdir(duplicateDirs[i], { recursive: true });
+    await copyFile(pipelinePath, duplicatePaths[i]);
+    // The preceding capacity assertion left the chooser open. Subsequent
+    // successful opens close it, so only toggle for later iterations.
+    if (i > 0) await page.getByRole("button", { name: "Choose pipeline" }).click();
+    await page.getByLabel("Server-visible pipeline path").fill(duplicatePaths[i]);
+    const duplicatePending = page.waitForResponse((response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/pipelines/open");
+    await page.getByRole("button", { name: "Open pipeline" }).click();
+    const duplicateResponse = await duplicatePending;
+    const duplicateRequest = duplicateResponse.request().postDataJSON();
+    const duplicateGraph = await duplicateResponse.json();
+    if (!duplicateResponse.ok() || duplicateRequest?.path !== duplicatePaths[i] ||
+        duplicateGraph.name !== graph.name || duplicateGraph.nodes?.length !== graph.nodes.length ||
+        duplicateGraph.edges?.length !== graph.edges.length) {
+      throw new Error("Duplicate-basename real .hpl open failed");
+    }
+    await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
+  }
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  const duplicateRecent = page.getByRole("group", { name: "最近打开的流程" });
+  const duplicateLabels = await duplicateRecent.getByRole("button").evaluateAll((buttons) =>
+    buttons.map((button) => ({ name: button.getAttribute("aria-label"), text: button.textContent?.trim() })));
+  if (duplicateLabels[0]?.name !== `填入最近流程：${duplicatePaths[1]}` ||
+      duplicateLabels[1]?.name !== `填入最近流程：${duplicatePaths[0]}` ||
+      duplicateLabels[0]?.text !== "乙目录 / 同名流程.hpl" ||
+      duplicateLabels[1]?.text !== "甲目录 / 同名流程.hpl") {
+    throw new Error("Duplicate-basename recent files are not visibly distinguishable");
+  }
+  const opensBeforeSelection = requests.filter((url) => url.includes("/api/pipelines/open")).length;
+  await duplicateRecent.getByRole("button", { name: `填入最近流程：${duplicatePaths[0]}` }).click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== duplicatePaths[0] ||
+      requests.filter((url) => url.includes("/api/pipelines/open")).length !== opensBeforeSelection) {
+    throw new Error("Duplicate-basename shortcut must only fill the selected exact path");
+  }
+  const selectedPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const selectedResponse = await selectedPending;
+  const selectedGraph = await selectedResponse.json();
+  if (!selectedResponse.ok() || selectedResponse.request().postDataJSON()?.path !== duplicatePaths[0] ||
+      selectedGraph.name !== graph.name || selectedGraph.nodes?.length !== graph.nodes.length ||
+      requests.filter((url) => url.includes("/api/pipelines/open")).length !== opensBeforeSelection + 1) {
+    throw new Error("Duplicate-basename shortcut did not explicitly reopen the chosen real .hpl");
+  }
+  console.log("Duplicate-basename recent-file proof passed: distinct visible path suffixes, explicit real reopen.");
+
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
     return path === "/ui" || path.startsWith("/ui/");
@@ -39,4 +353,5 @@ try {
   console.log("V2 proof passed: real .hpl -> /api/pipelines/open -> 2+ nodes / 1+ edge in React Flow; no RAP /ui requests.");
 } finally {
   await browser.close();
+  if (unicodeDirectory) await rm(unicodeDirectory, { recursive: true, force: true });
 }
