@@ -35,7 +35,8 @@ try {
   const sqlField = panel.locator(`#config-${sqlDescriptor.javaField}`);
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
   if (await sqlField.inputValue() !== "SELECT id, name FROM customers") throw new Error("Authoritative SQL not visible");
-  const sql = "SELECT id, name FROM customers WHERE id > 10";
+  // Chinese aliases and a Chinese literal must survive runtime config and .hpl disk XML.
+  const sql = 'SELECT id AS "黄河编号", name AS "水库名称" FROM customers WHERE name = \'三门峡\'';
   await sqlField.fill(sql);
   const writePromise = page.waitForResponse(r => match(r, "/config/write"));
   const rereadPromise = page.waitForResponse(r => match(r, "/config/read"));
@@ -54,6 +55,30 @@ try {
   // Deleting the sole real Hop transform must reveal the Chinese empty-flow
   // guidance; undo must restore the authoritative node and hide the guidance.
   await panel.getByRole("button", { name: "Cancel" }).click();
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const diskSavePending = page.waitForResponse(r => match(r, "/save"));
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const diskSaveResponse = await diskSavePending;
+  if (!diskSaveResponse.ok()) throw new Error("Unicode SQL disk save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const diskReopenPending = page.waitForResponse(r => match(r, "/api/pipelines/open"));
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const diskReopenResponse = await diskReopenPending;
+  const diskReopened = await diskReopenResponse.json();
+  if (!diskReopenResponse.ok() || !diskReopened.nodes?.some(n => n.id === "table-input")) {
+    throw new Error("Unicode SQL disk reopen lost the authoritative TableInput node");
+  }
+  await node.waitFor({ state: "visible" });
+  await node.click();
+  const diskReadPending = page.waitForResponse(r => match(r, "/config/read"));
+  await page.getByRole("button", { name: "Configure" }).click();
+  const diskReadResponse = await diskReadPending;
+  const diskRead = await diskReadResponse.json();
+  if (!diskReadResponse.ok() || diskRead.config?.sql !== sql || diskRead.config?.connection !== "Warehouse") {
+    throw new Error("Chinese SQL or unchanged connection was corrupted by .hpl disk serialization");
+  }
+  await page.locator("form.generic-config").getByRole("button", { name: "Cancel" }).click();
   await node.click();
   const deletePending = page.waitForResponse(r => match(r, "/edit/delete"));
   await page.getByRole("button", { name: "Delete" }).click();
