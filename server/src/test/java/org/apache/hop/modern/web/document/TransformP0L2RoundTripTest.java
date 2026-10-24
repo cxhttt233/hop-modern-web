@@ -237,6 +237,75 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_HTTP_DYNAMIC_URL_NATIVE_CHECK_COMPATIBILITY=PASS");
   }
 
+  @Test
+  void restBinaryResultFlagChangesNativeOutputMetadataType() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "Rest");
+    assertEquals(Shape.OBJECT, property(descriptor, "result").shape());
+    assertEquals(Shape.STRING, property(descriptor, "result", "name").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "result", "binary").shape());
+    assertEquals(Shape.STRING, property(descriptor, "result", "code").shape());
+    assertEquals(Shape.STRING, property(descriptor, "result", "response_time").shape());
+    assertEquals(Shape.STRING, property(descriptor, "result", "response_header").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("REST_BINARY_RESULT_FIELD_CHANGES_OUTPUT_ROW_TYPE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/result/name", "/result/binary", "/result/code",
+        "/result/response_time", "/result/response_header"), contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin, "production REST plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Object result = metadataField(meta.getClass(), "resultField").get(meta);
+    result.getClass().getMethod("setFieldName", String.class)
+        .invoke(result, "${REST_BODY_FIELD}");
+    result.getClass().getMethod("setCode", String.class).invoke(result, "状态码");
+    result.getClass().getMethod("setResponseTime", String.class).invoke(result, "耗时");
+    result.getClass().getMethod("setResponseHeader", String.class)
+        .invoke(result, "${REST_HEADER_FIELD}");
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("REST_BODY_FIELD", "响应体_甲");
+    variables.setVariable("REST_HEADER_FIELD", "响应头_乙");
+    var provider = new MemoryMetadataProvider();
+
+    result.getClass().getMethod("setBinary", boolean.class).invoke(result, true);
+    var binaryRow = new org.apache.hop.core.row.RowMeta();
+    binaryRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("上游字段"));
+    meta.getFields(binaryRow, "rest-node", new org.apache.hop.core.row.IRowMeta[0],
+        null, variables, provider);
+    assertEquals(5, binaryRow.size());
+    assertEquals("响应体_甲", binaryRow.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_BINARY,
+        binaryRow.getValueMeta(1).getType());
+    assertEquals("状态码", binaryRow.getValueMeta(2).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        binaryRow.getValueMeta(2).getType());
+    assertEquals("耗时", binaryRow.getValueMeta(3).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        binaryRow.getValueMeta(3).getType());
+    assertEquals("响应头_乙", binaryRow.getValueMeta(4).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        binaryRow.getValueMeta(4).getType());
+
+    result.getClass().getMethod("setBinary", boolean.class).invoke(result, false);
+    var textRow = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(textRow, "rest-node", new org.apache.hop.core.row.IRowMeta[0],
+        null, variables, provider);
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        textRow.getValueMeta(0).getType(),
+        "Turning off binary must restore a STRING result body");
+    result.getClass().getMethod("setFieldName", String.class).invoke(result, "");
+    result.getClass().getMethod("setBinary", boolean.class).invoke(result, true);
+    var noBodyRow = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(noBodyRow, "rest-node", new org.apache.hop.core.row.IRowMeta[0],
+        null, variables, provider);
+    assertEquals(3, noBodyRow.size(),
+        "An empty result name omits the body column even in binary mode");
+    assertEquals("状态码", noBodyRow.getValueMeta(0).getName());
+    System.out.println("PROD_P0_REST_BINARY_RESULT_OUTPUT_SCHEMA=PASS");
+  }
+
   @Test void restDynamicMethodNativeCheckFalsePositiveIsDocumentedByProductionDescriptor()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
