@@ -1,5 +1,7 @@
 import { chromium } from "playwright";
 import { fileURLToPath } from "node:url";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 const pipelinePath = process.env.REAL_HPL_PATH;
 if (!pipelinePath) throw new Error("REAL_HPL_PATH is required");
@@ -7,6 +9,7 @@ if (!pipelinePath) throw new Error("REAL_HPL_PATH is required");
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 const requests = [];
+let unicodeDirectory;
 page.on("request", (request) => requests.push(request.url()));
 
 try {
@@ -161,6 +164,33 @@ try {
     throw new Error("Real file-switch round trip failed to restore the authoritative graph");
   }
 
+  // A Chinese filename containing spaces must survive the browser JSON request,
+  // the server-side real .hpl open, and React Flow rendering without path mangling.
+  // Use a disposable copy of the real fixture, not a mock graph or Hop Core edit.
+  unicodeDirectory = await mkdtemp(join(dirname(pipelinePath), "黄河 路径-"));
+  const unicodePath = join(unicodeDirectory, "中文 流程.hpl");
+  await copyFile(pipelinePath, unicodePath);
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(unicodePath);
+  const unicodePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const unicodeResponse = await unicodePending;
+  const unicodeRequest = unicodeResponse.request().postDataJSON();
+  const unicodeGraph = await unicodeResponse.json();
+  if (!unicodeResponse.ok() || unicodeRequest?.path !== unicodePath ||
+      unicodeGraph.name !== graph.name ||
+      unicodeGraph.nodes?.length !== graph.nodes.length ||
+      unicodeGraph.edges?.length !== graph.edges.length ||
+      !unicodeGraph.nodes.every((node) => graph.nodes.some(
+        (original) => original.id === node.id && original.pluginId === node.pluginId))) {
+    throw new Error("Chinese and space-containing .hpl path did not round-trip through real Hop");
+  }
+  if (requests.filter((url) => url.includes("/api/pipelines/open")).length !== 5) {
+    throw new Error("Unicode real .hpl path must issue exactly one additional open request");
+  }
+
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
     return path === "/ui" || path.startsWith("/ui/");
@@ -169,4 +199,5 @@ try {
   console.log("V2 proof passed: real .hpl -> /api/pipelines/open -> 2+ nodes / 1+ edge in React Flow; no RAP /ui requests.");
 } finally {
   await browser.close();
+  if (unicodeDirectory) await rm(unicodeDirectory, { recursive: true, force: true });
 }
