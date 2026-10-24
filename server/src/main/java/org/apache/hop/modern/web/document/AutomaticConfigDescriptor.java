@@ -132,7 +132,12 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "CONCAT_FIELDS_SELECTED_SOURCE_FIELDS_REQUIRE_UPSTREAM_FIELDS",
                   List.of("/fields/field"),
-                  "When fields.field contains selected source names, each fields.field[*].name must exist in incoming row metadata. An empty selection means concatenate all incoming fields and is allowed; native check does not require an explicit selection."));
+                  "When fields.field contains selected source names, each fields.field[*].name must exist in incoming row metadata. An empty selection means concatenate all incoming fields and is allowed; native check does not require an explicit selection."),
+              new RuntimePrecondition(
+                  "CONCAT_FIELDS_REMOVE_SELECTED_FIELDS_CHANGES_OUTPUT_SCHEMA",
+                  List.of("/ConcatFields/removeSelectedFields", "/fields/field",
+                      "/ConcatFields/targetFieldName"),
+                  "When ConcatFields.removeSelectedFields is false, ConcatFieldsMeta.getFields() preserves incoming columns and appends targetFieldName as STRING. When true with selected fields, it removes each selected fields.field[*].name from the output metadata before appending the target; when true with an empty fields.field list, it clears every incoming output field before appending only the target. This is an output-row-schema compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta" ->
           List.of(
               new RuntimePrecondition(
