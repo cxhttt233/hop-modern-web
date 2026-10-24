@@ -1822,6 +1822,68 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void mergeJoinInfoRowOutputRetainsOrderedTypesAndSuffixesDuplicateNamesWithoutSourceMutation()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "MergeJoin");
+    assertEquals(Shape.STRING, property(descriptor, "transform1").shape());
+    assertEquals(Shape.STRING, property(descriptor, "transform2").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "MERGE_JOIN_INFO_ROWS_APPEND_FIELDS_AND_RENAME_DUPLICATE_NAMES"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/transform1", "/transform2"), contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "MergeJoin");
+    assertNotNull(plugin, "production MergeJoin plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    var left = new org.apache.hop.core.row.RowMeta();
+    left.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("站点"));
+    left.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("共享<&>雪"));
+    left.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("共享<&>雪_1"));
+    left.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("左侧流量"));
+    var right = new org.apache.hop.core.row.RowMeta();
+    right.addValueMeta(new org.apache.hop.core.row.value.ValueMetaNumber("共享<&>雪"));
+    right.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("站点"));
+    right.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("右侧流量"));
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    var output = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(output, "merge-join-schema",
+        new org.apache.hop.core.row.IRowMeta[] {left, right},
+        null, variables, provider);
+
+    assertArrayEquals(new String[] {"站点", "共享<&>雪", "共享<&>雪_1",
+        "左侧流量", "共享<&>雪_2", "站点_1", "右侧流量"},
+        output.getFieldNames(), "info stream order and smallest free suffix must survive");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER,
+        output.getValueMeta(4).getType(), "renamed right-side field keeps its type");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        output.getValueMeta(5).getType());
+    assertEquals("merge-join-schema", output.getValueMeta(4).getOrigin());
+    assertEquals("merge-join-schema", output.getValueMeta(5).getOrigin());
+    assertNotSame(right.getValueMeta(0), output.getValueMeta(4),
+        "native RowMeta clones only the colliding field before renaming it");
+    assertArrayEquals(new String[] {"共享<&>雪", "站点", "右侧流量"},
+        right.getFieldNames(), "output suffixing must not rename source info metadata");
+
+    var oneSide = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(oneSide, "merge-join-schema",
+        new org.apache.hop.core.row.IRowMeta[] {null, right},
+        null, variables, provider);
+    assertArrayEquals(right.getFieldNames(), oneSide.getFieldNames(),
+        "null info metadata must not invent fields");
+    var missingInfo = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(missingInfo, "merge-join-schema", null,
+        null, variables, provider);
+    assertEquals(0, missingInfo.size());
+    System.out.println("PROD_P0_MERGEJOIN_INFO_ROW_DUPLICATE_OUTPUT_SCHEMA=PASS");
+  }
+
+  @Test
   void mergeJoinNativeCheckDoesNotValidateJoinTypeOrUnequalKeyArity()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
