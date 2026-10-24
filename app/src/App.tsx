@@ -330,12 +330,12 @@ export function App() {
         </div>
 
         <div className="editor-actions">
-          <button type="button" aria-label="Choose pipeline" disabled={saving} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
+          <button type="button" aria-label="打开流程（Choose pipeline）" disabled={saving} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
           {isRealGraph && <>
-            <button type="button" aria-label="Fit canvas" disabled={!flow || nodes.length === 0} title="将当前流程的全部节点适配到可见画布" onClick={() => { void flow?.fitView({ padding: 0.18, maxZoom: 1, duration: 250 }); }}>适配画布</button>
-            <button type="button" aria-label="Undo" disabled={saving} onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
-            <button type="button" aria-label="Redo" disabled={saving} onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
-            <button type="button" aria-label="Save" aria-busy={saving} className="primary-action" disabled={!dirty || saving} onClick={saveDocument}>{saving ? "保存中…" : "保存"}</button>
+            <button type="button" aria-label="适配画布（Fit canvas）" disabled={!flow || nodes.length === 0} title="将当前流程的全部节点适配到可见画布" onClick={() => { void flow?.fitView({ padding: 0.18, maxZoom: 1, duration: 250 }); }}>适配画布</button>
+            <button type="button" aria-label="撤销（Undo）" disabled={saving} onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
+            <button type="button" aria-label="重做（Redo）" disabled={saving} onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
+            <button type="button" aria-label="保存（Save）" aria-busy={saving} className="primary-action" disabled={!dirty || saving} onClick={saveDocument}>{saving ? "保存中…" : "保存"}</button>
           </>}
         </div>
 
@@ -352,7 +352,7 @@ export function App() {
               <strong>打开流程</strong>
               <small>输入服务器上的 .hpl 文件路径</small>
             </div>
-            <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="/workspace/example.hpl" autoFocus />
+            <input aria-label="服务器流程路径（Server-visible pipeline path）" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="/workspace/example.hpl" autoFocus />
             {recentPipelinePaths.length > 0 && (
               <div className="pipeline-open-actions" role="group" aria-label="最近打开的流程" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
                 <small style={{ alignSelf: "center" }}>最近打开</small>
@@ -367,7 +367,7 @@ export function App() {
             )}
             <div className="pipeline-open-actions">
               {isRealGraph && <button type="button" onClick={() => setShowOpenPanel(false)}>取消</button>}
-              <button type="submit" aria-label="Open pipeline" className="primary-action" disabled={!pipelinePathDraft.trim() || source.kind === "loading" || saving}>打开文件</button>
+              <button type="submit" aria-label="打开文件（Open pipeline）" className="primary-action" disabled={!pipelinePathDraft.trim() || source.kind === "loading" || saving}>打开文件</button>
             </div>
           </form>
         )}
@@ -385,7 +385,7 @@ export function App() {
             </div>
             <div className="palette-search">
               <span aria-hidden="true">⌕</span>
-              <input aria-label="Search transforms" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} />
+              <input aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} />
             </div>
             <div className="transform-list">
               {CATEGORY_ORDER.map((category) => {
