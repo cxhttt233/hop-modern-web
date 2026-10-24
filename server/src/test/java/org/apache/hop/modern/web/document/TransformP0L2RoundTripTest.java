@@ -700,6 +700,73 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_STRINGCUT_NATIVE_STRING_INPUT_PRECONDITION=PASS");
   }
 
+  @Test
+  void stringCutOutputAliasesPreserveSourcesAndAppendFixedLengthColumnsInRuleOrder()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "StringCut");
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals(Shape.STRING, property(descriptor, "field", "out_stream_name").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "STRING_CUT_ALIAS_APPENDS_VARIABLE_RESOLVED_FIXED_LENGTH_STRING"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "StringCut");
+    assertNotNull(plugin, "production StringCut plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> item = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.stringcut.StringCutField");
+    var setInput = item.getMethod("setFieldInStream", String.class);
+    var setAlias = item.getMethod("setFieldOutStream", String.class);
+    var setRules = meta.getClass().getMethod("setFields", List.class);
+    Object first = item.getConstructor().newInstance();
+    Object second = item.getConstructor().newInstance();
+    setInput.invoke(first, "源字段");
+    setInput.invoke(second, "源字段");
+    setAlias.invoke(first, "前段");
+    setAlias.invoke(second, "${CUT_ALIAS}");
+    setRules.invoke(meta, List.of(first, second));
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("CUT_ALIAS", "截取结果_黄河");
+    var provider = new MemoryMetadataProvider();
+    var incoming = new org.apache.hop.core.row.RowMeta();
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("源字段"));
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaNumber("流量"));
+
+    var aliased = new org.apache.hop.core.row.RowMeta();
+    aliased.addRowMeta(incoming);
+    meta.getFields(aliased, "string-cut", null, null, variables, provider);
+    assertEquals(4, aliased.size(), "two aliases must append two columns in rule order");
+    assertEquals(List.of("源字段", "流量", "前段", "截取结果_黄河"),
+        aliased.getValueMetaList().stream().map(v -> v.getName()).toList());
+    for (int i = 2; i < 4; i++) {
+      assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+          aliased.getValueMeta(i).getType());
+      assertEquals(100, aliased.getValueMeta(i).getLength());
+    }
+
+    setAlias.invoke(first, "");
+    var oneAlias = new org.apache.hop.core.row.RowMeta();
+    oneAlias.addRowMeta(incoming);
+    meta.getFields(oneAlias, "string-cut", null, null, variables, provider);
+    assertEquals(3, oneAlias.size(), "blank alias must not append a column");
+    assertEquals("源字段", oneAlias.getValueMeta(0).getName());
+    assertEquals("截取结果_黄河", oneAlias.getValueMeta(2).getName());
+
+    setAlias.invoke(second, "");
+    var inPlace = new org.apache.hop.core.row.RowMeta();
+    inPlace.addRowMeta(incoming);
+    meta.getFields(inPlace, "string-cut", null, null, variables, provider);
+    assertEquals(2, inPlace.size(), "two blank aliases must preserve incoming width");
+    assertEquals("源字段", inPlace.getValueMeta(0).getName());
+    assertEquals("流量", inPlace.getValueMeta(1).getName());
+    System.out.println("PROD_P0_STRINGCUT_ALIAS_OUTPUT_SCHEMA=PASS");
+  }
+
   @Test void replaceStringNativeSourceFieldPreconditions() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "ReplaceString");
