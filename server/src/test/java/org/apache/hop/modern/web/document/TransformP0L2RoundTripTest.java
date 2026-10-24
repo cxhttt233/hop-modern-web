@@ -519,6 +519,90 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void sortRowsGetFieldsPropagatesSortingCriteriaAndNormalizesSelectedStorage()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "SortRows");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SORT_ROWS_GETFIELDS_PROPAGATES_SORT_FLAGS_AND_NORMALIZES_STORAGE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    for (String key : List.of("name", "ascending", "case_sensitive",
+        "collator_enabled", "collator_strength", "presorted")) {
+      assertNotNull(property(descriptor, "field", key));
+    }
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "SortRows");
+    assertNotNull(plugin, "production SortRows plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> fieldType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.sort.SortRowsField");
+    var constructor = fieldType.getConstructor(String.class, boolean.class,
+        boolean.class, boolean.class, int.class, boolean.class);
+    Object water = constructor.newInstance("水位", false, false, true, 2, false);
+    Object station = constructor.newInstance("站点", true, true, false, 3, true);
+    Object absent = constructor.newInstance("未输入的字段", true, true, false, 0, false);
+    meta.getClass().getMethod("setSortFields", List.class)
+        .invoke(meta, List.of(water, station, absent));
+
+    var row = new org.apache.hop.core.row.RowMeta();
+    var waterMeta = new org.apache.hop.core.row.value.ValueMetaString("水位");
+    waterMeta.setStorageType(
+        org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_BINARY_STRING);
+    waterMeta.setStorageMetadata(
+        new org.apache.hop.core.row.value.ValueMetaString("原二进制存储"));
+    var stationMeta = new org.apache.hop.core.row.value.ValueMetaString("站点");
+    var otherMeta = new org.apache.hop.core.row.value.ValueMetaInteger("流量");
+    row.addValueMeta(waterMeta);
+    row.addValueMeta(stationMeta);
+    row.addValueMeta(otherMeta);
+    boolean otherDescending = otherMeta.isSortedDescending();
+    boolean otherCaseInsensitive = otherMeta.isCaseInsensitive();
+    boolean otherCollatorDisabled = otherMeta.isCollatorDisabled();
+    int otherCollatorStrength = otherMeta.getCollatorStrength();
+    int otherStorage = otherMeta.getStorageType();
+
+    meta.getFields(row, "sort-metadata", new org.apache.hop.core.row.IRowMeta[0],
+        null, new org.apache.hop.core.variables.Variables(),
+        new MemoryMetadataProvider());
+
+    assertEquals(3, row.size(), "SortRows must not append or drop output fields");
+    assertEquals(List.of("水位", "站点", "流量"),
+        List.of(row.getValueMeta(0).getName(), row.getValueMeta(1).getName(),
+            row.getValueMeta(2).getName()));
+    assertSame(waterMeta, row.getValueMeta(0),
+        "Native SortRows modifies incoming IValueMeta in place");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        waterMeta.getType());
+    assertTrue(waterMeta.isSortedDescending());
+    assertTrue(waterMeta.isCaseInsensitive());
+    assertFalse(waterMeta.isCollatorDisabled());
+    assertEquals(2, waterMeta.getCollatorStrength());
+    assertEquals(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_NORMAL,
+        waterMeta.getStorageType());
+    assertNull(waterMeta.getStorageMetadata());
+
+    assertFalse(stationMeta.isSortedDescending());
+    assertFalse(stationMeta.isCaseInsensitive());
+    assertTrue(stationMeta.isCollatorDisabled());
+    assertEquals(3, stationMeta.getCollatorStrength());
+    assertEquals(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_NORMAL,
+        stationMeta.getStorageType());
+
+    assertSame(otherMeta, row.getValueMeta(2));
+    assertEquals(otherDescending, otherMeta.isSortedDescending());
+    assertEquals(otherCaseInsensitive, otherMeta.isCaseInsensitive());
+    assertEquals(otherCollatorDisabled, otherMeta.isCollatorDisabled());
+    assertEquals(otherCollatorStrength, otherMeta.getCollatorStrength());
+    assertEquals(otherStorage, otherMeta.getStorageType());
+    System.out.println("PROD_P0_SORTROWS_OUTPUT_SORT_FLAGS_STORAGE=PASS");
+  }
+
+  @Test
   void streamLookupOutputTypesUseActualInfoRowOrConfiguredDefaultsAndDoNotHideMutation()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
