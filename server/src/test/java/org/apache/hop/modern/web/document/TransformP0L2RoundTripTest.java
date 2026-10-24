@@ -1435,6 +1435,68 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_MERGEJOIN_UNCHECKED_JOIN_TYPE_KEY_ARITY=PASS");
   }
 
+  @Test
+  void uniqueRowsHashSetNativeCheckIgnoresMissingSelectedComparisonFields() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "UniqueRowsByHashSet");
+    Property compareFields = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && "fields".equals(p.groupKey()))
+        .findFirst().orElseThrow();
+    assertEquals(Shape.LIST, compareFields.shape());
+    assertTrue(compareFields.elementProperties().stream()
+        .anyMatch(p -> p.key().equals("name") && p.shape() == Shape.STRING));
+    assertEquals(Shape.BOOLEAN, property(descriptor, "store_values").shape());
+    var requirement = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "UNIQUE_ROWS_HASHSET_COMPARE_FIELDS_REQUIRE_INPUT_ROW_FIELDS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), requirement.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "UniqueRowsByHashSet");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> compareFieldType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta$CompareField");
+    var input = new org.apache.hop.core.row.RowMeta();
+    input.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("水位&流量"));
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "UniqueRowsByHashSet", "unique-hash-native", meta);
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+
+    Object present = compareFieldType.getConstructor(String.class).newInstance("水位&流量");
+    meta.getClass().getMethod("setCompareFields", List.class)
+        .invoke(meta, List.of(present));
+    meta.check(remarks, pipeline, transform, input,
+        new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        x -> x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
+    assertEquals(0, input.indexOfValue("水位&流量"));
+
+    Object missing = compareFieldType.getConstructor(String.class).newInstance("未接入字段");
+    meta.getClass().getMethod("setCompareFields", List.class)
+        .invoke(meta, List.of(missing));
+    remarks.clear();
+    meta.check(remarks, pipeline, transform, input,
+        new String[] {"source"}, new String[0], null, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        x -> x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Native check accepts missing comparison columns when an input hop exists");
+    assertEquals(-1, input.indexOfValue("未接入字段"),
+        "The runtime resolves comparison columns against this incoming row");
+
+    remarks.clear();
+    meta.check(remarks, pipeline, transform, input,
+        new String[0], new String[0], null, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        x -> x.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Native check does reject a missing input hop");
+    System.out.println("PROD_P0_UNIQUEROWS_HASHSET_MISSING_COMPARE_FIELD_NATIVE_GAP=PASS");
+  }
+
   @Test void nestedAndSensitiveProductionDescriptorsStayTyped() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor json = descriptorFor(registry, "JsonInput");
