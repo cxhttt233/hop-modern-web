@@ -153,10 +153,15 @@ public final class AutomaticConfigDescriptor {
                   List.of("/checksumtype", "/resultType", "/resultfieldName"),
                   "CheckSumMeta.getFields() emits INTEGER for CRC32 and ADLER32 regardless of resultType. Other algorithms emit BINARY only when resultType is BINARY, otherwise STRING (including HEXADECIMAL). Binary MD5 has length 16. An empty resultfieldName adds no output column, and non-empty names resolve variables. Diagnose downstream row metadata from both checksumtype and resultType; this is not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.datagrid.DataGridMeta" ->
-          List.of(new RuntimePrecondition(
-              "DATA_GRID_UNKNOWN_FIELD_TYPES_FALLBACK_TO_STRING",
-              List.of("/fields/field"),
-              "For each non-empty fields.field[*].name, DataGridMeta.getFields() resolves the declared fields.field[*].type through ValueMetaFactory. An unknown or null type resolves to TYPE_NONE and silently falls back to STRING; entries with an empty name are omitted from output metadata. Diagnose an unrecognized declared type instead of assuming that Hop will honor it. This is not a save-time validator."));
+          List.of(
+              new RuntimePrecondition(
+                  "DATA_GRID_UNKNOWN_FIELD_TYPES_FALLBACK_TO_STRING",
+                  List.of("/fields/field"),
+                  "For each non-empty fields.field[*].name, DataGridMeta.getFields() resolves the declared fields.field[*].type through ValueMetaFactory. An unknown or null type resolves to TYPE_NONE and silently falls back to STRING; entries with an empty name are omitted from output metadata. Diagnose an unrecognized declared type instead of assuming that Hop will honor it. This is not a save-time validator."),
+              new RuntimePrecondition(
+                  "DATA_GRID_DECLARED_FIELD_FORMATS_PROPAGATE_TO_OUTPUT_METADATA",
+                  List.of("/fields/field"),
+                  "DataGridMeta.getFields() appends non-empty fields.field[*].name entries in declaration order, using their configured name literally (without variable resolution). For each output field it propagates length, precision, format as conversion mask, currency, group as grouping symbol, and decimal as decimal symbol; the origin is the DataGrid transform name. Downstream schema consumers must use these declared field attributes rather than infer formatting or precision from data rows. This is an output-metadata compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" ->
           List.of(
               new RuntimePrecondition(
