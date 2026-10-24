@@ -200,7 +200,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD",
                   List.of("/fields/field"),
-                  "For every aggregation except COUNT_ANY, fields.field[*].subject must name an incoming row field; COUNT_ANY does not require a subject. Check against upstream row metadata."));
+                  "For every aggregation except COUNT_ANY, fields.field[*].subject must name an incoming row field; COUNT_ANY does not require a subject. Check against upstream row metadata."),
+              new RuntimePrecondition(
+                  "GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME",
+                  List.of("/all_rows", "/add_linenr", "/linenr_fieldname"),
+                  "GroupByMeta.getFields() appends an INTEGER group line-number output field only when all_rows, add_linenr, and a non-empty linenr_fieldname are all present. With all_rows=false or add_linenr=false, the line-number field is absent even if its name is configured; with all_rows=true and an empty name, no field is appended. Diagnose downstream row metadata from all three values without rejecting draft saves."));
       case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" ->
           List.of(
               new RuntimePrecondition(
