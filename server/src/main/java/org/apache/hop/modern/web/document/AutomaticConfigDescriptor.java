@@ -198,10 +198,16 @@ public final class AutomaticConfigDescriptor {
                   List.of("/join_type", "/keys_1/key", "/keys_2/key", "/transform1", "/transform2"),
                   "Native MergeJoinMeta.check() always returns a not-verified WARNING, even for an unsupported join_type, unequal keys_1.key and keys_2.key counts, or missing stream references. The runtime accepts only INNER, LEFT OUTER, RIGHT OUTER, and FULL OUTER; it needs two resolved info streams and equal-length ordered key lists whose fields exist in the respective input rows. Diagnose these conditions before execution without treating the native warning as a successful validation or blocking draft saves."));
       case "org.apache.hop.pipeline.transforms.rest.RestMeta" ->
-          List.of(new RuntimePrecondition(
-              "REST_DYNAMIC_METHOD_NATIVE_CHECK_FALSE_POSITIVE",
-              List.of("/dynamicMethod", "/methodFieldName", "/method"),
-              "When dynamicMethod is true, methodFieldName must be non-empty and resolve to an incoming row field. The native RestMeta.check() incorrectly reports ERROR even when the field name is present (MethodFieldOk); this is a native-check false positive, not a reason to reject an otherwise valid dynamic-method configuration. Runtime also validates each incoming HTTP method token. When dynamicMethod is false, method must be a valid non-empty HTTP method token."));
+          List.of(
+              new RuntimePrecondition(
+                  "REST_DYNAMIC_METHOD_NATIVE_CHECK_FALSE_POSITIVE",
+                  List.of("/dynamicMethod", "/methodFieldName", "/method"),
+                  "When dynamicMethod is true, methodFieldName must be non-empty and resolve to an incoming row field. The native RestMeta.check() incorrectly reports ERROR even when the field name is present (MethodFieldOk); this is a native-check false positive, not a reason to reject an otherwise valid dynamic-method configuration. Runtime also validates each incoming HTTP method token. When dynamicMethod is false, method must be a valid non-empty HTTP method token."),
+              new RuntimePrecondition(
+                  "REST_BINARY_RESULT_FIELD_CHANGES_OUTPUT_ROW_TYPE",
+                  List.of("/result/name", "/result/binary", "/result/code",
+                      "/result/response_time", "/result/response_header"),
+                  "RestMeta.getFields() emits result.name as BINARY when result.binary is true, otherwise STRING; no result body column is added when result.name is empty. Result code and response_time columns are INTEGER, and response_header is STRING. These names are output columns, not incoming fields; preserve their types when deriving downstream row metadata. This is an output-schema compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta" ->
           List.of(new RuntimePrecondition(
               "REPLACE_STRING_SOURCE_FIELDS_MUST_BE_DISTINCT_STRINGS",
