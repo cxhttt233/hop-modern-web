@@ -52,23 +52,27 @@ class TransformP0L2RoundTripTest {
 
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "DataGrid");
     assertNotNull(plugin);
-    var meta = (org.apache.hop.pipeline.transforms.datagrid.DataGridMeta)
-        registry.loadClass(plugin, ITransformMeta.class);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
     meta.setDefault();
-    var numeric = new org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta();
-    numeric.setName("测站流量");
-    numeric.setType(org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
-        org.apache.hop.core.row.IValueMeta.TYPE_NUMBER));
-    var unknown = new org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta();
-    unknown.setName("未知类型字段");
-    unknown.setType("NOT_A_HOP_VALUE_META_TYPE");
-    var unspecified = new org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta();
-    unspecified.setName("未指定类型字段");
-    unspecified.setType(null);
-    var unnamed = new org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta();
-    unnamed.setName("");
-    unnamed.setType("Number");
-    meta.setDataGridFields(List.of(numeric, unknown, unspecified, unnamed));
+    // Keep the fixture independent of the DataGrid artifact at compile time:
+    // only the production P0 runtime installs the full 20-transform plugin set.
+    Class<?> fieldClass = Class.forName(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta",
+        true, meta.getClass().getClassLoader());
+    String[] names = {"测站流量", "未知类型字段", "未指定类型字段", ""};
+    String[] types = {
+        org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
+            org.apache.hop.core.row.IValueMeta.TYPE_NUMBER),
+        "NOT_A_HOP_VALUE_META_TYPE", null, "Number"
+    };
+    List<Object> fields = new ArrayList<>();
+    for (int i = 0; i < names.length; i++) {
+      Object field = fieldClass.getConstructor().newInstance();
+      fieldClass.getMethod("setName", String.class).invoke(field, names[i]);
+      fieldClass.getMethod("setType", String.class).invoke(field, (Object) types[i]);
+      fields.add(field);
+    }
+    meta.getClass().getMethod("setDataGridFields", List.class).invoke(meta, fields);
 
     var output = new org.apache.hop.core.row.RowMeta();
     meta.getFields(output, "DataGrid", null, null,
