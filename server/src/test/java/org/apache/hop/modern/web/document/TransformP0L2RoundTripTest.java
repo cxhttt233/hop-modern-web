@@ -804,7 +804,8 @@ class TransformP0L2RoundTripTest {
         .anyMatch(p -> p.key().equals("name") && p.shape() == Shape.STRING));
     assertEquals(Shape.STRING, property(descriptor, "resultfieldName").shape());
     assertEquals(List.of("CHECKSUM_RESULT_FIELD_REQUIRED",
-            "CHECKSUM_SELECTED_FIELDS_REQUIRE_UPSTREAM_FIELDS"),
+            "CHECKSUM_SELECTED_FIELDS_REQUIRE_UPSTREAM_FIELDS",
+            "CHECKSUM_RESULT_ROW_TYPE_DEPENDS_ON_ALGORITHM_AND_ENCODING"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     assertEquals(List.of("/resultfieldName"),
         descriptor.runtimePreconditions().get(0).keyListPointers());
@@ -849,6 +850,78 @@ class TransformP0L2RoundTripTest {
     assertTrue(remarks.stream().anyMatch(
         r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR));
     System.out.println("PROD_P0_CHECKSUM_NATIVE_CHECK_PRECONDITIONS=PASS");
+  }
+
+  @Test
+  void checkSumAlgorithmAndResultEncodingDetermineNativeOutputRowType() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "CheckSum");
+    assertEquals(Shape.ENUM, property(descriptor, "checksumtype").shape());
+    assertEquals(Shape.ENUM, property(descriptor, "resultType").shape());
+    assertEquals(Shape.STRING, property(descriptor, "resultfieldName").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "CHECKSUM_RESULT_ROW_TYPE_DEPENDS_ON_ALGORITHM_AND_ENCODING"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/checksumtype", "/resultType", "/resultfieldName"),
+        contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "CheckSum");
+    assertNotNull(plugin, "production CheckSum plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    ClassLoader loader = meta.getClass().getClassLoader();
+    Class<?> algorithmClass = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta$CheckSumType");
+    Class<?> resultClass = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta$ResultType");
+    var setAlgorithm = meta.getClass().getMethod("setCheckSumType", algorithmClass);
+    var setResult = meta.getClass().getMethod("setResultType", resultClass);
+    var setName = meta.getClass().getMethod("setResultFieldName", String.class);
+    setName.invoke(meta, "${CHECKSUM_RESULT_COLUMN}");
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("CHECKSUM_RESULT_COLUMN", "摘要_雪<&>");
+    var provider = new MemoryMetadataProvider();
+
+    String[][] cases = {
+        {"CRC32", "BINARY"}, {"ADLER32", "HEXADECIMAL"},
+        {"MD5", "BINARY"}, {"SHA256", "BINARY"},
+        {"SHA256", "HEXADECIMAL"}, {"SHA256", "STRING"}
+    };
+    int[] types = {
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        org.apache.hop.core.row.IValueMeta.TYPE_BINARY,
+        org.apache.hop.core.row.IValueMeta.TYPE_BINARY,
+        org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        org.apache.hop.core.row.IValueMeta.TYPE_STRING
+    };
+    for (int i = 0; i < cases.length; i++) {
+      final String algorithm = cases[i][0];
+      final String encoding = cases[i][1];
+      Object algorithmValue = java.util.Arrays.stream(algorithmClass.getEnumConstants())
+          .filter(v -> ((Enum<?>) v).name().equals(algorithm)).findFirst().orElseThrow();
+      Object encodingValue = java.util.Arrays.stream(resultClass.getEnumConstants())
+          .filter(v -> ((Enum<?>) v).name().equals(encoding)).findFirst().orElseThrow();
+      setAlgorithm.invoke(meta, algorithmValue);
+      setResult.invoke(meta, encodingValue);
+      var row = new org.apache.hop.core.row.RowMeta();
+      row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("upstream"));
+      meta.getFields(row, "checksum-node", new org.apache.hop.core.row.IRowMeta[0],
+          null, variables, provider);
+      assertEquals(2, row.size(), algorithm + "/" + encoding);
+      assertEquals("摘要_雪<&>", row.getValueMeta(1).getName());
+      assertEquals(types[i], row.getValueMeta(1).getType(), algorithm + "/" + encoding);
+      if (algorithm.equals("MD5") && encoding.equals("BINARY")) {
+        assertEquals(16, row.getValueMeta(1).getLength(), "MD5 binary length");
+      }
+    }
+    setName.invoke(meta, "");
+    var unnamed = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(unnamed, "checksum-node", new org.apache.hop.core.row.IRowMeta[0],
+        null, variables, provider);
+    assertEquals(0, unnamed.size(), "Missing result field name omits the output column");
+    System.out.println("PROD_P0_CHECKSUM_ALGORITHM_RESULT_OUTPUT_TYPE=PASS");
   }
 
   @Test
