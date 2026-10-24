@@ -21,6 +21,16 @@ try {
   const node = page.locator('.react-flow__node[data-id="table-input"]');
   await node.waitFor({ state: "visible" });
   await node.click();
+  // Contextual node actions must be discoverable in Chinese while preserving
+  // their existing real Hop configure/delete behavior.
+  const nodeActions = page.locator(".node-context-actions");
+  await nodeActions.waitFor({ state: "visible" });
+  const nodeTitle = (await nodeActions.locator(".node-action-label").innerText()).trim();
+  if (!nodeTitle ||
+      await nodeActions.getByRole("button", { name: `配置转换：${nodeTitle}（Configure）`, exact: true }).count() !== 1 ||
+      await nodeActions.getByRole("button", { name: `删除转换：${nodeTitle}（Delete）`, exact: true }).count() !== 1) {
+    throw new Error("Real TableInput node lacks Chinese-first contextual action names");
+  }
   const initialReadPromise = page.waitForResponse(r => match(r, "/config/read"));
   await page.getByRole("button", { name: "Configure" }).click();
   const initialRead = await initialReadPromise;
