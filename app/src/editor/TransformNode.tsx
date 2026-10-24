@@ -77,14 +77,14 @@ export function TransformNode({ id, data, selected }: NodeProps) {
         <button
           type="button"
           className="nodrag nopan primary-context"
-          aria-label="Configure"
+          aria-label={`配置转换：${title}（Configure）`}
           disabled={actions?.loading}
           onClick={(event) => { event.stopPropagation(); actions?.configure(id); }}
         >配置</button>
         <button
           type="button"
           className="nodrag nopan danger-context"
-          aria-label="Delete"
+          aria-label={`删除转换：${title}（Delete）`}
           onClick={(event) => { event.stopPropagation(); actions?.remove(id); }}
         >删除</button>
       </NodeToolbar>
