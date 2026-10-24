@@ -227,10 +227,15 @@ public final class AutomaticConfigDescriptor {
                       "/result/response_time", "/result/response_header"),
                   "RestMeta.getFields() emits result.name as BINARY when result.binary is true, otherwise STRING; no result body column is added when result.name is empty. Result code and response_time columns are INTEGER, and response_header is STRING. These names are output columns, not incoming fields; preserve their types when deriving downstream row metadata. This is an output-schema compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta" ->
-          List.of(new RuntimePrecondition(
-              "REPLACE_STRING_SOURCE_FIELDS_MUST_BE_DISTINCT_STRINGS",
-              List.of("/fields/field"),
-              "Each fields.field[*].in_stream_name must be non-empty, distinct and present in incoming row metadata as STRING. The native ReplaceString check reports errors for missing, non-string or repeated source fields. out_stream_name is an optional output alias, not an upstream field."));
+          List.of(
+              new RuntimePrecondition(
+                  "REPLACE_STRING_SOURCE_FIELDS_MUST_BE_DISTINCT_STRINGS",
+                  List.of("/fields/field"),
+                  "Each fields.field[*].in_stream_name must be non-empty, distinct and present in incoming row metadata as STRING. The native ReplaceString check reports errors for missing, non-string or repeated source fields. out_stream_name is an optional output alias, not an upstream field."),
+              new RuntimePrecondition(
+                  "REPLACE_STRING_OUTPUT_ALIAS_APPENDS_VARIABLE_RESOLVED_STRING_FIELD",
+                  List.of("/fields/field"),
+                  "For each fields.field[*], a non-empty out_stream_name is resolved through Hop variables and appended as a new STRING output field while the original in_stream_name column remains. A blank out_stream_name changes the original field in place without appending a column. Native ReplaceStringMeta.getFields() does not reject an alias that duplicates an existing output name; diagnose the resulting downstream row schema before execution, without blocking draft saves."));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" ->
           List.of(new RuntimePrecondition(
               "SELECT_VALUES_STAGE_SPECIFIC_FIELD_RESOLUTION",
