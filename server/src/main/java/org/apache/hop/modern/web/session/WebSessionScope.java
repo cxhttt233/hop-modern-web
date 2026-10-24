@@ -17,11 +17,16 @@
 package org.apache.hop.modern.web.session;
 
 import jakarta.servlet.http.HttpSession;
+import java.util.HashSet;
+import java.util.Set;
 import org.apache.hop.core.scope.IHopScope;
 
 /** Keeps Hop ambient state isolated by HTTP session and inherited by execution threads. */
 public class WebSessionScope<T> implements IHopScope<T> {
   private static final ThreadLocal<HttpSession> REQUEST_SESSION = new ThreadLocal<>();
+  // Track request-scoped fallbacks so pooled HTTP threads never retain another user's state.
+  private static final ThreadLocal<Set<WebSessionScope<?>>> REQUEST_FALLBACKS =
+      ThreadLocal.withInitial(HashSet::new);
 
   private final String attributeName;
   private final InheritableThreadLocal<T> outsideRequest = new InheritableThreadLocal<>();
@@ -35,9 +40,16 @@ public class WebSessionScope<T> implements IHopScope<T> {
     REQUEST_SESSION.set(session);
   }
 
-  /** Remove request state before the container reuses the request thread. */
+  /** Remove request state and inherited fallbacks before the container reuses the thread. */
   public static void unbind() {
     REQUEST_SESSION.remove();
+    try {
+      for (WebSessionScope<?> scope : REQUEST_FALLBACKS.get()) {
+        scope.outsideRequest.remove();
+      }
+    } finally {
+      REQUEST_FALLBACKS.remove();
+    }
   }
 
   @Override
@@ -52,7 +64,9 @@ public class WebSessionScope<T> implements IHopScope<T> {
     HttpSession session = REQUEST_SESSION.get();
     if (session != null) {
       session.setAttribute(attributeName, value);
+      REQUEST_FALLBACKS.get().add(this);
     }
+    // Execution threads created during the request inherit this snapshot.
     outsideRequest.set(value);
   }
 
