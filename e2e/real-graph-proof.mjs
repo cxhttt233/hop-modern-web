@@ -191,6 +191,63 @@ try {
     throw new Error("Unicode real .hpl path must issue exactly one additional open request");
   }
 
+  // Unicode disk write proof: the same Chinese/space-containing server path
+  // must survive a real semantic node move, save, and disk reopen. V3/V5
+  // exercise ordinary fixture paths; this checks a distinct filesystem path
+  // boundary using only the disposable .hpl copy created above.
+  const unicodeSource = page.locator('.react-flow__node[data-id="source"]');
+  await unicodeSource.waitFor({ state: "visible" });
+  const originalSource = unicodeGraph.nodes.find((node) => node.id === "source");
+  if (!originalSource) throw new Error("Unicode real .hpl is missing its source transform");
+  const iconBox = await unicodeSource.locator(".transform-node-icon").boundingBox();
+  if (!iconBox) throw new Error("Unicode source drag handle is not visible");
+  const start = { x: iconBox.x + iconBox.width / 2, y: iconBox.y + iconBox.height / 2 };
+  const movePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    /\\/api\\/pipelines\\/[^/]+\\/move$/.test(new URL(response.url()).pathname));
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + 48, start.y + 32, { steps: 12 });
+  await page.mouse.up();
+  const moveResponse = await movePending;
+  const moved = await moveResponse.json();
+  const movedSource = moved.nodes?.find((node) => node.id === "source");
+  if (!moveResponse.ok() || !movedSource ||
+      (movedSource.x === originalSource.x && movedSource.y === originalSource.y) ||
+      moved.revision === unicodeGraph.revision) {
+    throw new Error("Real semantic move failed for Unicode-path .hpl");
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const savePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    /\\/api\\/pipelines\\/[^/]+\\/save$/.test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const saveResponse = await savePending;
+  if (!saveResponse.ok()) throw new Error("Real Unicode-path .hpl disk save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const unicodeReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== unicodePath) {
+    throw new Error("Unicode path identity changed before disk reopen");
+  }
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const unicodeReopenResponse = await unicodeReopenPending;
+  const unicodeReopened = await unicodeReopenResponse.json();
+  const diskSource = unicodeReopened.nodes?.find((node) => node.id === "source");
+  if (!unicodeReopenResponse.ok() || !diskSource ||
+      diskSource.x !== movedSource.x || diskSource.y !== movedSource.y ||
+      unicodeReopened.edges?.length !== unicodeGraph.edges.length) {
+    throw new Error("Unicode-path .hpl disk reopen lost saved node position or hops");
+  }
+  await unicodeSource.waitFor({ state: "visible" });
+  if (requests.filter((url) => url.includes("/api/pipelines/open")).length !== 6 ||
+      requests.filter((url) => /\\/api\\/pipelines\\/[^/]+\\/save$/.test(new URL(url).pathname)).length !== 1) {
+    throw new Error("Unicode-path move/save/reopen issued unexpected backend requests");
+  }
+  console.log("Unicode disk write proof passed: real .hpl move -> save -> disk reopen with Chinese/spaced path.");
+
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
     return path === "/ui" || path.startsWith("/ui/");
