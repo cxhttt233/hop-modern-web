@@ -9,11 +9,22 @@ const post=s=>page.waitForResponse(r=>r.request().method()==="POST"&&new URL(r.u
 const rf=id=>page.locator('.react-flow__node[data-id="'+id+'"]');
 try{
  await page.goto("http://127.0.0.1:5173",{waitUntil:"networkidle"});
+ // Chinese-first accessibility must work in the real browser file-open flow.
+ if(await page.getByRole("textbox",{name:"服务器流程路径（Server-visible pipeline path）",exact:true}).count()!==1 ||
+    await page.getByRole("button",{name:"打开文件（Open pipeline）",exact:true}).count()!==1)
+   throw new Error("Chinese file-open controls are missing accessible names");
  let p=post("/api/pipelines/open");
  await page.getByLabel("Server-visible pipeline path").fill(pipelinePath);
  await page.getByRole("button",{name:"Open pipeline"}).click();
  const opened=await (await p).json(); const original=opened.nodes[0]?.id;
  if(!original) throw new Error("real pipeline has no transform");
+ // Verify screen-reader names on the real editor before exercising undo/redo/save.
+ for(const name of ["打开流程（Choose pipeline）","适配画布（Fit canvas）","撤销（Undo）","重做（Redo）","保存（Save）"])
+   if(await page.getByRole("button",{name,exact:true}).count()!==1)
+     throw new Error("Missing localized toolbar accessible name: "+name);
+ if(await page.getByRole("textbox",{name:"搜索组件（Search transforms）",exact:true}).count()!==1)
+   throw new Error("Missing localized Palette search accessible name");
+
  await rf(original).waitFor();
  if(await page.getByRole("button",{name:"Save"}).isEnabled()) throw new Error("freshly opened authoritative graph must start clean");
  if(await page.locator(".dirty-state.is-dirty").count()) throw new Error("freshly opened authoritative graph must not show dirty state");
