@@ -2263,6 +2263,89 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_SELECTVALUES_UNSPECIFIED_OUTPUT_ORDER=PASS");
   }
 
+  @Test
+  void scriptValueModOutputReplacementPrefersNameThenFallsBackToRename() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "ScriptValueMod");
+    assertEquals(Shape.OBJECT, property(descriptor, "fields").shape());
+    assertEquals(Shape.LIST, property(descriptor, "fields", "field").shape());
+    assertEquals(Shape.STRING, property(descriptor, "fields", "field", "name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "fields", "field", "rename").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "fields", "field", "replace").shape());
+    assertEquals(Shape.NUMBER, property(descriptor, "fields", "field", "type").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("SCRIPT_VALUE_MOD_REPLACE_TARGET_FALLS_BACK_TO_RENAME"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ScriptValueMod");
+    assertNotNull(plugin, "production JavaScript transform plugin missing");
+    var meta = (org.apache.hop.pipeline.transforms.javascript.ScriptValuesMeta)
+        registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+
+    var append = new org.apache.hop.pipeline.transforms.javascript.ScriptValuesMeta.ScriptField();
+    append.setName("脚本结果");
+    append.setRename("新增列");
+    append.setType(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
+    append.setLength(9);
+    append.setPrecision(0);
+    append.setReplace(false);
+    meta.setScriptFields(List.of(append));
+    var appended = new org.apache.hop.core.row.RowMeta();
+    appended.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入值"));
+    appended.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("候选别名"));
+    meta.getFields(appended, "javascript", null, null, variables, provider);
+    assertEquals(3, appended.size());
+    assertEquals("新增列", appended.getValueMeta(2).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        appended.getValueMeta(2).getType());
+    assertEquals(9, appended.getValueMeta(2).getLength());
+
+    var fallback = new org.apache.hop.pipeline.transforms.javascript.ScriptValuesMeta.ScriptField();
+    fallback.setName("不存在的脚本名");
+    fallback.setRename("候选别名");
+    fallback.setType(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER);
+    fallback.setLength(14);
+    fallback.setPrecision(3);
+    fallback.setReplace(true);
+    meta.setScriptFields(List.of(fallback));
+    var fallbackRow = new org.apache.hop.core.row.RowMeta();
+    fallbackRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入值"));
+    fallbackRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("候选别名"));
+    meta.getFields(fallbackRow, "javascript", null, null, variables, provider);
+    assertEquals(2, fallbackRow.size(), "replacement must not append a field");
+    assertEquals("候选别名", fallbackRow.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER,
+        fallbackRow.getValueMeta(1).getType());
+    assertEquals(14, fallbackRow.getValueMeta(1).getLength());
+    assertEquals(3, fallbackRow.getValueMeta(1).getPrecision());
+
+    fallback.setName("输入值");
+    fallback.setType(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
+    fallback.setLength(7);
+    var preferred = new org.apache.hop.core.row.RowMeta();
+    preferred.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入值"));
+    preferred.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("候选别名"));
+    meta.getFields(preferred, "javascript", null, null, variables, provider);
+    assertEquals(2, preferred.size());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        preferred.getValueMeta(0).getType(), "name wins over rename");
+    assertEquals(7, preferred.getValueMeta(0).getLength());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        preferred.getValueMeta(1).getType(), "fallback alias must remain unchanged");
+
+    fallback.setName("完全不存在");
+    fallback.setRename("也不存在");
+    var invalid = new org.apache.hop.core.row.RowMeta();
+    invalid.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入值"));
+    assertThrows(org.apache.hop.core.exception.HopTransformException.class,
+        () -> meta.getFields(invalid, "javascript", null, null, variables, provider));
+    System.out.println("PROD_P0_SCRIPTVALUE_REPLACE_NAME_RENAME_OUTPUT_SCHEMA=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
