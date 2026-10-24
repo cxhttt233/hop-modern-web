@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import { fileURLToPath } from "node:url";
-import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 const pipelinePath = process.env.REAL_HPL_PATH;
@@ -289,6 +289,59 @@ try {
     throw new Error("Recent-file capacity proof issued unexpected real open requests");
   }
   console.log("Recent-file capacity proof passed: four real .hpl paths in recency order, oldest evicted.");
+
+  // Two different real .hpl paths can share a filename. Their recent shortcuts
+  // must show unique visible path suffixes, not indistinguishable basenames.
+  const sharedName = "同名流程.hpl";
+  const duplicateDirs = [join(unicodeDirectory, "甲目录"), join(unicodeDirectory, "乙目录")];
+  const duplicatePaths = duplicateDirs.map((dir) => join(dir, sharedName));
+  for (let i = 0; i < duplicatePaths.length; i++) {
+    await mkdir(duplicateDirs[i], { recursive: true });
+    await copyFile(pipelinePath, duplicatePaths[i]);
+    await page.getByRole("button", { name: "Choose pipeline" }).click();
+    await page.getByLabel("Server-visible pipeline path").fill(duplicatePaths[i]);
+    const duplicatePending = page.waitForResponse((response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/pipelines/open");
+    await page.getByRole("button", { name: "Open pipeline" }).click();
+    const duplicateResponse = await duplicatePending;
+    const duplicateRequest = duplicateResponse.request().postDataJSON();
+    const duplicateGraph = await duplicateResponse.json();
+    if (!duplicateResponse.ok() || duplicateRequest?.path !== duplicatePaths[i] ||
+        duplicateGraph.name !== graph.name || duplicateGraph.nodes?.length !== graph.nodes.length ||
+        duplicateGraph.edges?.length !== graph.edges.length) {
+      throw new Error("Duplicate-basename real .hpl open failed");
+    }
+    await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
+  }
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  const duplicateRecent = page.getByRole("group", { name: "最近打开的流程" });
+  const duplicateLabels = await duplicateRecent.getByRole("button").evaluateAll((buttons) =>
+    buttons.map((button) => ({ name: button.getAttribute("aria-label"), text: button.textContent?.trim() })));
+  if (duplicateLabels[0]?.name !== `填入最近流程：${duplicatePaths[1]}` ||
+      duplicateLabels[1]?.name !== `填入最近流程：${duplicatePaths[0]}` ||
+      duplicateLabels[0]?.text !== "乙目录 / 同名流程.hpl" ||
+      duplicateLabels[1]?.text !== "甲目录 / 同名流程.hpl") {
+    throw new Error("Duplicate-basename recent files are not visibly distinguishable");
+  }
+  const opensBeforeSelection = requests.filter((url) => url.includes("/api/pipelines/open")).length;
+  await duplicateRecent.getByRole("button", { name: `填入最近流程：${duplicatePaths[0]}` }).click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== duplicatePaths[0] ||
+      requests.filter((url) => url.includes("/api/pipelines/open")).length !== opensBeforeSelection) {
+    throw new Error("Duplicate-basename shortcut must only fill the selected exact path");
+  }
+  const selectedPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const selectedResponse = await selectedPending;
+  const selectedGraph = await selectedResponse.json();
+  if (!selectedResponse.ok() || selectedResponse.request().postDataJSON()?.path !== duplicatePaths[0] ||
+      selectedGraph.name !== graph.name || selectedGraph.nodes?.length !== graph.nodes.length ||
+      requests.filter((url) => url.includes("/api/pipelines/open")).length !== opensBeforeSelection + 1) {
+    throw new Error("Duplicate-basename shortcut did not explicitly reopen the chosen real .hpl");
+  }
+  console.log("Duplicate-basename recent-file proof passed: distinct visible path suffixes, explicit real reopen.");
 
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
