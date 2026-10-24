@@ -1125,7 +1125,8 @@ class TransformP0L2RoundTripTest {
         .anyMatch(p -> p.key().equals("subject") && p.shape() == Shape.STRING));
     assertEquals(List.of("GROUP_KEYS_CONTIGUOUS",
             "GROUPBY_GROUPING_KEYS_REQUIRE_UPSTREAM_FIELDS",
-            "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD"),
+            "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD",
+            "GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     var precondition = descriptor.runtimePreconditions().get(2);
     assertEquals(List.of("/fields/field"), precondition.keyListPointers());
@@ -2009,6 +2010,67 @@ class TransformP0L2RoundTripTest {
     assertEquals(19, disk.at("/fields/field/1/length").intValue());
     assertTrue(disk.at("/fields/field/1/repeat").isBoolean());
     assertFalse(disk.at("/fields/field/1/repeat").booleanValue());
+  }
+
+  @Test
+  void groupByLineNumberOutputMetadataRequiresAllRowsFlagAndNonemptyName() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "GroupBy");
+    assertEquals(Shape.BOOLEAN, property(descriptor, "all_rows").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "add_linenr").shape());
+    assertEquals(Shape.STRING, property(descriptor, "linenr_fieldname").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/all_rows", "/add_linenr", "/linenr_fieldname"),
+        contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(plugin, "production GroupBy plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var setAllRows = meta.getClass().getMethod("setPassAllRows", boolean.class);
+    var setAddLine = meta.getClass().getMethod("setAddingLineNrInGroup", boolean.class);
+    var setLineName = meta.getClass().getMethod("setLineNrInGroupField", String.class);
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    var incoming = new org.apache.hop.core.row.RowMeta();
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("流域"));
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaNumber("流量"));
+
+    setAllRows.invoke(meta, true);
+    setAddLine.invoke(meta, false);
+    setLineName.invoke(meta, "组内序号");
+    var disabled = new org.apache.hop.core.row.RowMeta();
+    disabled.addRowMeta(incoming);
+    meta.getFields(disabled, "groupby-line-number", null, null, variables, provider);
+    assertEquals(2, disabled.size(), "add_linenr=false must preserve only input fields");
+
+    setAddLine.invoke(meta, true);
+    setLineName.invoke(meta, "");
+    var unnamed = new org.apache.hop.core.row.RowMeta();
+    unnamed.addRowMeta(incoming);
+    meta.getFields(unnamed, "groupby-line-number", null, null, variables, provider);
+    assertEquals(2, unnamed.size(), "blank linenr_fieldname must not append a field");
+
+    setLineName.invoke(meta, "组内序号");
+    var enabled = new org.apache.hop.core.row.RowMeta();
+    enabled.addRowMeta(incoming);
+    meta.getFields(enabled, "groupby-line-number", null, null, variables, provider);
+    assertEquals(3, enabled.size());
+    assertEquals("流域", enabled.getValueMeta(0).getName());
+    assertEquals("流量", enabled.getValueMeta(1).getName());
+    assertEquals("组内序号", enabled.getValueMeta(2).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        enabled.getValueMeta(2).getType());
+
+    setAllRows.invoke(meta, false);
+    var groupedOnly = new org.apache.hop.core.row.RowMeta();
+    groupedOnly.addRowMeta(incoming);
+    meta.getFields(groupedOnly, "groupby-line-number", null, null, variables, provider);
+    assertEquals(-1, groupedOnly.indexOfValue("组内序号"),
+        "all_rows=false must suppress group line number even if add_linenr=true");
+    System.out.println("PROD_P0_GROUPBY_LINE_NUMBER_OUTPUT_SCHEMA=PASS");
   }
 
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
