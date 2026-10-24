@@ -194,7 +194,7 @@ try {
   }
 
   pending = post("/save");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
   const activatedSaved = await (await pending).json();
   pending = post("/api/pipelines/open");
   await page.getByRole("button", { name: "Choose pipeline" }).click();
