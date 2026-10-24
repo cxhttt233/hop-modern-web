@@ -147,7 +147,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "CHECKSUM_SELECTED_FIELDS_REQUIRE_UPSTREAM_FIELDS",
                   List.of("/fields/field"),
-                  "Each fields.field[*].name must exist in incoming row metadata. Missing selected fields are errors; an empty selection is a warning, not an unknown-field error."));
+                  "Each fields.field[*].name must exist in incoming row metadata. Missing selected fields are errors; an empty selection is a warning, not an unknown-field error."),
+              new RuntimePrecondition(
+                  "CHECKSUM_RESULT_ROW_TYPE_DEPENDS_ON_ALGORITHM_AND_ENCODING",
+                  List.of("/checksumtype", "/resultType", "/resultfieldName"),
+                  "CheckSumMeta.getFields() emits INTEGER for CRC32 and ADLER32 regardless of resultType. Other algorithms emit BINARY only when resultType is BINARY, otherwise STRING (including HEXADECIMAL). Binary MD5 has length 16. An empty resultfieldName adds no output column, and non-empty names resolve variables. Diagnose downstream row metadata from both checksumtype and resultType; this is not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.datagrid.DataGridMeta" ->
           List.of(new RuntimePrecondition(
               "DATA_GRID_UNKNOWN_FIELD_TYPES_FALLBACK_TO_STRING",
