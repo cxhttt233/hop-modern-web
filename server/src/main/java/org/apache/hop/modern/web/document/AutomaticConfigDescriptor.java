@@ -223,7 +223,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "MERGE_JOIN_NATIVE_CHECK_DOES_NOT_VALIDATE_JOIN_TYPE_OR_KEY_ARITY",
                   List.of("/join_type", "/keys_1/key", "/keys_2/key", "/transform1", "/transform2"),
-                  "Native MergeJoinMeta.check() always returns a not-verified WARNING, even for an unsupported join_type, unequal keys_1.key and keys_2.key counts, or missing stream references. The runtime accepts only INNER, LEFT OUTER, RIGHT OUTER, and FULL OUTER; it needs two resolved info streams and equal-length ordered key lists whose fields exist in the respective input rows. Diagnose these conditions before execution without treating the native warning as a successful validation or blocking draft saves."));
+                  "Native MergeJoinMeta.check() always returns a not-verified WARNING, even for an unsupported join_type, unequal keys_1.key and keys_2.key counts, or missing stream references. The runtime accepts only INNER, LEFT OUTER, RIGHT OUTER, and FULL OUTER; it needs two resolved info streams and equal-length ordered key lists whose fields exist in the respective input rows. Diagnose these conditions before execution without treating the native warning as a successful validation or blocking draft saves."),
+              new RuntimePrecondition(
+                  "MERGE_JOIN_INFO_ROWS_APPEND_FIELDS_AND_RENAME_DUPLICATE_NAMES",
+                  List.of("/transform1", "/transform2"),
+                  "MergeJoinMeta.getFields() merges resolved info-row metadata in info[] order into the output row. Repeated names are disambiguated using the first available _1, _2, etc. suffix, including collisions with already suffixed fields. A renamed field retains its source type, gains the MergeJoin transform as its origin, and does not rename the source info-row field. Null info-row entries are skipped. Derive downstream output field order and names from both resolved streams; this is a diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.rest.RestMeta" ->
           List.of(
               new RuntimePrecondition(
