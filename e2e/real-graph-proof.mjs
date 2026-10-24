@@ -204,7 +204,7 @@ try {
   const start = { x: iconBox.x + iconBox.width / 2, y: iconBox.y + iconBox.height / 2 };
   const movePending = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
-    /\\/api\\/pipelines\\/[^/]+\\/move$/.test(new URL(response.url()).pathname));
+    new RegExp("/api/pipelines/[^/]+/move$").test(new URL(response.url()).pathname));
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(start.x + 48, start.y + 32, { steps: 12 });
@@ -220,7 +220,7 @@ try {
   await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
   const savePending = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
-    /\\/api\\/pipelines\\/[^/]+\\/save$/.test(new URL(response.url()).pathname));
+    new RegExp("/api/pipelines/[^/]+/save$").test(new URL(response.url()).pathname));
   await page.getByRole("button", { name: "Save", exact: true }).click();
   const saveResponse = await savePending;
   if (!saveResponse.ok()) throw new Error("Real Unicode-path .hpl disk save failed");
@@ -243,7 +243,7 @@ try {
   }
   await unicodeSource.waitFor({ state: "visible" });
   if (requests.filter((url) => url.includes("/api/pipelines/open")).length !== 6 ||
-      requests.filter((url) => /\\/api\\/pipelines\\/[^/]+\\/save$/.test(new URL(url).pathname)).length !== 1) {
+      requests.filter((url) => new RegExp("/api/pipelines/[^/]+/save$").test(new URL(url).pathname)).length !== 1) {
     throw new Error("Unicode-path move/save/reopen issued unexpected backend requests");
   }
   console.log("Unicode disk write proof passed: real .hpl move -> save -> disk reopen with Chinese/spaced path.");
