@@ -150,9 +150,17 @@ try {
   if (reopenedConfig.config?.sql !== sql) throw new Error("disk reopen lost authoritative config");
 
   // Native Palette buttons also support pointer clicks and keyboard Enter.
+  // A Chinese search must find the localized transform and the result must
+  // still add the original technical pluginId through the real Hop API.
   // Each activation must make exactly one authoritative add request and
   // survive a real disk save/reopen, not merely create a local canvas node.
   await page.locator("form.generic-config").getByRole("button", { name: "Cancel" }).click();
+  const paletteSearch = page.getByRole("textbox", { name: "Search transforms" });
+  await paletteSearch.fill("表输入");
+  if (!(await page.getByRole("button", { name: "TableInput", exact: true }).isVisible()) ||
+      await page.getByRole("button", { name: "SelectValues", exact: true }).count() !== 0) {
+    throw new Error("Chinese Palette search did not filter to TableInput");
+  }
   let activationGraph = reopened;
   const activated = [];
   for (const [pluginId, method] of [["TableInput", "click"], ["SelectValues", "Enter"]]) {
@@ -179,6 +187,8 @@ try {
       throw new Error(`Palette ${method} issued duplicate /edit/add requests for ${pluginId}`);
     }
     activated.push(node);
+    // Restore the full Palette before the next keyboard activation.
+    if (method === "click") await paletteSearch.fill("");
   }
 
   pending = post("/save");
