@@ -173,6 +173,72 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_CONCATFIELDS_TARGET_AND_SOURCE_NATIVE_CHECK=PASS");
   }
 
+  @Test
+  void httpResultFieldNamesKeepLiteralBodyButResolveStatusTimingAndHeaders() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "Http");
+    assertEquals(Shape.OBJECT, property(descriptor, "result").shape());
+    for (String key : List.of("name", "code", "response_time", "response_header")) {
+      assertEquals(Shape.STRING, property(descriptor, "result", key).shape());
+    }
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("HTTP_RESULT_FIELD_NAMES_MIX_LITERAL_AND_RESOLVED_VARIABLES"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/result/name", "/result/code", "/result/response_time",
+        "/result/response_header"), contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "Http");
+    assertNotNull(plugin, "production HTTP plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Object result = meta.getClass().getMethod("getResultFields").invoke(meta);
+    Class<?> resultType = result.getClass();
+    resultType.getMethod("setFieldName", String.class).invoke(result, "${HTTP_BODY_FIELD}");
+    resultType.getMethod("setResultCodeFieldName", String.class)
+        .invoke(result, "${HTTP_STATUS_FIELD}");
+    resultType.getMethod("setResponseTimeFieldName", String.class)
+        .invoke(result, "${HTTP_TIME_FIELD}");
+    resultType.getMethod("setResponseHeaderFieldName", String.class)
+        .invoke(result, "${HTTP_HEADER_FIELD}");
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("HTTP_BODY_FIELD", "响应正文");
+    variables.setVariable("HTTP_STATUS_FIELD", "状态码<&>雪");
+    variables.setVariable("HTTP_TIME_FIELD", "耗时毫秒");
+    variables.setVariable("HTTP_HEADER_FIELD", "响应头");
+    var provider = new MemoryMetadataProvider();
+    var output = new org.apache.hop.core.row.RowMeta();
+    output.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("上游字段"));
+    meta.getFields(output, "http-native", null, null, variables, provider);
+    assertEquals(5, output.size());
+    assertEquals("${HTTP_BODY_FIELD}", output.getValueMeta(1).getName(),
+        "HTTP body output name is literal, unlike the other result names");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        output.getValueMeta(1).getType());
+    assertEquals("状态码<&>雪", output.getValueMeta(2).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        output.getValueMeta(2).getType());
+    assertEquals("耗时毫秒", output.getValueMeta(3).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        output.getValueMeta(3).getType());
+    assertEquals("响应头", output.getValueMeta(4).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        output.getValueMeta(4).getType());
+
+    resultType.getMethod("setFieldName", String.class).invoke(result, "");
+    var noBody = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(noBody, "http-native", null, null, variables, provider);
+    assertEquals(3, noBody.size(), "Empty result.name must omit only the body column");
+    assertEquals("状态码<&>雪", noBody.getValueMeta(0).getName());
+
+    resultType.getMethod("setResultCodeFieldName", String.class).invoke(result, "");
+    resultType.getMethod("setResponseTimeFieldName", String.class).invoke(result, "");
+    resultType.getMethod("setResponseHeaderFieldName", String.class).invoke(result, "");
+    var empty = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(empty, "http-native", null, null, variables, provider);
+    assertEquals(0, empty.size(), "All empty result names must add no output fields");
+    System.out.println("PROD_P0_HTTP_RESULT_FIELD_VARIABLE_RESOLUTION=PASS");
+  }
+
   @Test void httpDynamicUrlFieldNativeCheckFalsePositiveIsDocumentedByProductionDescriptor()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
