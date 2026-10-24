@@ -519,6 +519,86 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void streamLookupOutputTypesUseActualInfoRowOrConfiguredDefaultsAndDoNotHideMutation()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "StreamLookup");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "STREAM_LOOKUP_RETURN_TYPES_FOLLOW_INFO_ROW_OR_DEFAULT_TYPE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/lookup/value"), contract.keyListPointers());
+    assertEquals(Shape.OBJECT, property(descriptor, "lookup").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "value").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup", "value", "name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup", "value", "rename").shape());
+    assertEquals(Shape.NUMBER, property(descriptor, "lookup", "value", "type").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "StreamLookup");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> returnType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$ReturnValue");
+    Object nameReturn = returnType.getConstructor().newInstance();
+    returnType.getMethod("setValue", String.class).invoke(nameReturn, "站点名称");
+    returnType.getMethod("setValueName", String.class).invoke(nameReturn, "名称别名<&>雪");
+    returnType.getMethod("setValueDefaultType", int.class).invoke(
+        nameReturn, org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
+    Object flowReturn = returnType.getConstructor().newInstance();
+    returnType.getMethod("setValue", String.class).invoke(flowReturn, "瞬时流量");
+    returnType.getMethod("setValueName", String.class).invoke(flowReturn, "流量别名");
+    returnType.getMethod("setValueDefaultType", int.class).invoke(
+        flowReturn, org.apache.hop.core.row.IValueMeta.TYPE_STRING);
+    Object lookup = meta.getClass().getMethod("getLookup").invoke(meta);
+    lookup.getClass().getMethod("setReturnValues", List.class)
+        .invoke(lookup, List.of(nameReturn, flowReturn));
+
+    var info = new org.apache.hop.core.row.RowMeta();
+    info.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("站点名称"));
+    info.addValueMeta(new org.apache.hop.core.row.value.ValueMetaNumber("瞬时流量"));
+    var output = new org.apache.hop.core.row.RowMeta();
+    output.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("主流编号"));
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    meta.getFields(output, "streamlookup-output",
+        new org.apache.hop.core.row.IRowMeta[] {info}, null, variables, provider);
+    assertEquals(3, output.size());
+    assertEquals("主流编号", output.getValueMeta(0).getName());
+    assertEquals("名称别名<&>雪", output.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        output.getValueMeta(1).getType(), "real info-row type overrides default INTEGER");
+    assertEquals("流量别名", output.getValueMeta(2).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER,
+        output.getValueMeta(2).getType(), "real info-row type overrides default STRING");
+    assertEquals("名称别名<&>雪", info.getValueMeta(0).getName(),
+        "native getFields mutates shared lookup metadata, so schema callers must isolate it");
+    assertEquals("流量别名", info.getValueMeta(1).getName());
+
+    var fallback = new org.apache.hop.core.row.RowMeta();
+    fallback.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("主流编号"));
+    meta.getFields(fallback, "streamlookup-output", null, null, variables, provider);
+    assertEquals(3, fallback.size());
+    assertEquals("名称别名<&>雪", fallback.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        fallback.getValueMeta(1).getType(), "without info metadata use configured default");
+    assertEquals("流量别名", fallback.getValueMeta(2).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        fallback.getValueMeta(2).getType());
+
+    var incompleteInfo = new org.apache.hop.core.row.RowMeta();
+    incompleteInfo.addValueMeta(
+        new org.apache.hop.core.row.value.ValueMetaString("站点名称"));
+    var invalid = new org.apache.hop.core.row.RowMeta();
+    assertThrows(org.apache.hop.core.exception.HopTransformException.class,
+        () -> meta.getFields(invalid, "streamlookup-output",
+            new org.apache.hop.core.row.IRowMeta[] {incompleteInfo},
+            null, variables, provider),
+        "missing lookup return field is an error, not a fallback to default type");
+    System.out.println("PROD_P0_STREAMLOOKUP_INFO_TYPE_VS_DEFAULT_OUTPUT_SCHEMA=PASS");
+  }
+
+  @Test
   void streamLookupNativeChecksResolveTwoRowSchemasAndRequireLookupSourceAndTwoHops()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
