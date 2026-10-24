@@ -2752,6 +2752,74 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void replaceStringOutputInheritsSourceEncodingAndInPlaceRuleNormalizesStorage()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "ReplaceString");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "REPLACE_STRING_OUTPUT_ENCODING_FOLLOWS_SOURCE_AND_INPLACE_NORMALIZES_STORAGE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+    assertEquals(Shape.STRING, property(descriptor, "field", "in_stream_name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "field", "out_stream_name").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ReplaceString");
+    assertNotNull(plugin, "production ReplaceString plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> item = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta$RSField");
+    Object append = item.getConstructor().newInstance();
+    item.getMethod("setFieldInStream", String.class).invoke(append, "编码源");
+    item.getMethod("setFieldOutStream", String.class).invoke(append, "编码副本");
+    Object inPlace = item.getConstructor().newInstance();
+    item.getMethod("setFieldInStream", String.class).invoke(inPlace, "原地替换");
+    item.getMethod("setFieldOutStream", String.class).invoke(inPlace, "");
+    var setRules = meta.getClass().getMethod("setFields", List.class);
+    setRules.invoke(meta, List.of(append, inPlace));
+
+    var source = new org.apache.hop.core.row.value.ValueMetaString("编码源");
+    source.setStringEncoding("UTF-16LE");
+    var changed = new org.apache.hop.core.row.value.ValueMetaString("原地替换");
+    changed.setStorageType(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_BINARY_STRING);
+    var untouched = new org.apache.hop.core.row.value.ValueMetaString("其他字段");
+    untouched.setStorageType(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_BINARY_STRING);
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(source);
+    row.addValueMeta(changed);
+    row.addValueMeta(untouched);
+
+    meta.getFields(row, "replace-encoding", null, null,
+        new org.apache.hop.core.variables.Variables(), new MemoryMetadataProvider());
+    assertEquals(4, row.size());
+    assertEquals(List.of("编码源", "原地替换", "其他字段", "编码副本"),
+        List.of(row.getValueMeta(0).getName(), row.getValueMeta(1).getName(),
+            row.getValueMeta(2).getName(), row.getValueMeta(3).getName()));
+    assertEquals("UTF-16LE", row.getValueMeta(3).getStringEncoding(),
+        "appended STRING field inherits source encoding");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING, row.getValueMeta(3).getType());
+    assertEquals("replace-encoding", row.getValueMeta(3).getOrigin());
+    assertEquals(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_NORMAL,
+        row.getValueMeta(1).getStorageType(),
+        "in-place replacement normalizes storage without changing the field position");
+    assertEquals(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_BINARY_STRING,
+        row.getValueMeta(2).getStorageType(), "unrelated field storage must remain unchanged");
+
+    Object missing = item.getConstructor().newInstance();
+    item.getMethod("setFieldInStream", String.class).invoke(missing, "不存在的输入");
+    item.getMethod("setFieldOutStream", String.class).invoke(missing, "");
+    setRules.invoke(meta, List.of(missing));
+    var missingRow = new org.apache.hop.core.row.RowMeta();
+    missingRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("仍然存在"));
+    meta.getFields(missingRow, "replace-encoding", null, null,
+        new org.apache.hop.core.variables.Variables(), new MemoryMetadataProvider());
+    assertEquals(1, missingRow.size(),
+        "native metadata projection skips missing in-place fields; check() validates them");
+    System.out.println("PROD_P0_REPLACESTRING_ENCODING_STORAGE_OUTPUT_META=PASS");
+  }
+
+  @Test
   void selectValuesUnspecifiedFieldsFollowSelectedOrderThenAlphabeticalExtras() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "SelectValues");
