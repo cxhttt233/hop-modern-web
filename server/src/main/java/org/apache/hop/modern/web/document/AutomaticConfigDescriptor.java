@@ -218,7 +218,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME",
                   List.of("/all_rows", "/add_linenr", "/linenr_fieldname"),
-                  "GroupByMeta.getFields() appends an INTEGER group line-number output field only when all_rows, add_linenr, and a non-empty linenr_fieldname are all present. With all_rows=false or add_linenr=false, the line-number field is absent even if its name is configured; with all_rows=true and an empty name, no field is appended. Diagnose downstream row metadata from all three values without rejecting draft saves."));
+                  "GroupByMeta.getFields() appends an INTEGER group line-number output field only when all_rows, add_linenr, and a non-empty linenr_fieldname are all present. With all_rows=false or add_linenr=false, the line-number field is absent even if its name is configured; with all_rows=true and an empty name, no field is appended. Diagnose downstream row metadata from all three values without rejecting draft saves."),
+              new RuntimePrecondition(
+                  "GROUPBY_AGGREGATE_OUTPUT_TYPES_FOLLOW_OPERATION_AND_SUBJECT",
+                  List.of("/fields/field", "/group/field", "/all_rows"),
+                  "GroupByMeta.getFields() retains only group.field keys when all_rows=false, otherwise passes all incoming fields, then appends fields.field aggregations in configured order. COUNT_ANY emits INTEGER without a subject, COUNT_ALL and COUNT_DISTINCT emit INTEGER for existing subjects; SUM on a nonnumeric subject becomes NUMBER, CUM_AVG on an INTEGER subject becomes NUMBER, statistical operations emit NUMBER, CONCAT operations emit STRING, and FIRST/LAST/MIN/MAX inherit the subject type. Except for COUNT_ANY, aggregates whose subject is missing from the incoming row are omitted from output metadata. Derived columns preserve the subject conversion mask. This is a downstream row-schema diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" ->
           List.of(
               new RuntimePrecondition(
