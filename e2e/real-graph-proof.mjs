@@ -298,7 +298,9 @@ try {
   for (let i = 0; i < duplicatePaths.length; i++) {
     await mkdir(duplicateDirs[i], { recursive: true });
     await copyFile(pipelinePath, duplicatePaths[i]);
-    await page.getByRole("button", { name: "Choose pipeline" }).click();
+    // The preceding capacity assertion left the chooser open. Subsequent
+    // successful opens close it, so only toggle for later iterations.
+    if (i > 0) await page.getByRole("button", { name: "Choose pipeline" }).click();
     await page.getByLabel("Server-visible pipeline path").fill(duplicatePaths[i]);
     const duplicatePending = page.waitForResponse((response) =>
       response.request().method() === "POST" &&
