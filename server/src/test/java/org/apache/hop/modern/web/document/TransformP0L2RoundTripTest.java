@@ -2437,6 +2437,107 @@ class TransformP0L2RoundTripTest {
 
 
   @Test
+  void jsonInputSourceRemovalAndAuxiliaryOutputSchemaSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "JsonInput");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("JSON_INPUT_SOURCE_REMOVAL_AND_AUXILIARY_OUTPUT_COLUMNS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/IsInFields", "/removeSourceField", "/valueField",
+        "/fields/field", "/include", "/include_field", "/rownum", "/rownum_field"),
+        contract.keyListPointers());
+    for (String key : List.of("IsInFields", "removeSourceField", "include", "rownum")) {
+      assertEquals(Shape.BOOLEAN, property(descriptor, key).shape(), key);
+    }
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(plugin);
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> fieldType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField");
+    Object extracted = fieldType.getConstructor(String.class).newInstance("${EXTRACTED}");
+    fieldType.getMethod("setPath", String.class).invoke(extracted, "$.data['雪<&>']");
+    fieldType.getMethod("setType", int.class).invoke(extracted,
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
+    fieldType.getMethod("setLength", int.class).invoke(extracted, 12);
+    fieldType.getMethod("setPrecision", int.class).invoke(extracted, 0);
+    meta.getClass().getMethod("setInputFields", List.class).invoke(meta, List.of(extracted));
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("EXTRACTED", "提取<&>雪");
+    variables.setVariable("FILE_COL", "源文件<&>");
+    variables.setVariable("ROW_COL", "行号雪");
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("jsoninput-aux-output.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("jsoninput-aux-output");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "JsonInput", "json-aux", meta));
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("json-aux-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("json-aux-doc",
+        new PipelineConfigResource.ReadRequest("json-aux"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("IsInFields", true);
+    changed.put("valueField", "payload");
+    changed.put("removeSourceField", true);
+    changed.put("include", true);
+    changed.put("include_field", "${FILE_COL}");
+    changed.put("rownum", true);
+    changed.put("rownum_field", "${ROW_COL}");
+    var write = resource.write("json-aux-doc",
+        new PipelineConfigResource.WriteRequest("json-aux", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    var reopened = store.open(hpl);
+    var diskTransform = reopened.findTransform("json-aux");
+    assertNotNull(diskTransform);
+    var disk = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskTransform.getTransform(), provider);
+    assertTrue(disk.path("IsInFields").booleanValue());
+    assertTrue(disk.path("removeSourceField").booleanValue());
+    assertTrue(disk.path("include").booleanValue());
+    assertTrue(disk.path("rownum").booleanValue());
+    assertEquals("payload", disk.path("valueField").asText());
+    assertEquals("${FILE_COL}", disk.path("include_field").asText());
+    assertEquals("${ROW_COL}", disk.path("rownum_field").asText());
+    assertEquals("${EXTRACTED}", disk.at("/fields/field/0/name").asText());
+
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("payload"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("保留"));
+    diskTransform.getTransform().getFields(
+        row, "json-aux", null, null, variables, provider);
+    assertEquals(4, row.size());
+    assertEquals("保留", row.getValueMeta(0).getName());
+    assertEquals("提取<&>雪", row.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        row.getValueMeta(1).getType());
+    assertEquals(12, row.getValueMeta(1).getLength());
+    assertEquals("源文件<&>", row.getValueMeta(2).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        row.getValueMeta(2).getType());
+    assertEquals(250, row.getValueMeta(2).getLength());
+    assertEquals("行号雪", row.getValueMeta(3).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        row.getValueMeta(3).getType());
+    assertEquals(org.apache.hop.core.row.IValueMeta.DEFAULT_INTEGER_LENGTH,
+        row.getValueMeta(3).getLength());
+    System.out.println("PROD_P0_JSONINPUT_SOURCE_REMOVAL_AUX_OUTPUT_DISK_REOPEN=PASS");
+  }
+
+  @Test
   void jsonInputOrderedJsonPathFieldsSurviveRealHplDiskReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
