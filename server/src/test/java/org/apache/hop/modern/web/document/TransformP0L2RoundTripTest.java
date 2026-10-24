@@ -1067,6 +1067,54 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void tableOutputGeneratedKeyFieldMustBeNamedToPreserveOutputRowSchema() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "TableOutput");
+    assertEquals(Shape.BOOLEAN, property(descriptor, "return_keys").shape());
+    assertEquals(Shape.STRING, property(descriptor, "return_field").shape());
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "TABLE_OUTPUT_RETURN_KEYS_REQUIRES_RETURN_FIELD_FOR_ROW_SCHEMA"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/return_keys", "/return_field"), precondition.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    // Reflection keeps the standalone server test independent of the TableOutput
+    // artifact: the pinned source-derived P0 runtime supplies the real plugin.
+    meta.getClass().getMethod("setReturningGeneratedKeys", boolean.class).invoke(meta, true);
+    meta.getClass().getMethod("setGeneratedKeyField", String.class).invoke(meta, "");
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+
+    var unnamed = new org.apache.hop.core.row.RowMeta();
+    unnamed.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("source"));
+    meta.getFields(unnamed, "TableOutput", null, null, variables, provider);
+    assertEquals(1, unnamed.size(),
+        "With return_keys=true and an empty return_field, native getFields omits the key");
+
+    variables.setVariable("OUTPUT_KEY_FIELD", "主键<&>雪");
+    meta.getClass().getMethod("setGeneratedKeyField", String.class)
+        .invoke(meta, "${OUTPUT_KEY_FIELD}");
+    var named = new org.apache.hop.core.row.RowMeta();
+    named.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("source"));
+    meta.getFields(named, "TableOutput", null, null, variables, provider);
+    assertEquals(2, named.size());
+    assertEquals("主键<&>雪", named.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        named.getValueMeta(1).getType());
+
+    meta.getClass().getMethod("setReturningGeneratedKeys", boolean.class).invoke(meta, false);
+    var disabled = new org.apache.hop.core.row.RowMeta();
+    disabled.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("source"));
+    meta.getFields(disabled, "TableOutput", null, null, variables, provider);
+    assertEquals(1, disabled.size(), "Disabled generated keys must not add a field");
+    System.out.println("PROD_P0_TABLEOUTPUT_GENERATED_KEY_ROW_SCHEMA=PASS");
+  }
+
+  @Test
   void selectValuesStageSpecificFieldResolutionMatchesRealPluginAndCanonicalPaths()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
