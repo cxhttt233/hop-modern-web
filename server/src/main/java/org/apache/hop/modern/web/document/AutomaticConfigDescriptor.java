@@ -177,6 +177,11 @@ public final class AutomaticConfigDescriptor {
                   "JSON_INPUT_FIELD_SOURCE_REQUIRES_INCOMING_HOP_AND_NAME",
                   List.of("/IsInFields", "/valueField"),
                   "When IsInFields is true, an incoming hop and non-empty valueField are required. Resolve the source field against upstream row metadata at runtime; native check only checks the name is non-empty. When IsInFields is false, source files must resolve through the file input configuration."));
+      case "org.apache.hop.pipeline.transforms.javascript.ScriptValuesMeta" ->
+          List.of(new RuntimePrecondition(
+              "SCRIPT_VALUE_MOD_REPLACE_TARGET_FALLS_BACK_TO_RENAME",
+              List.of("/fields/field"),
+              "ScriptValueMod fields.field[*] describes a JavaScript result column. When replace is false, ScriptValuesMeta.getFields() appends a new column named rename when non-empty, otherwise name, using the configured type, length and precision. When replace is true, it first searches the incoming row for name; only when name is absent does it try rename. It changes the matched column's type, length and precision in place without renaming it or appending a column. If neither name nor rename matches an incoming field, getFields() throws HopTransformException. Diagnose output row schema using the ordered field list and this name-first fallback, not the display alias alone; do not reject draft saves."));
       case "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta" ->
           List.of(new RuntimePrecondition(
               "EXEC_SQL_INPUT_MODE_REQUIRES_MATCHING_HOP_TOPOLOGY",
