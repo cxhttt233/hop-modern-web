@@ -143,6 +143,11 @@ public final class AutomaticConfigDescriptor {
                   "CHECKSUM_SELECTED_FIELDS_REQUIRE_UPSTREAM_FIELDS",
                   List.of("/fields/field"),
                   "Each fields.field[*].name must exist in incoming row metadata. Missing selected fields are errors; an empty selection is a warning, not an unknown-field error."));
+      case "org.apache.hop.pipeline.transforms.datagrid.DataGridMeta" ->
+          List.of(new RuntimePrecondition(
+              "DATA_GRID_UNKNOWN_FIELD_TYPES_FALLBACK_TO_STRING",
+              List.of("/fields/field"),
+              "For each non-empty fields.field[*].name, DataGridMeta.getFields() resolves the declared fields.field[*].type through ValueMetaFactory. An unknown or null type resolves to TYPE_NONE and silently falls back to STRING; entries with an empty name are omitted from output metadata. Diagnose an unrecognized declared type instead of assuming that Hop will honor it. This is not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" ->
           List.of(new RuntimePrecondition(
               "HTTP_DYNAMIC_URL_NATIVE_CHECK_FALSE_POSITIVE",
