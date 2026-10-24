@@ -23,6 +23,7 @@ import org.apache.hop.modern.web.document.PipelineOpenResource;
 import org.glassfish.grizzly.http.server.HttpServer;
 import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
 import org.glassfish.jersey.jackson.JacksonFeature;
+import org.glassfish.jersey.jackson.internal.jackson.jaxrs.cfg.JaxRSFeature;
 import org.glassfish.jersey.server.ResourceConfig;
 
 /** Provisional loopback-only HTTP host for the first real browser pipeline slice. */
@@ -60,6 +61,9 @@ public final class ModernWebServer {
         .register(openResource)
         .register(configResource)
         .register(editResource)
-        .register(JacksonFeature.class);
+        // Jersey Jackson 2.15+ reads to EOF by default; on Grizzly this can block
+        // POST record binding for 30 seconds (eclipse-ee4j/jersey#5812).
+        // Use the provider's supported setting rather than changing HTTP framing.
+        .register(new JacksonFeature().jaxrsFeature(JaxRSFeature.READ_FULL_STREAM, false));
   }
 }
