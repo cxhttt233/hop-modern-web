@@ -258,6 +258,11 @@ public final class AutomaticConfigDescriptor {
                   "TABLE_OUTPUT_RETURN_KEYS_REQUIRES_RETURN_FIELD_FOR_ROW_SCHEMA",
                   List.of("/return_keys", "/return_field"),
                   "When return_keys is true, return_field must resolve to a non-empty output field name. Native TableOutputMeta.getFields() adds an INTEGER field only when both conditions hold, but TableOutput may append the generated key to successful output rows whenever return_keys is true. An empty return_field therefore risks row-data/metadata width mismatch. The output field name is variable-resolved; diagnose this before execution without blocking draft saves."));
+      case "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta" ->
+          List.of(new RuntimePrecondition(
+              "UNIQUE_ROWS_HASHSET_COMPARE_FIELDS_REQUIRE_INPUT_ROW_FIELDS",
+              List.of("/fields/field"),
+              "When fields.field specifies comparison columns, each fields.field[*].name must exist in the incoming row metadata. UniqueRowsByHashSetMeta.check() checks only that an input hop exists, not whether the named comparison columns resolve. On the first input row, UniqueRowsByHashSet.processRow() resolves each name with indexOfValue() and stops the pipeline with an error when a name is missing. Diagnose selected columns against the actual incoming row schema before execution; an empty comparison list has no selected-column requirement. This is not a save-time validator."));
       default -> List.of();
     };
   }
