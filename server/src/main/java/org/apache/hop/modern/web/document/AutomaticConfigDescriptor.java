@@ -149,10 +149,15 @@ public final class AutomaticConfigDescriptor {
               List.of("/fields/field"),
               "For each non-empty fields.field[*].name, DataGridMeta.getFields() resolves the declared fields.field[*].type through ValueMetaFactory. An unknown or null type resolves to TYPE_NONE and silently falls back to STRING; entries with an empty name are omitted from output metadata. Diagnose an unrecognized declared type instead of assuming that Hop will honor it. This is not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" ->
-          List.of(new RuntimePrecondition(
-              "HTTP_DYNAMIC_URL_NATIVE_CHECK_FALSE_POSITIVE",
-              List.of("/urlInField", "/urlField", "/url"),
-              "When urlInField is true, urlField must be non-empty and resolve to an incoming row field. Native HttpMeta.check() reports ERROR with UrlfieldOk even when the URL field name is present; this is a native-check false positive, not grounds to reject an otherwise valid dynamic URL configuration. At runtime the resolved URL field must exist in upstream row metadata. When urlInField is false, url must be non-empty."));
+          List.of(
+              new RuntimePrecondition(
+                  "HTTP_DYNAMIC_URL_NATIVE_CHECK_FALSE_POSITIVE",
+                  List.of("/urlInField", "/urlField", "/url"),
+                  "When urlInField is true, urlField must be non-empty and resolve to an incoming row field. Native HttpMeta.check() reports ERROR with UrlfieldOk even when the URL field name is present; this is a native-check false positive, not grounds to reject an otherwise valid dynamic URL configuration. At runtime the resolved URL field must exist in upstream row metadata. When urlInField is false, url must be non-empty."),
+              new RuntimePrecondition(
+                  "HTTP_RESULT_FIELD_NAMES_MIX_LITERAL_AND_RESOLVED_VARIABLES",
+                  List.of("/result/name", "/result/code", "/result/response_time", "/result/response_header"),
+                  "HttpMeta.getFields() appends result.name as STRING without variable resolution, while result.code and result.response_time are variable-resolved INTEGER fields and result.response_header is a variable-resolved STRING field. Empty result field names are omitted. Preserve the distinct name-resolution behavior when deriving downstream row metadata; this is a diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           List.of(
               new RuntimePrecondition(
