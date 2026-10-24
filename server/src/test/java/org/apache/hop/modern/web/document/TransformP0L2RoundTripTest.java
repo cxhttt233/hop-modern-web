@@ -1128,6 +1128,67 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void execSqlResultCounterColumnsUseFixedOrderIntegerTypesAndLiteralNames() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "ExecSql");
+    for (String field : List.of("update_field", "insert_field", "delete_field", "read_field")) {
+      assertEquals(Shape.STRING, property(descriptor, field).shape());
+    }
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "EXEC_SQL_RESULT_COUNTER_FIELDS_APPEND_FIXED_ORDER_INTEGERS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/update_field", "/insert_field", "/delete_field", "/read_field"),
+        contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ExecSql");
+    assertNotNull(plugin, "production ExecSql plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    // Reflection keeps the standalone server independent of the P0-only SQL plugin jar.
+    meta.getClass().getMethod("setUpdateField", String.class).invoke(meta, "更新行数");
+    meta.getClass().getMethod("setInsertField", String.class)
+        .invoke(meta, "${SQL_INSERT_COUNTER}");
+    meta.getClass().getMethod("setDeleteField", String.class).invoke(meta, "删除行数");
+    meta.getClass().getMethod("setReadField", String.class).invoke(meta, "读取行数");
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("SQL_INSERT_COUNTER", "变量解析后的名称");
+    var provider = new MemoryMetadataProvider();
+    var incoming = new org.apache.hop.core.row.RowMeta();
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入值"));
+    var output = new org.apache.hop.core.row.RowMeta();
+    output.addRowMeta(incoming);
+    meta.getFields(output, "execsql-result", null, null, variables, provider);
+    assertEquals(5, output.size());
+    assertEquals("输入值", output.getValueMeta(0).getName());
+    assertEquals(List.of("更新行数", "${SQL_INSERT_COUNTER}", "删除行数", "读取行数"),
+        List.of(output.getValueMeta(1).getName(), output.getValueMeta(2).getName(),
+            output.getValueMeta(3).getName(), output.getValueMeta(4).getName()),
+        "native getFields appends counters in update/insert/delete/read order without variable resolution");
+    for (int index = 1; index < output.size(); index++) {
+      assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+          output.getValueMeta(index).getType());
+      assertEquals(org.apache.hop.core.row.IValueMeta.DEFAULT_INTEGER_LENGTH,
+          output.getValueMeta(index).getLength());
+    }
+
+    meta.getClass().getMethod("setInsertField", String.class).invoke(meta, "");
+    meta.getClass().getMethod("setDeleteField", String.class).invoke(meta, "");
+    meta.getClass().getMethod("setReadField", String.class).invoke(meta, "");
+    var oneCounter = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(oneCounter, "execsql-result", null, null, variables, provider);
+    assertEquals(1, oneCounter.size(), "blank configured names must not emit counters");
+    assertEquals("更新行数", oneCounter.getValueMeta(0).getName());
+
+    meta.getClass().getMethod("setUpdateField", String.class).invoke(meta, "");
+    var noCounters = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(noCounters, "execsql-result", null, null, variables, provider);
+    assertEquals(0, noCounters.size());
+    System.out.println("PROD_P0_EXECSQL_RESULT_COUNTER_OUTPUT_SCHEMA=PASS");
+  }
+
+  @Test
   void groupByMissingGroupingKeysAreSilentlyOmittedByNativeMetadataProjection()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
