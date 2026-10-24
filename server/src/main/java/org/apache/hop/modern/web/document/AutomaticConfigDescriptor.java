@@ -237,10 +237,15 @@ public final class AutomaticConfigDescriptor {
                   List.of("/fields/field"),
                   "For each fields.field[*], a non-empty out_stream_name is resolved through Hop variables and appended as a new STRING output field while the original in_stream_name column remains. A blank out_stream_name changes the original field in place without appending a column. When an alias collides with an existing output field name, Hop RowMeta automatically disambiguates the appended field (for example, name becomes name_1); do not assume the requested alias is the final downstream name. Diagnose the resulting row schema before execution, without blocking draft saves."));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" ->
-          List.of(new RuntimePrecondition(
-              "SELECT_VALUES_STAGE_SPECIFIC_FIELD_RESOLUTION",
-              List.of("/fields/field", "/fields/remove", "/fields/meta"),
-              "Select & Alter field[*].name resolves against incoming row fields; Remove remove[*].name resolves against the row after selection and renaming; Metadata meta[*].name resolves after removal. A renamed field must be referenced by its new name in later stages. Diagnose each stage against its own row metadata, not only the original input."));
+          List.of(
+              new RuntimePrecondition(
+                  "SELECT_VALUES_STAGE_SPECIFIC_FIELD_RESOLUTION",
+                  List.of("/fields/field", "/fields/remove", "/fields/meta"),
+                  "Select & Alter field[*].name resolves against incoming row fields; Remove remove[*].name resolves against the row after selection and renaming; Metadata meta[*].name resolves after removal. A renamed field must be referenced by its new name in later stages. Diagnose each stage against its own row metadata, not only the original input."),
+              new RuntimePrecondition(
+                  "SELECT_VALUES_UNSPECIFIED_FIELDS_SORT_AFTER_EXPLICIT_SELECTION",
+                  List.of("/fields/select_unspecified", "/fields/field"),
+                  "When fields.field contains an explicit selection, SelectValuesMeta.getFields() emits selected fields in configured list order (using their output rename), then, only if fields.select_unspecified is true, appends all unselected incoming fields sorted by original field name rather than input order. When the flag is false, unselected fields are omitted. With an empty fields.field list, native selection is skipped and the original input order remains unchanged regardless of select_unspecified. Diagnose downstream column order from both settings; do not reject draft saves."));
       case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" ->
           List.of(new RuntimePrecondition(
               "SORT_ROWS_KEYS_AND_TEMP_DIRECTORY_NATIVE_CHECK",
