@@ -2267,12 +2267,14 @@ class TransformP0L2RoundTripTest {
   void scriptValueModOutputReplacementPrefersNameThenFallsBackToRename() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "ScriptValueMod");
-    assertEquals(Shape.OBJECT, property(descriptor, "fields").shape());
-    assertEquals(Shape.LIST, property(descriptor, "fields", "field").shape());
-    assertEquals(Shape.STRING, property(descriptor, "fields", "field", "name").shape());
-    assertEquals(Shape.STRING, property(descriptor, "fields", "field", "rename").shape());
-    assertEquals(Shape.BOOLEAN, property(descriptor, "fields", "field", "replace").shape());
-    assertEquals(Shape.NUMBER, property(descriptor, "fields", "field", "type").shape());
+    // The producer descriptor is a root LIST with groupKey=fields; the Hop JSON wire
+    // wraps it at /fields/field. It is not a nested descriptor OBJECT.
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(Shape.STRING, property(descriptor, "field", "name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "field", "rename").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "field", "replace").shape());
+    assertEquals(Shape.NUMBER, property(descriptor, "field", "type").shape());
     var contract = descriptor.runtimePreconditions().stream()
         .filter(p -> p.code().equals("SCRIPT_VALUE_MOD_REPLACE_TARGET_FALLS_BACK_TO_RENAME"))
         .findFirst().orElseThrow();
@@ -2280,20 +2282,18 @@ class TransformP0L2RoundTripTest {
 
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ScriptValueMod");
     assertNotNull(plugin, "production JavaScript transform plugin missing");
-    var meta = (org.apache.hop.pipeline.transforms.javascript.ScriptValuesMeta)
-        registry.loadClass(plugin, ITransformMeta.class);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
     meta.setDefault();
+    // Reflect on the production plugin to keep the standalone server and v2 jobs
+    // independent of the P0-only javascript plugin Maven dependency.
+    Class<?> fieldType = java.util.Arrays.stream(meta.getClass().getDeclaredClasses())
+        .filter(c -> c.getSimpleName().equals("ScriptField")).findFirst().orElseThrow();
+    Field scriptFields = metadataField(meta.getClass(), "scriptFields");
     var provider = new MemoryMetadataProvider();
     var variables = new org.apache.hop.core.variables.Variables();
 
-    var append = new org.apache.hop.pipeline.transforms.javascript.ScriptValuesMeta.ScriptField();
-    append.setName("脚本结果");
-    append.setRename("新增列");
-    append.setType(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
-    append.setLength(9);
-    append.setPrecision(0);
-    append.setReplace(false);
-    meta.setScriptFields(List.of(append));
+    scriptFields.set(meta, List.of(newScriptField(fieldType, "脚本结果", "新增列",
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER, 9, 0, false)));
     var appended = new org.apache.hop.core.row.RowMeta();
     appended.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入值"));
     appended.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("候选别名"));
@@ -2304,14 +2304,8 @@ class TransformP0L2RoundTripTest {
         appended.getValueMeta(2).getType());
     assertEquals(9, appended.getValueMeta(2).getLength());
 
-    var fallback = new org.apache.hop.pipeline.transforms.javascript.ScriptValuesMeta.ScriptField();
-    fallback.setName("不存在的脚本名");
-    fallback.setRename("候选别名");
-    fallback.setType(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER);
-    fallback.setLength(14);
-    fallback.setPrecision(3);
-    fallback.setReplace(true);
-    meta.setScriptFields(List.of(fallback));
+    scriptFields.set(meta, List.of(newScriptField(fieldType, "不存在的脚本名", "候选别名",
+        org.apache.hop.core.row.IValueMeta.TYPE_NUMBER, 14, 3, true)));
     var fallbackRow = new org.apache.hop.core.row.RowMeta();
     fallbackRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入值"));
     fallbackRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("候选别名"));
@@ -2323,9 +2317,8 @@ class TransformP0L2RoundTripTest {
     assertEquals(14, fallbackRow.getValueMeta(1).getLength());
     assertEquals(3, fallbackRow.getValueMeta(1).getPrecision());
 
-    fallback.setName("输入值");
-    fallback.setType(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
-    fallback.setLength(7);
+    scriptFields.set(meta, List.of(newScriptField(fieldType, "输入值", "候选别名",
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER, 7, 0, true)));
     var preferred = new org.apache.hop.core.row.RowMeta();
     preferred.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入值"));
     preferred.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("候选别名"));
@@ -2337,13 +2330,25 @@ class TransformP0L2RoundTripTest {
     assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
         preferred.getValueMeta(1).getType(), "fallback alias must remain unchanged");
 
-    fallback.setName("完全不存在");
-    fallback.setRename("也不存在");
+    scriptFields.set(meta, List.of(newScriptField(fieldType, "完全不存在", "也不存在",
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER, 7, 0, true)));
     var invalid = new org.apache.hop.core.row.RowMeta();
     invalid.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入值"));
     assertThrows(org.apache.hop.core.exception.HopTransformException.class,
         () -> meta.getFields(invalid, "javascript", null, null, variables, provider));
     System.out.println("PROD_P0_SCRIPTVALUE_REPLACE_NAME_RENAME_OUTPUT_SCHEMA=PASS");
+  }
+
+  private static Object newScriptField(Class<?> type, String name, String rename,
+      int valueType, int length, int precision, boolean replace) throws Exception {
+    Object field = type.getDeclaredConstructor().newInstance();
+    type.getMethod("setName", String.class).invoke(field, name);
+    type.getMethod("setRename", String.class).invoke(field, rename);
+    type.getMethod("setType", int.class).invoke(field, valueType);
+    type.getMethod("setLength", int.class).invoke(field, length);
+    type.getMethod("setPrecision", int.class).invoke(field, precision);
+    type.getMethod("setReplace", boolean.class).invoke(field, replace);
+    return field;
   }
 
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
