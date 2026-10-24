@@ -30,12 +30,14 @@ try {
   const canvas = page.locator(".react-flow__pane");
   const added = [];
   const plugins = ["TableInput", "SelectValues", "FilterRows"];
+  const chineseNames = { TableInput: "表输入", SelectValues: "选择字段", FilterRows: "过滤记录" };
+  const accessibleName = pluginId => `${chineseNames[pluginId]}（${pluginId}）`;
   const positions = [{ x: 560, y: 260 }, { x: 760, y: 360 }, { x: 960, y: 260 }];
 
   for (let i = 0; i < plugins.length; i++) {
     const before = new Set(graph.nodes.map(node => node.id));
     pending = post("/edit/add");
-    await page.getByRole("button", { name: plugins[i] }).dragTo(canvas, { targetPosition: positions[i] });
+    await page.getByRole("button", { name: accessibleName(plugins[i]), exact: true }).dragTo(canvas, { targetPosition: positions[i] });
     const response = await pending;
     if (!response.ok()) throw new Error(`add ${plugins[i]} HTTP ${response.status()}: ${await response.text()}`);
     graph = await response.json();
@@ -157,8 +159,8 @@ try {
   await page.locator("form.generic-config").getByRole("button", { name: "Cancel" }).click();
   const paletteSearch = page.getByRole("textbox", { name: "Search transforms" });
   await paletteSearch.fill("表输入");
-  if (!(await page.getByRole("button", { name: "TableInput", exact: true }).isVisible()) ||
-      await page.getByRole("button", { name: "SelectValues", exact: true }).count() !== 0) {
+  if (!(await page.getByRole("button", { name: accessibleName("TableInput"), exact: true }).isVisible()) ||
+      await page.getByRole("button", { name: accessibleName("SelectValues"), exact: true }).count() !== 0) {
     throw new Error("Chinese Palette search did not filter to TableInput");
   }
   let activationGraph = reopened;
@@ -169,7 +171,7 @@ try {
       verb === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
     const beforeCount = countAdds();
     pending = post("/edit/add");
-    const button = page.getByRole("button", { name: pluginId, exact: true });
+    const button = page.getByRole("button", { name: accessibleName(pluginId), exact: true });
     if (method === "click") await button.click();
     else {
       await button.focus();
