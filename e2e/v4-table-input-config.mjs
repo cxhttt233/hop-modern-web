@@ -52,6 +52,28 @@ try {
   if (await connection.inputValue() !== "Warehouse") throw new Error("Connection not preserved");
   const writes = requests.filter(({url,method}) => method === "POST" && new URL(url).pathname.endsWith("/config/write"));
   if (writes.length !== 1) throw new Error("Expected exactly one config/write");
+  // An unsaved SQL draft must be discarded by Cancel, without a second
+  // authoritative config/write request or a mutation of the real Hop config.
+  const canceledSql = 'SELECT name FROM customers WHERE name = \'未保存草稿\'';
+  await sqlField.fill(canceledSql);
+  await panel.getByRole("button", { name: "Cancel" }).click();
+  const cancelReadPending = page.waitForResponse(r => match(r, "/config/read"));
+  await node.click();
+  await page.getByRole("button", { name: "Configure" }).click();
+  const cancelReadResponse = await cancelReadPending;
+  const cancelRead = await cancelReadResponse.json();
+  if (!cancelReadResponse.ok() || cancelRead.config?.sql !== sql ||
+      cancelRead.config?.connection !== "Warehouse") {
+    throw new Error("Cancel must discard the unsaved SQL draft on the authoritative server");
+  }
+  await panel.waitFor({ state: "visible" });
+  if (await sqlField.inputValue() !== sql) {
+    throw new Error("Reopened configuration displayed canceled SQL rather than saved SQL");
+  }
+  if (requests.filter(({url,method}) => method === "POST" &&
+      new URL(url).pathname.endsWith("/config/write")).length !== 1) {
+    throw new Error("Cancel must not issue an additional config/write request");
+  }
   // Deleting the sole real Hop transform must reveal the Chinese empty-flow
   // guidance; undo must restore the authoritative node and hide the guidance.
   await panel.getByRole("button", { name: "Cancel" }).click();
