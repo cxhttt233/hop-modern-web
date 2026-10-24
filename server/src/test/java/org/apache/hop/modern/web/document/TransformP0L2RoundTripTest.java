@@ -382,6 +382,114 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_SORTROWS_KEYS_TEMP_DIRECTORY_NATIVE_CHECK=PASS");
   }
 
+  @Test
+  void streamLookupNativeChecksResolveTwoRowSchemasAndRequireLookupSourceAndTwoHops()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "StreamLookup");
+    assertEquals(Shape.OBJECT, property(descriptor, "lookup").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "key").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup", "key", "name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup", "key", "field").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "value").shape());
+    assertEquals(Shape.STRING, property(descriptor, "lookup", "value", "name").shape());
+    var prerequisite = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("STREAM_LOOKUP_TWO_INPUTS_AND_STAGE_SPECIFIC_FIELDS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/from", "/lookup/key", "/lookup/value"),
+        prerequisite.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "StreamLookup");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    ClassLoader loader = meta.getClass().getClassLoader();
+    Class<?> matchType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$MatchKey");
+    Object match = matchType.getConstructor().newInstance();
+    var setMainKey = matchType.getMethod("setKeyStream", String.class);
+    var setLookupKey = matchType.getMethod("setKeyLookup", String.class);
+    setMainKey.invoke(match, "主流编号");
+    setLookupKey.invoke(match, "关联编号");
+
+    Class<?> returnType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$ReturnValue");
+    Object returned = returnType.getConstructor().newInstance();
+    var setReturnName = returnType.getMethod("setValue", String.class);
+    setReturnName.invoke(returned, "站点名称");
+    returnType.getMethod("setValueName", String.class).invoke(returned, "名称别名");
+
+    Object lookup = meta.getClass().getMethod("getLookup").invoke(meta);
+    lookup.getClass().getMethod("setMatchKeys", List.class).invoke(lookup, List.of(match));
+    lookup.getClass().getMethod("setReturnValues", List.class)
+        .invoke(lookup, List.of(returned));
+    meta.getClass().getMethod("setSourceTransformName", String.class)
+        .invoke(meta, "lookup-source");
+    var infoStream = meta.getTransformIOMeta().getInfoStreams().getFirst();
+    infoStream.setTransformMeta(new org.apache.hop.pipeline.transform.TransformMeta(
+        "StreamLookup", "lookup-source", meta));
+
+    var mainRow = new org.apache.hop.core.row.RowMeta();
+    mainRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("主流编号"));
+    var lookupRow = new org.apache.hop.core.row.RowMeta();
+    lookupRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("关联编号"));
+    lookupRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("站点名称"));
+    var node = new org.apache.hop.pipeline.transform.TransformMeta(
+        "StreamLookup", "stream-lookup-native", meta);
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var provider = new MemoryMetadataProvider();
+    List<org.apache.hop.core.ICheckResult> remarks = new ArrayList<>();
+    meta.check(remarks, pipeline, node, mainRow, new String[] {"main", "lookup"},
+        new String[0], lookupRow, variables, provider);
+    assertFalse(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Selected lookup source and matching fields in both rows must pass native check");
+
+    setMainKey.invoke(match, "主流不存在");
+    remarks.clear();
+    meta.check(remarks, pipeline, node, mainRow, new String[] {"main", "lookup"},
+        new String[0], lookupRow, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Main match key must resolve against main row, not lookup row");
+    setMainKey.invoke(match, "主流编号");
+
+    setLookupKey.invoke(match, "关联不存在");
+    remarks.clear();
+    meta.check(remarks, pipeline, node, mainRow, new String[] {"main", "lookup"},
+        new String[0], lookupRow, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Lookup match key must resolve against lookup row");
+    setLookupKey.invoke(match, "关联编号");
+
+    setReturnName.invoke(returned, "返回不存在");
+    remarks.clear();
+    meta.check(remarks, pipeline, node, mainRow, new String[] {"main", "lookup"},
+        new String[0], lookupRow, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "Return field must resolve in lookup row; its alias is not a source field");
+    setReturnName.invoke(returned, "站点名称");
+
+    remarks.clear();
+    meta.check(remarks, pipeline, node, mainRow, new String[] {"main"},
+        new String[0], lookupRow, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "A single incoming hop cannot satisfy StreamLookup's two-stream prerequisite");
+
+    infoStream.setTransformMeta(null);
+    remarks.clear();
+    meta.check(remarks, pipeline, node, mainRow, new String[] {"main", "lookup"},
+        new String[0], lookupRow, variables, provider);
+    assertTrue(remarks.stream().anyMatch(
+        r -> r.getType() == org.apache.hop.core.ICheckResult.TYPE_RESULT_ERROR),
+        "A lookup row alone does not replace selecting a source transform");
+    System.out.println("PROD_P0_STREAMLOOKUP_SPLIT_ROW_NATIVE_CHECK=PASS");
+  }
+
   @Test void stringCutNativeInputFieldChecksDoNotRequireDistinctSources() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "StringCut");
