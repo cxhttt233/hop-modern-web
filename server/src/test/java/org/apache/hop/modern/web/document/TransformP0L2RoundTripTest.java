@@ -36,6 +36,57 @@ class TransformP0L2RoundTripTest {
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
   @Test
+  void dataGridUnknownDeclaredFieldTypesFallbackToStringAndUnnamedFieldsAreSkipped()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "DataGrid");
+    Property declaredFields = property(descriptor, "field");
+    assertEquals(Shape.LIST, declaredFields.shape());
+    assertEquals("fields", declaredFields.groupKey());
+    assertEquals(Shape.STRING, property(descriptor, "field", "name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "field", "type").shape());
+    var precondition = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("DATA_GRID_UNKNOWN_FIELD_TYPES_FALLBACK_TO_STRING"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), precondition.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "DataGrid");
+    assertNotNull(plugin);
+    var meta = (org.apache.hop.pipeline.transforms.datagrid.DataGridMeta)
+        registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var numeric = new org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta();
+    numeric.setName("测站流量");
+    numeric.setType(org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
+        org.apache.hop.core.row.IValueMeta.TYPE_NUMBER));
+    var unknown = new org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta();
+    unknown.setName("未知类型字段");
+    unknown.setType("NOT_A_HOP_VALUE_META_TYPE");
+    var unspecified = new org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta();
+    unspecified.setName("未指定类型字段");
+    unspecified.setType(null);
+    var unnamed = new org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta();
+    unnamed.setName("");
+    unnamed.setType("Number");
+    meta.setDataGridFields(List.of(numeric, unknown, unspecified, unnamed));
+
+    var output = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(output, "DataGrid", null, null,
+        new org.apache.hop.core.variables.Variables(), new MemoryMetadataProvider());
+    assertEquals(3, output.size(), "A field with an empty name is omitted");
+    assertEquals("测站流量", output.getValueMeta(0).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER,
+        output.getValueMeta(0).getType());
+    assertEquals("未知类型字段", output.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        output.getValueMeta(1).getType(), "Unknown type silently falls back to STRING");
+    assertEquals("未指定类型字段", output.getValueMeta(2).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        output.getValueMeta(2).getType(), "Null type silently falls back to STRING");
+    System.out.println("PROD_P0_DATAGRID_UNKNOWN_TYPE_NATIVE_FALLBACK=PASS");
+  }
+
+  @Test
   void concatFieldsTargetAndSelectedSourceNativeChecksRespectErrorWarningDistinction()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
