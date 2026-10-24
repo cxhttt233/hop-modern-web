@@ -79,7 +79,7 @@ try {
   await panel.getByRole("button", { name: "Cancel" }).click();
   await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
   const diskSavePending = page.waitForResponse(r => match(r, "/save"));
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
   const diskSaveResponse = await diskSavePending;
   if (!diskSaveResponse.ok()) throw new Error("Unicode SQL disk save failed");
   await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
