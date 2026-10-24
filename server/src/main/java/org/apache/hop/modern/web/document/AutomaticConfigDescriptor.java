@@ -188,10 +188,15 @@ public final class AutomaticConfigDescriptor {
                   List.of("/fields/field"),
                   "For every aggregation except COUNT_ANY, fields.field[*].subject must name an incoming row field; COUNT_ANY does not require a subject. Check against upstream row metadata."));
       case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" ->
-          List.of(new RuntimePrecondition(
-              "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
-              List.of("/keys_1/key", "/keys_2/key"),
-              "Both input streams must be sorted ascending by their respective join keys."));
+          List.of(
+              new RuntimePrecondition(
+                  "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
+                  List.of("/keys_1/key", "/keys_2/key"),
+                  "Both input streams must be sorted ascending by their respective join keys."),
+              new RuntimePrecondition(
+                  "MERGE_JOIN_NATIVE_CHECK_DOES_NOT_VALIDATE_JOIN_TYPE_OR_KEY_ARITY",
+                  List.of("/join_type", "/keys_1/key", "/keys_2/key", "/transform1", "/transform2"),
+                  "Native MergeJoinMeta.check() always returns a not-verified WARNING, even for an unsupported join_type, unequal keys_1.key and keys_2.key counts, or missing stream references. The runtime accepts only INNER, LEFT OUTER, RIGHT OUTER, and FULL OUTER; it needs two resolved info streams and equal-length ordered key lists whose fields exist in the respective input rows. Diagnose these conditions before execution without treating the native warning as a successful validation or blocking draft saves."));
       case "org.apache.hop.pipeline.transforms.rest.RestMeta" ->
           List.of(new RuntimePrecondition(
               "REST_DYNAMIC_METHOD_NATIVE_CHECK_FALSE_POSITIVE",
