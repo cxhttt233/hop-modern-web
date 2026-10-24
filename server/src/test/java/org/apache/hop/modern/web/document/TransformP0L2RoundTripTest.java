@@ -1388,6 +1388,83 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void tableInputSpecifiedJdbcMappingUsesResolvedNamesAndValidatesTypesOnlyWhenEnabled()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "TableInput");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "TABLE_INPUT_SPECIFIED_FIELDS_MAP_JDBC_COLUMNS_BY_RESOLVED_NAME"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/specify_fields", "/validate_specified_fields", "/fields/field"),
+        contract.keyListPointers());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(Shape.STRING, property(descriptor, "field", "name").shape());
+    assertEquals(Shape.NUMBER, property(descriptor, "field", "type").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "specify_fields").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "validate_specified_fields").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "TableInput");
+    assertNotNull(plugin);
+    var meta = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+        registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.setSpecifyFields(true);
+    meta.setValidateSpecifiedFields(true);
+    var second = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    second.setName("${T3_JDBC_SECOND}");
+    second.setType(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
+    second.setLength(11);
+    var unnamed = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    unnamed.setName("");
+    var first = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    first.setName("甲列");
+    first.setType(org.apache.hop.core.row.IValueMeta.TYPE_STRING);
+    first.setLength(80);
+    meta.setFields(List.of(second, unnamed, first));
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("T3_JDBC_SECOND", "乙列<&>");
+    var output = new org.apache.hop.core.row.RowMeta();
+    output.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("incoming-parameter"));
+    meta.getFields(output, "tableinput-specified", null, null, variables,
+        new MemoryMetadataProvider());
+    assertEquals(2, output.size(), "specified output replaces incoming parameter metadata");
+    assertEquals("乙列<&>", output.getValueMeta(0).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        output.getValueMeta(0).getType());
+    assertEquals(11, output.getValueMeta(0).getLength());
+    assertEquals("甲列", output.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        output.getValueMeta(1).getType());
+    assertEquals(80, output.getValueMeta(1).getLength());
+
+    var jdbc = new org.apache.hop.core.row.RowMeta();
+    jdbc.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("甲列"));
+    jdbc.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("乙列<&>"));
+    jdbc.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("未选择列"));
+    assertArrayEquals(new int[] {1, 0}, meta.createSpecifiedMapping(jdbc, output, true),
+        "JDBC column positions are mapped by resolved name in configured output order");
+
+    var wrongTypes = new org.apache.hop.core.row.RowMeta();
+    wrongTypes.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("甲列"));
+    wrongTypes.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("乙列<&>"));
+    assertArrayEquals(new int[] {1, 0},
+        meta.createSpecifiedMapping(wrongTypes, output, false),
+        "disabled type validation permits later value conversion");
+    assertThrows(org.apache.hop.core.exception.HopException.class,
+        () -> meta.createSpecifiedMapping(wrongTypes, output, true));
+
+    var missing = new org.apache.hop.core.row.RowMeta();
+    missing.addValueMeta(new org.apache.hop.core.row.value.ValueMetaInteger("乙列<&>"));
+    assertThrows(org.apache.hop.core.exception.HopException.class,
+        () -> meta.createSpecifiedMapping(missing, output, false),
+        "missing JDBC columns fail even when type validation is disabled");
+    System.out.println("PROD_P0_TABLEINPUT_SPECIFIED_JDBC_NAME_MAPPING=PASS");
+  }
+
+  @Test
   void tableOutputExplicitFieldMappingPreconditionMatchesProductionGroupedDescriptor()
       throws Exception {
     Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "TableOutput");
