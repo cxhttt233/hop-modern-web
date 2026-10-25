@@ -363,6 +363,11 @@ export function App() {
                     {recentPathLabel(path, recentPipelinePaths)}
                   </button>
                 ))}
+                <button type="button" aria-label="清空最近打开记录"
+                  disabled={saving || source.kind === "loading"}
+                  onClick={() => setRecentPipelinePaths([])}>
+                  清空记录
+                </button>
               </div>
             )}
             <div className="pipeline-open-actions">
