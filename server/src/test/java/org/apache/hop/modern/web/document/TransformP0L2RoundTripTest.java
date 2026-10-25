@@ -4590,6 +4590,134 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REST_PAGINATION_WITHOUT_CONNECTION_FALLBACK=PASS");
   }
 
+
+  @Test
+  void restFieldDrivenOptionsWithoutInputHopFailBeforeHttpAfterRealHplConfigEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("REST_FIELD_DRIVEN_OPTIONS_REQUIRE_INPUT_HOP"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/urlInField", "/urlField", "/dynamicMethod",
+        "/methodFieldName", "/bodyField", "/headers/header",
+        "/parameters/parameter", "/matrixParameters/matrixParameter"),
+        contract.keyListPointers());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "urlInField").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "dynamicMethod").shape());
+    assertEquals(Shape.STRING, property(descriptor, "urlField").shape());
+    assertEquals(Shape.STRING, property(descriptor, "methodFieldName").shape());
+    assertEquals(Shape.STRING, property(descriptor, "bodyField").shape());
+    assertEquals(Shape.LIST, property(descriptor, "header").shape());
+    assertEquals("headers", property(descriptor, "header").groupKey());
+    assertEquals(Shape.LIST, property(descriptor, "parameter").shape());
+    assertEquals("parameters", property(descriptor, "parameter").groupKey());
+    assertEquals(Shape.LIST, property(descriptor, "matrixParameter").shape());
+    assertEquals("matrixParameters", property(descriptor, "matrixParameter").groupKey());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    String[][] scenarios = {
+        {"urlInField", "Accept URL from field"},
+        {"dynamicMethod", "Get Method from field"},
+        {"bodyField", "Body field"}
+    };
+    for (int index = 0; index < scenarios.length; index++) {
+      String option = scenarios[index][0];
+      String expectedNativeOption = scenarios[index][1];
+      ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+      original.setDefault();
+      original.getClass().getMethod("setUrl", String.class)
+          .invoke(original, "https://example.invalid/river?station=雪");
+      Object result = original.getClass().getMethod("getResultField").invoke(original);
+      result.getClass().getMethod("setFieldName", String.class)
+          .invoke(result, "响应<&雪>");
+
+      var provider = new MemoryMetadataProvider();
+      var variables = new org.apache.hop.core.variables.Variables();
+      PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+      java.nio.file.Path hpl = tempDir.resolve("rest-no-input-" + index + ".hpl");
+      var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+      pipeline.setName("rest-no-input-" + index);
+      pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+          "Rest", "rest-no-input-node", original));
+      store.save(hpl, pipeline);
+
+      var loaded = store.open(hpl);
+      PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+      String documentId = "rest-no-input-doc-" + index;
+      documents.put(new PipelineDocument(documentId, hpl, loaded));
+      PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read(documentId,
+          new PipelineConfigResource.ReadRequest("rest-no-input-node"));
+      assertEquals(200, read.getStatus());
+      var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+      switch (option) {
+        case "urlInField" -> {
+          edited.put("urlInField", true);
+          edited.put("urlField", "URL来源<&雪>");
+        }
+        case "dynamicMethod" -> {
+          edited.put("dynamicMethod", true);
+          edited.put("methodFieldName", "方法来源<&雪>");
+        }
+        case "bodyField" -> edited.put("bodyField", "请求体来源<&雪>");
+        default -> throw new AssertionError("unexpected REST option " + option);
+      }
+      var write = resource.write(documentId,
+          new PipelineConfigResource.WriteRequest("rest-no-input-node", edited));
+      assertEquals(200, write.getStatus(), option + " must remain an editable draft");
+      store.save(hpl, loaded);
+      var reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform("rest-no-input-node").getTransform();
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertEquals("响应<&雪>", wire.at("/result/name").asText());
+      if ("urlInField".equals(option)) {
+        assertTrue(wire.at("/urlInField").isBoolean());
+        assertTrue(wire.at("/urlInField").booleanValue());
+        assertEquals("URL来源<&雪>", wire.at("/urlField").asText());
+      } else if ("dynamicMethod".equals(option)) {
+        assertTrue(wire.at("/dynamicMethod").isBoolean());
+        assertTrue(wire.at("/dynamicMethod").booleanValue());
+        assertEquals("方法来源<&雪>", wire.at("/methodFieldName").asText());
+      } else {
+        assertTrue(wire.at("/bodyField").isTextual());
+        assertEquals("请求体来源<&雪>", wire.at("/bodyField").asText());
+        assertEquals("GET", wire.at("/method").asText(),
+            "native input-hop guard applies to bodyField even for GET");
+      }
+
+      ClassLoader loader = diskMeta.getClass().getClassLoader();
+      Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+      var ctor = runtimeType.getConstructor(
+          org.apache.hop.pipeline.transform.TransformMeta.class,
+          diskMeta.getClass(), dataType, int.class,
+          org.apache.hop.pipeline.PipelineMeta.class,
+          org.apache.hop.pipeline.Pipeline.class);
+      Object nativeRest = ctor.newInstance(
+          reopened.findTransform("rest-no-input-node"), diskMeta,
+          dataType.getConstructor().newInstance(), 0, reopened,
+          org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+      runtimeType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class)
+          .invoke(nativeRest, provider);
+      assertTrue((Boolean) runtimeType.getMethod("init").invoke(nativeRest),
+          "native init should accept an editable REST draft with no input hop");
+      var thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,
+          () -> runtimeType.getMethod("processRow").invoke(nativeRest),
+          option + " should be rejected before any HTTP request");
+      assertTrue(thrown.getCause() instanceof org.apache.hop.core.exception.HopException);
+      assertTrue(thrown.getCause().getMessage().contains(expectedNativeOption),
+          "native guard must identify the specific field-driven option: " + option);
+      assertTrue(thrown.getCause().getMessage().contains("no input hop"),
+          "native guard must identify the missing incoming graph hop");
+    }
+    System.out.println("PROD_P0_REST_NO_INPUT_FIELD_OPTIONS_PRE_HTTP_DISK_REOPEN=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
