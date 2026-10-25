@@ -4298,6 +4298,113 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REST_MATRIX_PATH_VS_QUERY_ENCODING=PASS");
   }
 
+  @Test
+  void restPaginationRejectsBinaryResultAtNativeInitAfterRealHplConfigEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("REST_PAGINATION_REJECTS_BINARY_RESULT_AT_INIT"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/paginationEnabled", "/result/binary", "/result/name"),
+        contract.keyListPointers());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "paginationEnabled").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "result", "binary").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/river?station=雪");
+    Object resultField = original.getClass().getMethod("getResultField").invoke(original);
+    resultField.getClass().getMethod("setFieldName", String.class)
+        .invoke(resultField, "响应<&雪>");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("rest-pagination-binary-guard.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-pagination-binary-guard");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-paging-node", original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("rest-paging-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("rest-paging-doc",
+        new PipelineConfigResource.ReadRequest("rest-paging-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertTrue(initial.config().at("/paginationEnabled").isBoolean());
+    assertFalse(initial.config().at("/paginationEnabled").booleanValue());
+    assertTrue(initial.config().at("/result/binary").isBoolean());
+    assertFalse(initial.config().at("/result/binary").booleanValue());
+
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("paginationEnabled", true);
+    ((com.fasterxml.jackson.databind.node.ObjectNode) changed.path("result"))
+        .put("binary", true);
+    var write = resource.write("rest-paging-doc",
+        new PipelineConfigResource.WriteRequest("rest-paging-node", changed));
+    assertEquals(200, write.getStatus(),
+        "the incompatible runtime pair remains an editable draft, not a save-time rejection");
+    var written = (PipelineConfigResource.ConfigResponse) write.getEntity();
+    assertTrue(written.config().at("/paginationEnabled").isBoolean());
+    assertTrue(written.config().at("/paginationEnabled").booleanValue());
+    assertTrue(written.config().at("/result/binary").isBoolean());
+    assertTrue(written.config().at("/result/binary").booleanValue());
+
+    store.save(hpl, loaded);
+    var reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("rest-paging-node").getTransform();
+    var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertTrue(diskWire.at("/paginationEnabled").booleanValue());
+    assertTrue(diskWire.at("/result/binary").booleanValue());
+    assertEquals("响应<&雪>", diskWire.at("/result/name").asText());
+
+    var projected = new org.apache.hop.core.row.RowMeta();
+    diskMeta.getFields(projected, "rest-paging-node", null, null, variables, provider);
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_BINARY,
+        projected.getValueMeta(0).getType(),
+        "getFields projects BINARY even though the runtime rejects pagination with binary");
+
+    ClassLoader loader = diskMeta.getClass().getClassLoader();
+    Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+    Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+    var ctor = runtimeType.getConstructor(
+        org.apache.hop.pipeline.transform.TransformMeta.class,
+        diskMeta.getClass(), dataType, int.class,
+        org.apache.hop.pipeline.PipelineMeta.class,
+        org.apache.hop.pipeline.Pipeline.class);
+    Object nativeRest = ctor.newInstance(
+        reopened.findTransform("rest-paging-node"), diskMeta,
+        dataType.getConstructor().newInstance(), 0, reopened,
+        org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+    runtimeType.getMethod("setMetadataProvider",
+        org.apache.hop.metadata.api.IHopMetadataProvider.class)
+        .invoke(nativeRest, provider);
+    assertFalse((Boolean) runtimeType.getMethod("init").invoke(nativeRest),
+        "native Rest.init must reject the persisted binary + pagination combination");
+
+    diskMeta.getClass().getMethod("setPaginationEnabled", boolean.class)
+        .invoke(diskMeta, false);
+    Object allowedRest = ctor.newInstance(
+        reopened.findTransform("rest-paging-node"), diskMeta,
+        dataType.getConstructor().newInstance(), 0, reopened,
+        org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+    runtimeType.getMethod("setMetadataProvider",
+        org.apache.hop.metadata.api.IHopMetadataProvider.class)
+        .invoke(allowedRest, provider);
+    assertTrue((Boolean) runtimeType.getMethod("init").invoke(allowedRest),
+        "binary responses without pagination must remain valid");
+    System.out.println("PROD_P0_REST_PAGINATION_BINARY_INIT_GUARD_DISK_REOPEN=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
