@@ -114,6 +114,6 @@ export function GenericConfigPanel({ descriptor, config, disabled, onCancel, onS
     <header><strong>转换配置</strong><small>{descriptor.className}</small></header>
     {groups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
       <label key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
-    <footer><button type="button" aria-label="Cancel" onClick={onCancel}>取消</button><button type="submit" aria-label="Save" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
+    <footer><button type="button" aria-label="取消配置（Cancel）" onClick={onCancel}>取消</button><button type="submit" aria-label="保存配置（Save）" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
   </form>;
 }
