@@ -280,7 +280,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "SELECT_VALUES_UNSPECIFIED_FIELDS_SORT_AFTER_EXPLICIT_SELECTION",
                   List.of("/fields/select_unspecified", "/fields/field"),
-                  "When fields.field contains an explicit selection, SelectValuesMeta.getFields() emits selected fields in configured list order (using their output rename), then, only if fields.select_unspecified is true, appends all unselected incoming fields sorted by original field name rather than input order. When the flag is false, unselected fields are omitted. With an empty fields.field list, native selection is skipped and the original input order remains unchanged regardless of select_unspecified. Diagnose downstream column order from both settings; do not reject draft saves."));
+                  "When fields.field contains an explicit selection, SelectValuesMeta.getFields() emits selected fields in configured list order (using their output rename), then, only if fields.select_unspecified is true, appends all unselected incoming fields sorted by original field name rather than input order. When the flag is false, unselected fields are omitted. With an empty fields.field list, native selection is skipped and the original input order remains unchanged regardless of select_unspecified. Diagnose downstream column order from both settings; do not reject draft saves."),
+              new RuntimePrecondition(
+                  "SELECT_VALUES_METADATA_CHANGES_TYPE_AND_FORMAT_AFTER_SELECTION",
+                  List.of("/fields/meta"),
+                  "SelectValuesMeta.getFields() applies fields.meta[*] after selection, renaming, and removal. Each fields.meta[*].name matches the post-selection field name. A non-NONE fields.meta[*].type change clones the value metadata to the requested Hop type and resets binary-string storage to NORMAL. Configured rename, length, precision, conversion_mask, encoding, decimal_symbol, and grouping_symbol then propagate to the same output field; unselected columns are not converted. Diagnose downstream type and format from the ordered metadata stage, not from the original upstream type. This is an output-schema compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" ->
           List.of(
               new RuntimePrecondition(
