@@ -82,6 +82,57 @@ try{
  await page.getByRole("button",{name:"Open pipeline"}).click();
  const reopened=await (await p).json();
  if(!reopened.nodes.some(n=>n.id===added.id)||!reopened.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("disk reopen lost semantics");
+ // Deleting a connected transform must remove its incident Hop, not leave
+ // an invisible/dangling edge in the authoritative graph or disk XML.
+ // Undo must restore BOTH the transform and its connection; redo must remove
+ // both again. This is distinct from V6's undo/redo of a newly drawn Hop.
+ const incidentEdge=reopened.edges.find(e=>e.source===original&&e.target===added.id);
+ if(!incidentEdge) throw new Error("connected-node cascade fixture has no incident Hop");
+ await rf(added.id).click();
+ let cascadePending=post("/edit/delete");
+ await page.getByRole("button",{name:"Delete"}).click();
+ const cascadeDeleteResponse=await cascadePending;
+ if(!cascadeDeleteResponse.ok()) throw new Error("connected-node cascade delete HTTP "+cascadeDeleteResponse.status());
+ const cascadeDeleted=await cascadeDeleteResponse.json();
+ const dangling=g=>g.edges.some(e=>e.source===added.id||e.target===added.id);
+ if(cascadeDeleted.nodes.some(n=>n.id===added.id)||dangling(cascadeDeleted))
+   throw new Error("connected-node delete left the transform or a dangling Hop");
+ await rf(added.id).waitFor({state:"detached"});
+ await page.locator('.react-flow__edge[data-id="'+incidentEdge.id+'"]').waitFor({state:"detached"});
+ cascadePending=post("/edit/undo");
+ await page.getByRole("button",{name:"撤销（Undo）",exact:true}).click();
+ const cascadeUndoResponse=await cascadePending;
+ if(!cascadeUndoResponse.ok()) throw new Error("connected-node undo HTTP "+cascadeUndoResponse.status());
+ const cascadeRestored=await cascadeUndoResponse.json();
+ if(!cascadeRestored.nodes.some(n=>n.id===added.id)||
+    !cascadeRestored.edges.some(e=>e.source===original&&e.target===added.id))
+   throw new Error("undo connected-node deletion did not restore node and Hop");
+ await rf(added.id).waitFor({state:"visible"});
+ cascadePending=post("/edit/redo");
+ await page.getByRole("button",{name:"重做（Redo）",exact:true}).click();
+ const cascadeRedoResponse=await cascadePending;
+ if(!cascadeRedoResponse.ok()) throw new Error("connected-node redo HTTP "+cascadeRedoResponse.status());
+ const cascadeRedone=await cascadeRedoResponse.json();
+ if(cascadeRedone.nodes.some(n=>n.id===added.id)||dangling(cascadeRedone))
+   throw new Error("redo connected-node deletion left a node or dangling Hop");
+ cascadePending=post("/save");
+ await page.getByRole("button",{name:"保存（Save）",exact:true}).click();
+ const cascadeSaveResponse=await cascadePending;
+ if(!cascadeSaveResponse.ok()) throw new Error("connected-node cascade disk save HTTP "+cascadeSaveResponse.status());
+ const cascadeSaved=await cascadeSaveResponse.json();
+ if(cascadeSaved.nodes.some(n=>n.id===added.id)||dangling(cascadeSaved))
+   throw new Error("connected-node cascade disk save returned dangling graph");
+ cascadePending=post("/api/pipelines/open");
+ await page.getByRole("button",{name:"Choose pipeline"}).click();
+ await page.getByRole("button",{name:"Open pipeline"}).click();
+ const cascadeReopenResponse=await cascadePending;
+ if(!cascadeReopenResponse.ok()) throw new Error("connected-node cascade disk reopen HTTP "+cascadeReopenResponse.status());
+ const cascadeReopened=await cascadeReopenResponse.json();
+ if(cascadeReopened.nodes.some(n=>n.id===added.id)||dangling(cascadeReopened)||
+    !cascadeReopened.nodes.some(n=>n.id===original))
+   throw new Error("disk reopen retained deleted transform/Hop or lost unaffected source");
+ await rf(added.id).waitFor({state:"detached"});
+ console.log("V5 connected-node cascade proof passed: delete removes incident Hop; undo restores both; redo removes both; disk reopen has no dangling edge.");
  // Real filesystem save failure must not mark a dirty graph as saved.
  // Keep this case isolated from the shared .hpl fixtures and restore the
  // original path before retrying, with no HTTP mocks or intercepted responses.
