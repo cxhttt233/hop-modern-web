@@ -4398,8 +4398,8 @@ class TransformP0L2RoundTripTest {
           assertEquals("黄河<&>", mapper.readTree(pieces.get(0)).path("name").asText());
           assertEquals("雪", mapper.readTree(pieces.get(1)).path("name").asText());
         } else {
-          assertTrue(pieces.get(0).contains("黄河<&>"));
-          assertTrue(pieces.get(1).contains("雪"));
+          assertEquals("黄河<&>", XmlHandler.wrapLoadXmlString(pieces.get(0)).getTextContent());
+          assertEquals("雪", XmlHandler.wrapLoadXmlString(pieces.get(1)).getTextContent());
         }
       }
     }
