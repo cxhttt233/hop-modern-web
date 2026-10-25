@@ -3906,7 +3906,7 @@ class TransformP0L2RoundTripTest {
     assertTrue((Boolean) validToken.invoke(null, "pUrGe"));
     assertTrue((Boolean) validToken.invoke(null, "M-SEARCH"));
     assertFalse((Boolean) validToken.invoke(null, "GET /"));
-    assertFalse((Boolean) validToken.invoke(null, "GET\\r\\n"));
+    assertFalse((Boolean) validToken.invoke(null, "GET\r\n"));
     assertFalse((Boolean) validToken.invoke(null, ""));
     assertFalse((Boolean) activeBody.invoke(null, "GET"));
     assertFalse((Boolean) activeBody.invoke(null, "HEAD"));
