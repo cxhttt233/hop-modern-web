@@ -278,6 +278,18 @@ public final class AutomaticConfigDescriptor {
                       + "methodFieldName identifies the incoming row field; diagnose runtime tokens "
                       + "separately without rejecting draft saves."),
               new RuntimePrecondition(
+                  "REST_CONNECTION_BASE_URL_JOINS_RELATIVE_PATHS_AND_ABSOLUTE_OVERRIDE",
+                  List.of("/connection_name", "/url", "/urlInField", "/urlField"),
+                  "When connection_name resolves to a REST connection, native Rest.resolveAgainstBase() "
+                      + "joins its base URL to the static url or an incoming urlField value. It "
+                      + "removes one duplicate boundary slash or adds one missing slash; an "
+                      + "absolute URL with a valid scheme:// overrides the connection base, while "
+                      + "localhost:8080/path is treated as relative because a colon alone is not "
+                      + "an absolute URL scheme. An empty path preserves the base URL. Preserve "
+                      + "literal URL configuration through JSON/XML edits and diagnose the "
+                      + "effective request target after variable resolution; this is not a "
+                      + "save-time validator or a request execution proof."),
+              new RuntimePrecondition(
                   "REST_BINARY_RESULT_FIELD_CHANGES_OUTPUT_ROW_TYPE",
                   List.of("/result/name", "/result/binary", "/result/code",
                       "/result/response_time", "/result/response_header"),
