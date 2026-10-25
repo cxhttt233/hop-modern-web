@@ -358,6 +358,22 @@ public final class AutomaticConfigDescriptor {
                       + "dependency before users expect multiple pages; this is not a "
                       + "save-time rejection or a claim that network paging was tested."),
               new RuntimePrecondition(
+                  "REST_FIELD_DRIVEN_OPTIONS_REQUIRE_INPUT_HOP",
+                  List.of("/urlInField", "/urlField", "/dynamicMethod",
+                      "/methodFieldName", "/bodyField", "/headers/header",
+                      "/parameters/parameter", "/matrixParameters/matrixParameter"),
+                  "A REST transform without any incoming hop can act as a source for a static "
+                      + "request, even though RestMeta.check() reports no input. However, native "
+                      + "Rest.processRow() rejects every field-driven option on the first row "
+                      + "before issuing HTTP: urlInField, dynamicMethod, bodyField, non-empty "
+                      + "headers/header, parameters/parameter or matrixParameters/matrixParameter. "
+                      + "The guard checks options in that order, and does not exempt a bodyField "
+                      + "merely because the configured method is GET. Preserve the typed BOOLEAN "
+                      + "and STRING settings and ordered grouped LIST values in JSON and HPL; "
+                      + "diagnose the missing upstream hop rather than silently clearing editable "
+                      + "draft fields. The canonical pointers refer to the wire containers built "
+                      + "from Hop groupKey, not a flattened form path."),
+              new RuntimePrecondition(
                   "REST_BASIC_AUTH_PREEMPTIVE_FLAG_IS_INVERTED",
                   List.of("/non_preemptive_basic_auth"),
                   "RestMeta stores non_preemptive_basic_auth as the BOOLEAN inverse of isPreemptive(): false (the default) sends Basic credentials on the first request, while true waits for a 401 challenge. The legacy XML preemptive key was removed because it never affected runtime behavior; an old HPL lacking non_preemptive_basic_auth must retain the default preemptive behavior. Preserve this exact wire boolean through config JSON editing and Hop XML disk reopen; do not reverse the UI label into the persisted value or expose password material. This is a compatibility diagnostic, not a save-time validator."));
