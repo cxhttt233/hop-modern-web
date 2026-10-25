@@ -208,7 +208,11 @@ public final class AutomaticConfigDescriptor {
           List.of(new RuntimePrecondition(
               "FILTER_ROWS_NESTED_CONDITION_FIELDS_REQUIRE_UPSTREAM_FIELDS",
               List.of("/compare/condition"),
-              "FilterRows requires a non-empty compare.condition and incoming rows. Native FilterRowsMeta.check() recursively collects both leftvalue and rightvalue field references from nested conditions and reports missing upstream fields as ERROR. Literal right-side values are not upstream field references; true/false target transforms are separate graph references, not condition fields. The canonical pointer anchors the condition object; recursive child pointers are not exposed by the current descriptor."));
+              "FilterRows requires a non-empty compare.condition and incoming rows. Native FilterRowsMeta.check() recursively collects both leftvalue and rightvalue field references from nested conditions and reports missing upstream fields as ERROR. Literal right-side values are not upstream field references; true/false target transforms are separate graph references, not condition fields. The canonical pointer anchors the condition object; recursive child pointers are not exposed by the current descriptor."),
+              new RuntimePrecondition(
+                  "FILTER_ROWS_CONDITION_FIELDS_RESET_DESCENDING_SORT_METADATA",
+                  List.of("/compare/condition"),
+                  "FilterRowsMeta.getFields() obtains both left and right field operands from compare.condition through Condition.getUsedFields() and clears sortedDescending on each matching incoming IValueMeta in place. Unreferenced fields retain their descending-sort metadata, and missing condition field names are skipped by getFields() rather than validated here. This prevents sorted-descending metadata from inverting subsequent condition comparisons; derive downstream row metadata from the native projection, not the upstream sort flags. This is a compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
           List.of(
               new RuntimePrecondition(
