@@ -4270,6 +4270,7 @@ class TransformP0L2RoundTripTest {
     pipelineMeta.setName("rest-matrix-encoding");
     var transform = new org.apache.hop.pipeline.transform.TransformMeta(
         "Rest", "rest-parameter-node", original);
+    pipelineMeta.addTransform(transform); // BaseTransform.dispatch resolves its node from the graph.
     var ctor = runtimeType.getConstructor(
         org.apache.hop.pipeline.transform.TransformMeta.class,
         original.getClass(), dataType, int.class,
