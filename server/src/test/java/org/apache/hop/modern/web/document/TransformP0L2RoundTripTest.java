@@ -3872,6 +3872,92 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void restCustomMethodTokensAndBodyRulesSurviveRealHplConfigEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "REST_CUSTOM_METHOD_TOKENS_PRESERVE_CASE_AND_BODY_RULES"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/method", "/dynamicMethod", "/methodFieldName"),
+        contract.keyListPointers());
+    assertEquals(Shape.STRING, property(descriptor, "method").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "dynamicMethod").shape());
+    assertEquals(Shape.STRING, property(descriptor, "methodFieldName").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Class<?> nativeType = original.getClass();
+    nativeType.getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/river");
+    nativeType.getMethod("setMethod", String.class).invoke(original, "GET");
+
+    // The native API recognizes known verbs without turning custom methods into an enum.
+    var normalize = nativeType.getMethod("normalizeMethod", String.class);
+    var validToken = nativeType.getMethod("isValidMethodToken", String.class);
+    var activeBody = nativeType.getMethod("isActiveBody", String.class);
+    var activeParameters = nativeType.getMethod("isActiveParameters", String.class);
+    assertEquals("PATCH", normalize.invoke(null, "  pAtCh  "));
+    assertEquals("pUrGe", normalize.invoke(null, "  pUrGe  "));
+    assertEquals("M-SEARCH", normalize.invoke(null, " M-SEARCH "));
+    assertTrue((Boolean) validToken.invoke(null, "pUrGe"));
+    assertTrue((Boolean) validToken.invoke(null, "M-SEARCH"));
+    assertFalse((Boolean) validToken.invoke(null, "GET /"));
+    assertFalse((Boolean) validToken.invoke(null, "GET\\r\\n"));
+    assertFalse((Boolean) validToken.invoke(null, ""));
+    assertFalse((Boolean) activeBody.invoke(null, "GET"));
+    assertFalse((Boolean) activeBody.invoke(null, "HEAD"));
+    assertFalse((Boolean) activeBody.invoke(null, "OPTIONS"));
+    assertTrue((Boolean) activeBody.invoke(null, "POST"));
+    assertTrue((Boolean) activeBody.invoke(null, "pUrGe"));
+    assertFalse((Boolean) activeParameters.invoke(null, "HEAD"));
+    assertFalse((Boolean) activeParameters.invoke(null, "OPTIONS"));
+    assertTrue((Boolean) activeParameters.invoke(null, "GET"));
+    assertTrue((Boolean) activeParameters.invoke(null, "pUrGe"));
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("rest-custom-method-compat.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-custom-method-compat");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-custom-method-node", original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("rest-custom-method-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("rest-custom-method-doc",
+        new PipelineConfigResource.ReadRequest("rest-custom-method-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals("GET", initial.config().at("/method").asText());
+
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("method", "pUrGe");
+    var write = resource.write("rest-custom-method-doc",
+        new PipelineConfigResource.WriteRequest("rest-custom-method-node", changed));
+    assertEquals(200, write.getStatus(), "custom REST verb must survive JSON editing");
+    var written = (PipelineConfigResource.ConfigResponse) write.getEntity();
+    assertEquals("pUrGe", written.config().at("/method").asText());
+
+    store.save(hpl, loaded);
+    var reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("rest-custom-method-node").getTransform();
+    var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertTrue(diskWire.at("/method").isTextual());
+    assertEquals("pUrGe", diskWire.at("/method").asText());
+    assertEquals("pUrGe", normalize.invoke(null, diskWire.at("/method").asText()));
+    System.out.println("PROD_P0_REST_CUSTOM_METHOD_TOKEN_DISK_REOPEN=PASS");
+  }
+
+  @Test
   void restBasicAuthInvertedFlagSurvivesConfigWriteAndLegacyXmlReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
