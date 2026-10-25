@@ -1,4 +1,7 @@
 import { chromium } from "playwright";
+import { copyFile, mkdtemp, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const pipelinePath=process.env.REAL_HPL_PATH;
 if(!pipelinePath) throw new Error("REAL_HPL_PATH is required");
 const browser=await chromium.launch({headless:true});
@@ -79,6 +82,65 @@ try{
  await page.getByRole("button",{name:"Open pipeline"}).click();
  const reopened=await (await p).json();
  if(!reopened.nodes.some(n=>n.id===added.id)||!reopened.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("disk reopen lost semantics");
+ // Real filesystem save failure must not mark a dirty graph as saved.
+ // Keep this case isolated from the shared .hpl fixtures and restore the
+ // original path before retrying, with no HTTP mocks or intercepted responses.
+ const recoveryRoot=await mkdtemp(join(tmpdir(),"hop-modern-save-recovery-"));
+ try{
+   const liveDir=join(recoveryRoot,"live");
+   const offlineDir=join(recoveryRoot,"offline");
+   await mkdir(liveDir);
+   const recoveryPath=join(liveDir,"recovery.hpl");
+   await copyFile(pipelinePath,recoveryPath);
+   let pending=post("/api/pipelines/open");
+   await page.getByRole("button",{name:"Choose pipeline"}).click();
+   await page.getByLabel("Server-visible pipeline path").fill(recoveryPath);
+   await page.getByRole("button",{name:"Open pipeline"}).click();
+   const openedResponse=await pending;
+   if(!openedResponse.ok()) throw new Error("recovery fixture open failed");
+   const recoveryOpened=await openedResponse.json();
+   pending=post("/edit/add");
+   await page.getByRole("button",{name:"表输入（TableInput）",exact:true}).click();
+   const editedResponse=await pending;
+   if(!editedResponse.ok()) throw new Error("recovery fixture edit failed");
+   const edited=await editedResponse.json();
+   const recoveryAdded=edited.nodes.find(n=>!recoveryOpened.nodes.some(o=>o.id===n.id));
+   if(!recoveryAdded) throw new Error("recovery fixture did not add a real transform");
+   await page.locator(".dirty-state.is-dirty").waitFor({state:"visible"});
+
+   // Moving the parent directory makes the original path unwritable even
+   // when the CI runner has permission to write individual files.
+   await rename(liveDir,offlineDir);
+   pending=post("/save");
+   await page.getByRole("button",{name:"保存（Save）",exact:true}).click();
+   const failedSave=await pending;
+   if(failedSave.status()!==500) throw new Error("missing-path save must return HTTP 500");
+   await page.getByRole("alert").waitFor({state:"visible"});
+   await page.locator(".dirty-state.is-dirty").waitFor({state:"visible"});
+   if(!(await page.getByRole("button",{name:"Save"}).isEnabled()))
+     throw new Error("failed save must retain the dirty graph and retry action");
+
+   await rename(offlineDir,liveDir);
+   pending=post("/save");
+   await page.getByRole("button",{name:"保存（Save）",exact:true}).click();
+   const retriedSave=await pending;
+   if(!retriedSave.ok()) throw new Error("save retry after restoring path failed");
+   await page.locator(".dirty-state.is-dirty").waitFor({state:"hidden"});
+   if(await page.getByRole("button",{name:"Save"}).isEnabled())
+     throw new Error("successful save retry must clear the dirty indicator");
+   if(!(await readFile(recoveryPath,"utf8")).includes(recoveryAdded.id))
+     throw new Error("save retry did not persist the added transform to .hpl XML");
+
+   pending=post("/api/pipelines/open");
+   await page.getByRole("button",{name:"Choose pipeline"}).click();
+   await page.getByRole("button",{name:"Open pipeline"}).click();
+   const recovered=await (await pending).json();
+   if(!recovered.nodes.some(n=>n.id===recoveryAdded.id))
+     throw new Error("disk reopen after failed-save retry lost the transform");
+   console.log("V5 real save failure/retry proof passed: HTTP 500 retains dirty state; restored path saves and disk reopens.");
+ }finally{
+   await rm(recoveryRoot,{recursive:true,force:true});
+ }
  for(const s of ["/edit/add","/edit/delete","/edit/connect","/edit/undo","/edit/redo","/save"])
    if(!requests.some(r=>r.method==="POST"&&new URL(r.url).pathname.endsWith(s))) throw new Error("missing product request "+s);
  if(requests.some(r=>{const x=new URL(r.url).pathname;return x==="/ui"||x.startsWith("/ui/")})) throw new Error("RAP /ui entered");
