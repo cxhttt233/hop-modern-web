@@ -3706,6 +3706,96 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void tableOutputGeneratedKeyVariableCollisionAndEmptyExpressionSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "TableOutput");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "TABLE_OUTPUT_GENERATED_KEY_RESOLVED_COLLISION_AND_EMPTY_EXPRESSION"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/return_keys", "/return_field"), contract.keyListPointers());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "return_keys").shape());
+    assertEquals(Shape.STRING, property(descriptor, "return_field").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("GENERATED_KEY_NAME", "主键<&>雪");
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("table-output-generated-key.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("table-output-generated-key");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", "table-output-key-node", meta));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("table-output-key-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    jakarta.ws.rs.core.Response read = resource.read(
+        "table-output-key-doc", new PipelineConfigResource.ReadRequest("table-output-key-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("return_keys", true);
+    changed.put("return_field", "${GENERATED_KEY_NAME}");
+    jakarta.ws.rs.core.Response write = resource.write(
+        "table-output-key-doc",
+        new PipelineConfigResource.WriteRequest("table-output-key-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    var disk = store.open(hpl);
+    var diskTransform = disk.findTransform("table-output-key-node");
+    assertNotNull(diskTransform);
+    ITransformMeta nativeMeta = diskTransform.getTransform();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        nativeMeta, provider);
+    assertTrue(wire.at("/return_keys").isBoolean());
+    assertTrue(wire.at("/return_keys").booleanValue());
+    assertEquals("${GENERATED_KEY_NAME}", wire.at("/return_field").asText());
+
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("主键<&>雪"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("主键<&>雪_1"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("保留"));
+    nativeMeta.getFields(row, "table-output-key-node", null, null, variables, provider);
+    assertEquals(List.of("主键<&>雪", "主键<&>雪_1", "保留", "主键<&>雪_2"),
+        row.getValueMetaList().stream().map(v -> v.getName()).toList());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER, row.getValueMeta(3).getType());
+    assertEquals("table-output-key-node", row.getValueMeta(3).getOrigin());
+
+    variables.setVariable("GENERATED_KEY_NAME", "");
+    var resolvedEmpty = new org.apache.hop.core.row.RowMeta();
+    nativeMeta.getFields(resolvedEmpty, "table-output-key-node", null, null,
+        variables, provider);
+    assertEquals(1, resolvedEmpty.size(),
+        "a nonempty variable expression is checked before resolution");
+    assertEquals("", resolvedEmpty.getValueMeta(0).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        resolvedEmpty.getValueMeta(0).getType());
+
+    nativeMeta.getClass().getMethod("setGeneratedKeyField", String.class)
+        .invoke(nativeMeta, "");
+    var rawEmpty = new org.apache.hop.core.row.RowMeta();
+    nativeMeta.getFields(rawEmpty, "table-output-key-node", null, null, variables, provider);
+    assertEquals(0, rawEmpty.size(), "literal empty return_field adds no column");
+    nativeMeta.getClass().getMethod("setGeneratedKeyField", String.class)
+        .invoke(nativeMeta, "${GENERATED_KEY_NAME}");
+    nativeMeta.getClass().getMethod("setReturningGeneratedKeys", boolean.class)
+        .invoke(nativeMeta, false);
+    var disabled = new org.apache.hop.core.row.RowMeta();
+    nativeMeta.getFields(disabled, "table-output-key-node", null, null, variables, provider);
+    assertEquals(0, disabled.size(), "return_keys=false adds no column");
+    System.out.println("PROD_P0_TABLEOUTPUT_GENERATED_KEY_COLLISION_DISK_REOPEN=PASS");
+  }
+
+  @Test
   void tableOutputDynamicTableNameMetadataSurvivesRealHplDiskReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
