@@ -324,6 +324,18 @@ public final class AutomaticConfigDescriptor {
                       "/result/response_header"),
                   "Unlike HttpMeta, RestMeta.getFields() resolves Hop variables in all four result output names. It appends non-empty configured result.name (STRING or BINARY), result.code (INTEGER), and result.response_time (INTEGER) in that order, followed by a STRING response_header only when its resolved name is non-empty. For the first three names, the native empty check precedes variable resolution; the header empty check follows resolution. Preserve upstream fields and the native output order when diagnosing downstream row schemas. This is not a save-time validator."),
               new RuntimePrecondition(
+                  "REST_STREAMING_SPLIT_PATH_REJECTED_BEFORE_HTTP",
+                  List.of("/streamingEnabled", "/resultSplitPath", "/result/binary",
+                      "/paginationEnabled"),
+                  "With streamingEnabled=true, Rest.processRow() rejects a non-empty "
+                      + "resultSplitPath on its first row before sending an HTTP request: "
+                      + "streaming consumes individual records while JsonPath/XPath splitting "
+                      + "requires a complete response document. Native rejection occurs even "
+                      + "when paginationEnabled=false and result.binary=false. Preserve the "
+                      + "editable draft and canonical STRING/BOOLEAN wire values; warn before "
+                      + "execution rather than silently dropping the split path or streaming "
+                      + "setting. This runtime guard does not prove HTTP streaming works."),
+              new RuntimePrecondition(
                   "REST_PAGINATION_REJECTS_BINARY_RESULT_AT_INIT",
                   List.of("/paginationEnabled", "/result/binary", "/result/name"),
                   "Native Rest.init() rejects paginationEnabled=true together with result.binary=true "
