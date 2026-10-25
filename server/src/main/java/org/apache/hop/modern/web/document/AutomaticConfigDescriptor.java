@@ -324,6 +324,17 @@ public final class AutomaticConfigDescriptor {
                       "/result/response_header"),
                   "Unlike HttpMeta, RestMeta.getFields() resolves Hop variables in all four result output names. It appends non-empty configured result.name (STRING or BINARY), result.code (INTEGER), and result.response_time (INTEGER) in that order, followed by a STRING response_header only when its resolved name is non-empty. For the first three names, the native empty check precedes variable resolution; the header empty check follows resolution. Preserve upstream fields and the native output order when diagnosing downstream row schemas. This is not a save-time validator."),
               new RuntimePrecondition(
+                  "REST_PAGINATION_REJECTS_BINARY_RESULT_AT_INIT",
+                  List.of("/paginationEnabled", "/result/binary", "/result/name"),
+                  "Native Rest.init() rejects paginationEnabled=true together with result.binary=true "
+                      + "before any HTTP exchange: paging must inspect a textual response body "
+                      + "to extract page tokens or split records, whereas binary mode preserves "
+                      + "opaque bytes. RestMeta.check() does not detect this combination, and "
+                      + "RestMeta.getFields() still projects a BINARY result column when a result "
+                      + "name is configured. Diagnose the incompatible BOOLEAN pair before "
+                      + "execution without silently changing either persisted setting or "
+                      + "rejecting an editable draft save."),
+              new RuntimePrecondition(
                   "REST_BASIC_AUTH_PREEMPTIVE_FLAG_IS_INVERTED",
                   List.of("/non_preemptive_basic_auth"),
                   "RestMeta stores non_preemptive_basic_auth as the BOOLEAN inverse of isPreemptive(): false (the default) sends Basic credentials on the first request, while true waits for a 401 challenge. The legacy XML preemptive key was removed because it never affected runtime behavior; an old HPL lacking non_preemptive_basic_auth must retain the default preemptive behavior. Preserve this exact wire boolean through config JSON editing and Hop XML disk reopen; do not reverse the UI label into the persisted value or expose password material. This is a compatibility diagnostic, not a save-time validator."));
