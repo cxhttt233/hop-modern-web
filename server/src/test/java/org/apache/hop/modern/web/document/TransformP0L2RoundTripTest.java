@@ -3871,6 +3871,87 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEOUTPUT_DYNAMIC_TABLE_NAME_DISK_METADATA=PASS");
   }
 
+  @Test
+  void restBasicAuthInvertedFlagSurvivesConfigWriteAndLegacyXmlReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("REST_BASIC_AUTH_PREEMPTIVE_FLAG_IS_INVERTED"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/non_preemptive_basic_auth"), contract.keyListPointers());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "non_preemptive_basic_auth").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/river");
+    assertTrue((Boolean) original.getClass().getMethod("isPreemptive").invoke(original),
+        "native default sends Basic credentials preemptively when configured");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("rest-basic-auth-compat.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-basic-auth-compat");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-auth-node", original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("rest-auth-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read(
+        "rest-auth-doc", new PipelineConfigResource.ReadRequest("rest-auth-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertTrue(initial.config().at("/non_preemptive_basic_auth").isBoolean());
+    assertFalse(initial.config().at("/non_preemptive_basic_auth").booleanValue());
+
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("non_preemptive_basic_auth", true);
+    var write = resource.write(
+        "rest-auth-doc", new PipelineConfigResource.WriteRequest("rest-auth-node", changed));
+    assertEquals(200, write.getStatus(), "real REST JSON config edit must succeed");
+    var written = (PipelineConfigResource.ConfigResponse) write.getEntity();
+    assertTrue(written.config().at("/non_preemptive_basic_auth").isBoolean());
+    assertTrue(written.config().at("/non_preemptive_basic_auth").booleanValue());
+    ITransformMeta edited = loaded.findTransform("rest-auth-node").getTransform();
+    assertFalse((Boolean) edited.getClass().getMethod("isPreemptive").invoke(edited),
+        "true wire flag means wait for a 401 challenge, not preemptive authentication");
+
+    store.save(hpl, loaded);
+    var reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("rest-auth-node").getTransform();
+    var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertTrue(diskWire.at("/non_preemptive_basic_auth").isBoolean());
+    assertTrue(diskWire.at("/non_preemptive_basic_auth").booleanValue());
+    assertFalse((Boolean) diskMeta.getClass().getMethod("isPreemptive").invoke(diskMeta));
+
+    // Old pipelines persisted a no-op <preemptive>N</preemptive> tag.
+    // Removing the new inverted flag must retain the historical preemptive default.
+    String currentXml = original.getXml();
+    String legacyXml = currentXml.replaceFirst(
+        "(?s)<non_preemptive_basic_auth>[^<]*</non_preemptive_basic_auth>",
+        "<preemptive>N</preemptive>");
+    assertNotEquals(currentXml, legacyXml,
+        "native XML fixture must contain the new inverted wire flag");
+    ITransformMeta legacy = plugins.loadClass(plugin, ITransformMeta.class);
+    legacy.setDefault();
+    legacy.loadXml(XmlHandler.wrapLoadXmlString(legacyXml), provider);
+    assertTrue((Boolean) legacy.getClass().getMethod("isPreemptive").invoke(legacy),
+        "legacy no-op preemptive=N must not reverse existing authentication behavior");
+    var legacyWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        legacy, provider);
+    assertFalse(legacyWire.at("/non_preemptive_basic_auth").booleanValue());
+    System.out.println("PROD_P0_REST_BASIC_AUTH_INVERTED_FLAG_DISK_REOPEN=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
