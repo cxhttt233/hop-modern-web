@@ -41,6 +41,12 @@ try {
   if (!connectionDescriptor || !sqlDescriptor) throw new Error("Runtime descriptor fields missing");
   const panel = page.locator("form.generic-config");
   await panel.waitFor({ state: "visible" });
+  // The real Hop configuration dialog must expose Chinese-first accessible
+  // action names while retaining the English fallback for existing clients.
+  if (await panel.getByRole("button", { name: "取消配置（Cancel）", exact: true }).count() !== 1 ||
+      await panel.getByRole("button", { name: "保存配置（Save）", exact: true }).count() !== 1) {
+    throw new Error("Real TableInput configuration dialog lacks Chinese-first action names");
+  }
   const connection = panel.locator(`#config-${connectionDescriptor.javaField}`);
   const sqlField = panel.locator(`#config-${sqlDescriptor.javaField}`);
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
