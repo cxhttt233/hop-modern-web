@@ -230,7 +230,7 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME",
                   List.of("/all_rows", "/add_linenr", "/linenr_fieldname"),
-                  "GroupByMeta.getFields() appends an INTEGER group line-number output field only when all_rows, add_linenr, and a non-empty linenr_fieldname are all present. With all_rows=false or add_linenr=false, the line-number field is absent even if its name is configured; with all_rows=true and an empty name, no field is appended. Diagnose downstream row metadata from all three values without rejecting draft saves."),
+                  "GroupByMeta.getFields() appends an INTEGER group line-number field after the aggregate columns only when all_rows=true, add_linenr=true, and the configured linenr_fieldname is non-empty. It uses the configured field name literally, without resolving Hop variables; if that name already exists in the passed-through row, RowMeta.addValueMeta() adds a numeric suffix rather than replacing the original column. The appended field has DEFAULT_INTEGER_LENGTH, precision 0, and the GroupBy transform as origin. With all_rows=false, add_linenr=false, or an empty configured name, no line-number column is appended. Diagnose the exact downstream field names and types without rejecting draft saves."),
               new RuntimePrecondition(
                   "GROUPBY_AGGREGATE_OUTPUT_TYPES_FOLLOW_OPERATION_AND_SUBJECT",
                   List.of("/fields/field", "/group/field", "/all_rows"),
