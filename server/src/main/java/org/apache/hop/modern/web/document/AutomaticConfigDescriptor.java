@@ -251,7 +251,12 @@ public final class AutomaticConfigDescriptor {
                   "REST_BINARY_RESULT_FIELD_CHANGES_OUTPUT_ROW_TYPE",
                   List.of("/result/name", "/result/binary", "/result/code",
                       "/result/response_time", "/result/response_header"),
-                  "RestMeta.getFields() emits result.name as BINARY when result.binary is true, otherwise STRING; no result body column is added when result.name is empty. Result code and response_time columns are INTEGER, and response_header is STRING. These names are output columns, not incoming fields; preserve their types when deriving downstream row metadata. This is an output-schema compatibility diagnostic, not a save-time validator."));
+                  "RestMeta.getFields() emits result.name as BINARY when result.binary is true, otherwise STRING; no result body column is added when result.name is empty. Result code and response_time columns are INTEGER, and response_header is STRING. These names are output columns, not incoming fields; preserve their types when deriving downstream row metadata. This is an output-schema compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "REST_RESULT_FIELD_NAMES_RESOLVE_VARIABLES_AND_OMIT_EMPTY_HEADER",
+                  List.of("/result/name", "/result/code", "/result/response_time",
+                      "/result/response_header"),
+                  "Unlike HttpMeta, RestMeta.getFields() resolves Hop variables in all four result output names. It appends non-empty configured result.name (STRING or BINARY), result.code (INTEGER), and result.response_time (INTEGER) in that order, followed by a STRING response_header only when its resolved name is non-empty. For the first three names, the native empty check precedes variable resolution; the header empty check follows resolution. Preserve upstream fields and the native output order when diagnosing downstream row schemas. This is not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta" ->
           List.of(
               new RuntimePrecondition(
