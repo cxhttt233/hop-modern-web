@@ -3393,6 +3393,90 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void scriptValueModLiteralAliasesAndEmptySourceNameSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "ScriptValueMod");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SCRIPT_VALUE_MOD_LITERAL_ALIAS_COLLISION_AND_EMPTY_NAME_SKIP"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(Shape.STRING, property(descriptor, "field", "rename").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "field", "replace").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "ScriptValueMod");
+    assertNotNull(plugin, "production ScriptValueMod plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> fieldType = java.util.Arrays.stream(meta.getClass().getDeclaredClasses())
+        .filter(c -> c.getSimpleName().equals("ScriptField")).findFirst().orElseThrow();
+    Field fields = metadataField(meta.getClass(), "scriptFields");
+    fields.set(meta, List.of(
+        newScriptField(fieldType, "", "不可输出的别名", 
+            org.apache.hop.core.row.IValueMeta.TYPE_INTEGER, 5, 0, false),
+        newScriptField(fieldType, "jsOne", "字段<&>雪",
+            org.apache.hop.core.row.IValueMeta.TYPE_INTEGER, 9, 0, false),
+        newScriptField(fieldType, "jsTwo", "字段<&>雪",
+            org.apache.hop.core.row.IValueMeta.TYPE_NUMBER, 12, 2, false),
+        newScriptField(fieldType, "jsThree", "${JS_ALIAS}",
+            org.apache.hop.core.row.IValueMeta.TYPE_STRING, 17, 0, false),
+        newScriptField(fieldType, "jsFour", "",
+            org.apache.hop.core.row.IValueMeta.TYPE_STRING, 11, 0, false)));
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("JS_ALIAS", "变量解析后的名字");
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("script-value-alias-metadata.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("script-value-alias-metadata");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "ScriptValueMod", "script-node", meta));
+    store.save(hpl, pipeline);
+    var reopened = store.open(hpl);
+    var diskTransform = reopened.findTransform("script-node");
+    assertNotNull(diskTransform);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("script-alias-doc", hpl, reopened));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("script-alias-doc",
+        new PipelineConfigResource.ReadRequest("script-node"));
+    assertEquals(200, read.getStatus());
+    var wire = ((PipelineConfigResource.ConfigResponse) read.getEntity()).config();
+    assertTrue(wire.at("/fields/field").isArray());
+    assertEquals(5, wire.at("/fields/field").size());
+    assertEquals("字段<&>雪", wire.at("/fields/field/1/rename").asText());
+    assertEquals("${JS_ALIAS}", wire.at("/fields/field/3/rename").asText());
+    assertTrue(wire.at("/fields/field/2/replace").isBoolean());
+    assertFalse(wire.at("/fields/field/2/replace").booleanValue());
+
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("字段<&>雪"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("字段<&>雪_1"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("上游"));
+    diskTransform.getTransform().getFields(
+        row, "script-node", null, null, variables, provider);
+    assertEquals(List.of("字段<&>雪", "字段<&>雪_1", "上游", "字段<&>雪_2",
+        "字段<&>雪_3", "${JS_ALIAS}", "jsFour"),
+        row.getValueMetaList().stream().map(v -> v.getName()).toList());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        row.getValueMeta(3).getType());
+    assertEquals(9, row.getValueMeta(3).getLength());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER,
+        row.getValueMeta(4).getType());
+    assertEquals(12, row.getValueMeta(4).getLength());
+    assertEquals(2, row.getValueMeta(4).getPrecision());
+    assertEquals(17, row.getValueMeta(5).getLength());
+    assertEquals(11, row.getValueMeta(6).getLength());
+    assertEquals("字段<&>雪", row.getValueMeta(0).getName(),
+        "duplicate aliases must not rename the original input field");
+    System.out.println("PROD_P0_SCRIPTVALUE_LITERAL_ALIAS_COLLISION_DISK_REOPEN=PASS");
+  }
+
+  @Test
   void concatFieldsLiteralTargetNameAutoSuffixesCollisionAndPreservesConfiguredLength()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
