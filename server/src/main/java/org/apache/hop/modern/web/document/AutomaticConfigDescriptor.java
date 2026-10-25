@@ -360,6 +360,10 @@ public final class AutomaticConfigDescriptor {
                   List.of("/return_keys", "/return_field"),
                   "When return_keys is true, return_field must resolve to a non-empty output field name. Native TableOutputMeta.getFields() adds an INTEGER field only when both conditions hold, but TableOutput may append the generated key to successful output rows whenever return_keys is true. An empty return_field therefore risks row-data/metadata width mismatch. The output field name is variable-resolved; diagnose this before execution without blocking draft saves."),
               new RuntimePrecondition(
+                  "TABLE_OUTPUT_GENERATED_KEY_RESOLVED_COLLISION_AND_EMPTY_EXPRESSION",
+                  List.of("/return_keys", "/return_field"),
+                  "TableOutputMeta.getFields() tests the configured return_field for emptiness before resolving Hop variables. With return_keys true and a non-empty variable expression, it appends an INTEGER field with the resolved name; RowMeta.addValueMeta() suffixes collisions with existing fields (including previously suffixed names) rather than replacing input columns. An expression resolving to an empty string still appends an empty-named INTEGER field, whereas a literally empty return_field or return_keys false appends none. Diagnose the resulting downstream row schema separately from generated-key database execution; do not reject draft saves."),
+              new RuntimePrecondition(
                   "TABLE_OUTPUT_DYNAMIC_TABLE_NAME_FIELD_CONTROLS_INSERT_PROJECTION",
                   List.of("/tablename_in_field", "/tablename_field", "/tablename_in_table",
                       "/specify_fields"),
