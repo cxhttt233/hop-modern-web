@@ -4038,6 +4038,88 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REST_BASIC_AUTH_INVERTED_FLAG_DISK_REOPEN=PASS");
   }
 
+  @Test
+  void restConnectionBaseUrlJoiningAndAbsoluteOverrideSurviveRealHplConfigEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "REST_CONNECTION_BASE_URL_JOINS_RELATIVE_PATHS_AND_ABSOLUTE_OVERRIDE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/connection_name", "/url", "/urlInField", "/urlField"),
+        contract.keyListPointers());
+    assertEquals(Shape.STRING, property(descriptor, "connection_name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "url").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "urlInField").shape());
+    assertEquals(Shape.STRING, property(descriptor, "urlField").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "/initial?source=1&kind=river");
+
+    // Exercise the actual fixed-Hop-Core Rest URL resolver without sending network requests.
+    Class<?> restRuntime = original.getClass().getClassLoader()
+        .loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+    var join = restRuntime.getDeclaredMethod(
+        "resolveAgainstBase", String.class, String.class);
+    join.setAccessible(true);
+    String base = "https://api.example.invalid/v1/";
+    String expected = "https://api.example.invalid/v1/stations";
+    assertEquals(expected, join.invoke(null, base, "/stations"));
+    assertEquals(expected, join.invoke(null, base, "stations"));
+    assertEquals(expected, join.invoke(null, "https://api.example.invalid/v1", "/stations"));
+    assertEquals(expected, join.invoke(null, "https://api.example.invalid/v1", "stations"));
+    assertEquals(base, join.invoke(null, base, ""));
+    assertEquals("https://other.example.invalid/absolute",
+        join.invoke(null, base, "https://other.example.invalid/absolute"));
+    assertEquals("https://api.example.invalid/v1/localhost:8080/path",
+        join.invoke(null, base, "localhost:8080/path"));
+    assertEquals("/stations", join.invoke(null, "", "/stations"));
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("rest-base-url-compat.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-base-url-compat");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-url-node", original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("rest-url-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("rest-url-doc",
+        new PipelineConfigResource.ReadRequest("rest-url-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals("/initial?source=1&kind=river", initial.config().at("/url").asText());
+
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("url", "/stations/水位?code=雪&limit=2");
+    var write = resource.write("rest-url-doc",
+        new PipelineConfigResource.WriteRequest("rest-url-node", changed));
+    assertEquals(200, write.getStatus(), "native REST URL edit must succeed");
+    var written = (PipelineConfigResource.ConfigResponse) write.getEntity();
+    assertEquals("/stations/水位?code=雪&limit=2", written.config().at("/url").asText());
+
+    store.save(hpl, loaded);
+    var reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("rest-url-node").getTransform();
+    var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertTrue(diskWire.at("/url").isTextual());
+    assertEquals("/stations/水位?code=雪&limit=2", diskWire.at("/url").asText());
+    assertEquals("https://api.example.invalid/v1/stations/水位?code=雪&limit=2",
+        join.invoke(null, base, diskWire.at("/url").asText()));
+    System.out.println("PROD_P0_REST_BASE_URL_JOIN_DISK_REOPEN=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
