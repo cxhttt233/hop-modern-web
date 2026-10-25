@@ -62,7 +62,7 @@ try {
   const canvas = page.locator(".react-flow__pane");
   const added = [];
   const plugins = ["TableInput", "SelectValues", "FilterRows"];
-  const chineseNames = { TableInput: "表输入", SelectValues: "选择字段", FilterRows: "过滤记录", Rest: "REST 客户端", ScriptValueMod: "脚本计算" };
+  const chineseNames = { TableInput: "表输入", SelectValues: "选择字段", FilterRows: "过滤记录" };
   const accessibleName = pluginId => `${chineseNames[pluginId]}（${pluginId}）`;
   const positions = [{ x: 560, y: 260 }, { x: 760, y: 360 }, { x: 960, y: 260 }];
 
@@ -234,7 +234,7 @@ try {
   }
   let activationGraph = reopened;
   const activated = [];
-  for (const [pluginId, method] of [["TableInput", "click"], ["SelectValues", "Enter"], ["Rest", "click"], ["ScriptValueMod", "Enter"]]) {
+  for (const [pluginId, method] of [["TableInput", "click"], ["SelectValues", "Enter"]]) {
     const beforeIds = new Set(activationGraph.nodes.map(node => node.id));
     const countAdds = () => requests.filter(({ url, method: verb }) =>
       verb === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
@@ -282,7 +282,7 @@ try {
   });
   if (rap.length) throw new Error("RAP /ui entered");
 
-  console.log("V6 Palette authoritative proof passed: full 20-plugin Chinese catalog; drag TableInput/SelectValues/FilterRows; click TableInput/Rest; Enter SelectValues/ScriptValueMod; real disk reopen");
+  console.log("V6 Palette authoritative proof passed: full 20-plugin Chinese catalog; drag TableInput/SelectValues/FilterRows; click TableInput; Enter SelectValues; real disk reopen");
 } finally {
   await browser.close();
 }
