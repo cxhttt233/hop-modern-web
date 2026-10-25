@@ -302,6 +302,18 @@ public final class AutomaticConfigDescriptor {
                       + "effective request target after variable resolution; this is not a "
                       + "save-time validator or a request execution proof."),
               new RuntimePrecondition(
+                  "REST_MATRIX_PARAMETERS_USE_PATH_ENCODING_BEFORE_QUERY",
+                  List.of("/url", "/matrixParameters/matrixParameter", "/parameters/parameter"),
+                  "Native Rest.buildRequestUri() places ordered matrix parameters on the last URL "
+                      + "path segment before any existing query string, and adds query parameters "
+                      + "using URIBuilder.addParameter() without replacing existing query entries. "
+                      + "Matrix values use UTF-8 path percent encoding (space becomes %20, "
+                      + "literal plus becomes %2B), not form-style plus-for-space encoding. "
+                      + "Do not merge matrix and query parameter editors or interpret a plus in "
+                      + "a path segment as a space. The input-row field names and list order "
+                      + "remain significant; this is a runtime URL compatibility diagnostic, "
+                      + "not a save-time validator."),
+              new RuntimePrecondition(
                   "REST_BINARY_RESULT_FIELD_CHANGES_OUTPUT_ROW_TYPE",
                   List.of("/result/name", "/result/binary", "/result/code",
                       "/result/response_time", "/result/response_header"),
