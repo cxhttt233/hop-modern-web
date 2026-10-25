@@ -179,7 +179,19 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "HTTP_RESULT_FIELD_NAMES_MIX_LITERAL_AND_RESOLVED_VARIABLES",
                   List.of("/result/name", "/result/code", "/result/response_time", "/result/response_header"),
-                  "HttpMeta.getFields() appends result.name as a literal STRING field without variable resolution, while result.code and result.response_time are variable-resolved INTEGER fields and result.response_header is a variable-resolved STRING field. The body, code and time raw names are checked for emptiness before variable resolution, so a non-empty code/time placeholder resolving to an empty string still adds an empty-named INTEGER output field. The response header is checked after variable resolution and is omitted when its resolved name is empty. A raw empty body/code/time name omits that column. Preserve the native order and distinct empty-name semantics when diagnosing downstream row metadata; this is not a save-time validator."));
+                  "HttpMeta.getFields() appends result.name as a literal STRING field without variable resolution, while result.code and result.response_time are variable-resolved INTEGER fields and result.response_header is a variable-resolved STRING field. The body, code and time raw names are checked for emptiness before variable resolution, so a non-empty code/time placeholder resolving to an empty string still adds an empty-named INTEGER output field. The response header is checked after variable resolution and is omitted when its resolved name is empty. A raw empty body/code/time name omits that column. Preserve the native order and distinct empty-name semantics when diagnosing downstream row metadata; this is not a save-time validator."),
+              new RuntimePrecondition(
+                  "HTTP_REPEATED_RESPONSE_HEADER_NAMES_SERIALIZE_AS_JSON_ARRAY",
+                  List.of("/result/response_header"),
+                  "Http.callHttpService() serializes response headers as JSON text into the "
+                      + "configured result.response_header STRING output column. The native "
+                      + "extractHeaderString() keeps a single header occurrence as a JSON "
+                      + "string, but turns exact duplicate header names into an ordered JSON "
+                      + "array of strings; a third occurrence appends to that array. Names "
+                      + "with different casing remain distinct JSON keys. Consumers must "
+                      + "not collapse repeated header values or infer that every header "
+                      + "value has the same JSON shape. This is a response-payload "
+                      + "compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           List.of(
               new RuntimePrecondition(
