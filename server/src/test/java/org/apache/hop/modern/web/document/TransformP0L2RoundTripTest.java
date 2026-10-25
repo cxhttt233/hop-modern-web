@@ -4145,7 +4145,7 @@ class TransformP0L2RoundTripTest {
     ClassLoader loader = original.getClass().getClassLoader();
     Class<?> headerType = loader.loadClass("org.apache.hc.core5.http.Header");
     Class<?> basicHeader = loader.loadClass("org.apache.hc.core5.http.message.BasicHeader");
-    var headerConstructor = basicHeader.getConstructor(String.class, String.class);
+    var headerConstructor = basicHeader.getConstructor(String.class, Object.class);
     Object headers = java.lang.reflect.Array.newInstance(headerType, 5);
     java.lang.reflect.Array.set(headers, 0,
         headerConstructor.newInstance("X-River", "黄河<&>"));
