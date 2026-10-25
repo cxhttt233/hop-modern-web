@@ -324,6 +324,18 @@ public final class AutomaticConfigDescriptor {
                       "/result/response_header"),
                   "Unlike HttpMeta, RestMeta.getFields() resolves Hop variables in all four result output names. It appends non-empty configured result.name (STRING or BINARY), result.code (INTEGER), and result.response_time (INTEGER) in that order, followed by a STRING response_header only when its resolved name is non-empty. For the first three names, the native empty check precedes variable resolution; the header empty check follows resolution. Preserve upstream fields and the native output order when diagnosing downstream row schemas. This is not a save-time validator."),
               new RuntimePrecondition(
+                  "REST_RESPONSE_CHARSET_HEADER_OVERRIDES_REQUEST_TYPE_UTF8_FALLBACK",
+                  List.of("/applicationType", "/result/name", "/result/binary"),
+                  "For textual REST results, native Rest.resolveCharset() chooses the response "
+                      + "Content-Type charset when it is valid (for example UTF-16LE), and "
+                      + "falls back to UTF-8 when the response type is absent, lacks a charset, "
+                      + "or is malformed. applicationType configures the request body type; "
+                      + "it must not be treated as the response character encoding. A binary "
+                      + "result preserves response bytes instead of decoding text. Preserve "
+                      + "the canonical STRING applicationType and BOOLEAN result.binary "
+                      + "configuration and diagnose downstream response decoding separately; "
+                      + "this is not a save-time validator or a claim of network execution."),
+              new RuntimePrecondition(
                   "REST_SPLIT_PATH_JSONPATH_OVERRIDES_REQUEST_TYPE_XPATH_REQUIRES_XML",
                   List.of("/applicationType", "/resultSplitPath", "/result/name"),
                   "For non-streaming REST response splitting, a resultSplitPath starting with $ "
