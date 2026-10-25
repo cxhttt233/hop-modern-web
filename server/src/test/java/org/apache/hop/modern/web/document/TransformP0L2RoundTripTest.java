@@ -4120,6 +4120,107 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REST_BASE_URL_JOIN_DISK_REOPEN=PASS");
   }
 
+  @Test
+  void httpRepeatedResponseHeadersUseJsonArraysAndHeaderConfigSurvivesRealHplEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Http");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "HTTP_REPEATED_RESPONSE_HEADER_NAMES_SERIALIZE_AS_JSON_ARRAY"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/result/response_header"), contract.keyListPointers());
+    assertEquals(Shape.OBJECT, property(descriptor, "result").shape());
+    assertEquals(Shape.STRING, property(descriptor, "result", "response_header").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Http");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/river?name=雪");
+
+    // Exercise the native HTTP response-header serializer without a network request.
+    // Keep HttpClient 5 classes reflective: they belong to the pinned P0 plugin runtime.
+    ClassLoader loader = original.getClass().getClassLoader();
+    Class<?> headerType = loader.loadClass("org.apache.hc.core5.http.Header");
+    Class<?> basicHeader = loader.loadClass("org.apache.hc.core5.http.message.BasicHeader");
+    var headerConstructor = basicHeader.getConstructor(String.class, String.class);
+    Object headers = java.lang.reflect.Array.newInstance(headerType, 5);
+    java.lang.reflect.Array.set(headers, 0,
+        headerConstructor.newInstance("X-River", "黄河<&>"));
+    java.lang.reflect.Array.set(headers, 1,
+        headerConstructor.newInstance("X-Single", "once"));
+    java.lang.reflect.Array.set(headers, 2,
+        headerConstructor.newInstance("X-River", "雪"));
+    java.lang.reflect.Array.set(headers, 3,
+        headerConstructor.newInstance("X-River", "third"));
+    java.lang.reflect.Array.set(headers, 4,
+        headerConstructor.newInstance("x-river", "lowercase"));
+    Class<?> httpRuntime = loader.loadClass("org.apache.hop.pipeline.transforms.http.Http");
+    var extract = httpRuntime.getDeclaredMethod("extractHeaderString", headers.getClass());
+    extract.setAccessible(true);
+    String payload = (String) extract.invoke(null, headers);
+    var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(payload);
+    assertTrue(json.path("X-River").isArray(),
+        "exact repeated header names must become a JSON array");
+    assertEquals(3, json.path("X-River").size());
+    assertEquals("黄河<&>", json.path("X-River").get(0).asText());
+    assertEquals("雪", json.path("X-River").get(1).asText());
+    assertEquals("third", json.path("X-River").get(2).asText());
+    assertEquals("once", json.path("X-Single").asText(),
+        "a single occurrence remains a JSON string");
+    assertEquals("lowercase", json.path("x-river").asText(),
+        "native serializer preserves exact header-name case");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("HTTP_HEADER_OUTPUT", "响应头<&雪>");
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("http-header-result-compat.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("http-header-result-compat");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Http", "http-header-node", original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("http-header-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("http-header-doc",
+        new PipelineConfigResource.ReadRequest("http-header-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertTrue(initial.config().at("/result/response_header").isTextual());
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    assertTrue(changed.path("result").isObject());
+    ((com.fasterxml.jackson.databind.node.ObjectNode) changed.path("result"))
+        .put("response_header", "${HTTP_HEADER_OUTPUT}");
+    var write = resource.write("http-header-doc",
+        new PipelineConfigResource.WriteRequest("http-header-node", changed));
+    assertEquals(200, write.getStatus(), "real Http nested result JSON edit must succeed");
+    var written = (PipelineConfigResource.ConfigResponse) write.getEntity();
+    assertEquals("${HTTP_HEADER_OUTPUT}",
+        written.config().at("/result/response_header").asText());
+
+    store.save(hpl, loaded);
+    var reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("http-header-node").getTransform();
+    var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertEquals("${HTTP_HEADER_OUTPUT}",
+        diskWire.at("/result/response_header").asText());
+    var output = new org.apache.hop.core.row.RowMeta();
+    output.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("上游字段"));
+    diskMeta.getFields(output, "http-header-node", null, null, variables, provider);
+    int headerIndex = output.indexOfValue("响应头<&雪>");
+    assertTrue(headerIndex >= 0, "response-header output field must resolve its variable");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        output.getValueMeta(headerIndex).getType());
+    System.out.println("PROD_P0_HTTP_DUPLICATE_HEADER_JSON_ARRAY_DISK_REOPEN=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
