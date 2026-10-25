@@ -2171,6 +2171,67 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void filterRowsConditionOperandsResetDescendingSortFlagsWithoutChangingOtherFields()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "FilterRows");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "FILTER_ROWS_CONDITION_FIELDS_RESET_DESCENDING_SORT_METADATA"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/compare/condition"), contract.keyListPointers());
+    assertEquals(Shape.OBJECT, property(descriptor, "compare", "condition").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "FilterRows");
+    assertNotNull(plugin, "production FilterRows plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var condition = new org.apache.hop.core.Condition(
+        "水位<&>", org.apache.hop.core.Condition.Function.LARGER, "阈值", null);
+    meta.getClass().getMethod("setCondition", org.apache.hop.core.Condition.class)
+        .invoke(meta, condition);
+
+    var row = new org.apache.hop.core.row.RowMeta();
+    var left = new org.apache.hop.core.row.value.ValueMetaNumber("水位<&>");
+    var right = new org.apache.hop.core.row.value.ValueMetaNumber("阈值");
+    var untouched = new org.apache.hop.core.row.value.ValueMetaString("未参与条件");
+    left.setSortedDescending(true);
+    right.setSortedDescending(true);
+    untouched.setSortedDescending(true);
+    left.setCaseInsensitive(true);
+    row.addValueMeta(left);
+    row.addValueMeta(right);
+    row.addValueMeta(untouched);
+
+    meta.getFields(row, "filter-metadata", null, null,
+        new org.apache.hop.core.variables.Variables(), new MemoryMetadataProvider());
+    assertEquals(3, row.size(), "FilterRows must not add or drop output fields");
+    assertEquals(List.of("水位<&>", "阈值", "未参与条件"),
+        row.getValueMetaList().stream().map(v -> v.getName()).toList());
+    assertSame(left, row.getValueMeta(0), "native getFields mutates existing metadata");
+    assertSame(right, row.getValueMeta(1));
+    assertSame(untouched, row.getValueMeta(2));
+    assertFalse(left.isSortedDescending(), "left operand must not retain descending sort");
+    assertFalse(right.isSortedDescending(), "right field operand must not retain descending sort");
+    assertTrue(untouched.isSortedDescending(), "unreferenced field must preserve its sort flag");
+    assertTrue(left.isCaseInsensitive(), "other metadata flags must remain unchanged");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER, left.getType());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING, untouched.getType());
+
+    meta.getClass().getMethod("setCondition", org.apache.hop.core.Condition.class)
+        .invoke(meta, new org.apache.hop.core.Condition());
+    var noCondition = new org.apache.hop.core.row.RowMeta();
+    var preserved = new org.apache.hop.core.row.value.ValueMetaString("阈值");
+    preserved.setSortedDescending(true);
+    noCondition.addValueMeta(preserved);
+    meta.getFields(noCondition, "filter-empty", null, null,
+        new org.apache.hop.core.variables.Variables(), new MemoryMetadataProvider());
+    assertTrue(preserved.isSortedDescending(),
+        "without condition operands getFields must not clear unrelated sort metadata");
+    System.out.println("PROD_P0_FILTERROWS_CONDITION_SORT_FLAG_NORMALIZATION=PASS");
+  }
+
+  @Test
   void mergeJoinInfoRowOutputRetainsOrderedTypesAndSuffixesDuplicateNamesWithoutSourceMutation()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
