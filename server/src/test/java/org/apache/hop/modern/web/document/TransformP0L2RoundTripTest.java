@@ -182,7 +182,7 @@ class TransformP0L2RoundTripTest {
             "CONCAT_FIELDS_TARGET_NAME_REQUIRED_LENGTH_WARNING",
             "CONCAT_FIELDS_SELECTED_SOURCE_FIELDS_REQUIRE_UPSTREAM_FIELDS",
             "CONCAT_FIELDS_REMOVE_SELECTED_FIELDS_CHANGES_OUTPUT_SCHEMA",
-            "CONCAT_FIELDS_LITERAL_TARGET_NAME_MAY_DUPLICATE_INPUT_COLUMN"),
+            "CONCAT_FIELDS_LITERAL_TARGET_NAME_AUTO_SUFFIXES_COLLISIONS"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     assertEquals(List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
         descriptor.runtimePreconditions().get(0).keyListPointers());
@@ -3332,13 +3332,13 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
-  void concatFieldsLiteralTargetNameCanDuplicateIncomingFieldAndPreservesConfiguredLength()
+  void concatFieldsLiteralTargetNameAutoSuffixesCollisionAndPreservesConfiguredLength()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "ConcatFields");
     var contract = descriptor.runtimePreconditions().stream()
         .filter(p -> p.code().equals(
-            "CONCAT_FIELDS_LITERAL_TARGET_NAME_MAY_DUPLICATE_INPUT_COLUMN"))
+            "CONCAT_FIELDS_LITERAL_TARGET_NAME_AUTO_SUFFIXES_COLLISIONS"))
         .findFirst().orElseThrow();
     assertEquals(List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
         contract.keyListPointers());
@@ -3364,9 +3364,9 @@ class TransformP0L2RoundTripTest {
     row.addValueMeta(existing);
 
     meta.getFields(row, "concat-compat", null, null, variables, new MemoryMetadataProvider());
-    assertEquals(List.of("来源<&>列", literal, literal),
+    assertEquals(List.of("来源<&>列", literal, literal + "_1"),
         row.getValueMetaList().stream().map(v -> v.getName()).toList(),
-        "Native getFields appends the literal target name without resolving or deduplicating it");
+        "Native getFields leaves the target name literal, while RowMeta suffixes collisions");
     assertEquals(12, row.getValueMeta(1).getLength(),
         "The existing same-named field must not be overwritten");
     assertEquals(47, row.getValueMeta(2).getLength(),
