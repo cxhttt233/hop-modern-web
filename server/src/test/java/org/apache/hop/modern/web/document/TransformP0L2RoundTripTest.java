@@ -3438,6 +3438,103 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_CONCATFIELDS_LITERAL_DUPLICATE_TARGET_METADATA=PASS");
   }
 
+  @Test
+  void groupByLineNumberLiteralNameAndCollisionSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "GroupBy");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/all_rows", "/add_linenr", "/linenr_fieldname"),
+        contract.keyListPointers());
+    assertTrue(contract.explanation().contains("literally"));
+    assertEquals(Shape.BOOLEAN, property(descriptor, "all_rows").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "add_linenr").shape());
+    assertEquals(Shape.STRING, property(descriptor, "linenr_fieldname").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(plugin, "production GroupBy plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("GROUP_LINE", "解析后的列");
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("groupby-line-number-literal.hpl");
+    org.apache.hop.pipeline.PipelineMeta pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("groupby-line-number-literal");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "GroupBy", "group-line-node", meta));
+    store.save(hpl, pipeline);
+    org.apache.hop.pipeline.PipelineMeta loaded = store.open(hpl);
+
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("group-line-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    jakarta.ws.rs.core.Response read = resource.read(
+        "group-line-doc", new PipelineConfigResource.ReadRequest("group-line-node"));
+    assertEquals(200, read.getStatus());
+    PipelineConfigResource.ConfigResponse initial =
+        (PipelineConfigResource.ConfigResponse) read.getEntity();
+    com.fasterxml.jackson.databind.node.ObjectNode changed =
+        ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("all_rows", true);
+    changed.put("add_linenr", true);
+    changed.put("linenr_fieldname", "${GROUP_LINE}");
+    jakarta.ws.rs.core.Response write = resource.write(
+        "group-line-doc",
+        new PipelineConfigResource.WriteRequest("group-line-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    org.apache.hop.pipeline.PipelineMeta reopened = store.open(hpl);
+    org.apache.hop.pipeline.transform.TransformMeta diskTransform =
+        reopened.findTransform("group-line-node");
+    assertNotNull(diskTransform);
+    com.fasterxml.jackson.databind.JsonNode disk =
+        org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+            diskTransform.getTransform(), provider);
+    assertTrue(disk.at("/all_rows").isBoolean());
+    assertTrue(disk.at("/all_rows").booleanValue());
+    assertTrue(disk.at("/add_linenr").isBoolean());
+    assertTrue(disk.at("/add_linenr").booleanValue());
+    assertEquals("${GROUP_LINE}", disk.at("/linenr_fieldname").asText());
+
+    ITransformMeta reopenedMeta = diskTransform.getTransform();
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("${GROUP_LINE}"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("普通<&>雪"));
+    reopenedMeta.getFields(row, "group-line-node", null, null, variables, provider);
+    assertEquals(List.of("${GROUP_LINE}", "普通<&>雪", "${GROUP_LINE}_1"),
+        row.getValueMetaList().stream().map(v -> v.getName()).toList(),
+        "The native line-number name is literal; RowMeta suffixes the collision");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        row.getValueMeta(2).getType());
+    assertEquals(org.apache.hop.core.row.IValueMeta.DEFAULT_INTEGER_LENGTH,
+        row.getValueMeta(2).getLength());
+    assertEquals(0, row.getValueMeta(2).getPrecision());
+    assertEquals("group-line-node", row.getValueMeta(2).getOrigin());
+
+    reopenedMeta.getClass().getMethod("setAddingLineNrInGroup", boolean.class)
+        .invoke(reopenedMeta, false);
+    var disabled = new org.apache.hop.core.row.RowMeta();
+    disabled.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("普通<&>雪"));
+    reopenedMeta.getFields(disabled, "group-line-node", null, null, variables, provider);
+    assertEquals(1, disabled.size(), "add_linenr=false must omit the line-number column");
+
+    reopenedMeta.getClass().getMethod("setAddingLineNrInGroup", boolean.class)
+        .invoke(reopenedMeta, true);
+    reopenedMeta.getClass().getMethod("setLineNrInGroupField", String.class)
+        .invoke(reopenedMeta, "");
+    var emptyName = new org.apache.hop.core.row.RowMeta();
+    emptyName.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("普通<&>雪"));
+    reopenedMeta.getFields(emptyName, "group-line-node", null, null, variables, provider);
+    assertEquals(1, emptyName.size(), "An empty configured name must omit the line-number column");
+    System.out.println("PROD_P0_GROUPBY_LITERAL_LINE_NUMBER_DISK_REOPEN=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
