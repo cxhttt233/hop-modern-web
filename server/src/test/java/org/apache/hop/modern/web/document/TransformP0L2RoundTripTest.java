@@ -181,7 +181,8 @@ class TransformP0L2RoundTripTest {
     assertEquals(List.of(
             "CONCAT_FIELDS_TARGET_NAME_REQUIRED_LENGTH_WARNING",
             "CONCAT_FIELDS_SELECTED_SOURCE_FIELDS_REQUIRE_UPSTREAM_FIELDS",
-            "CONCAT_FIELDS_REMOVE_SELECTED_FIELDS_CHANGES_OUTPUT_SCHEMA"),
+            "CONCAT_FIELDS_REMOVE_SELECTED_FIELDS_CHANGES_OUTPUT_SCHEMA",
+            "CONCAT_FIELDS_LITERAL_TARGET_NAME_MAY_DUPLICATE_INPUT_COLUMN"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     assertEquals(List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
         descriptor.runtimePreconditions().get(0).keyListPointers());
@@ -3328,6 +3329,52 @@ class TransformP0L2RoundTripTest {
     assertThrows(org.apache.hop.core.exception.HopTransformException.class,
         () -> meta.getFields(invalid, "javascript", null, null, variables, provider));
     System.out.println("PROD_P0_SCRIPTVALUE_REPLACE_NAME_RENAME_OUTPUT_SCHEMA=PASS");
+  }
+
+  @Test
+  void concatFieldsLiteralTargetNameCanDuplicateIncomingFieldAndPreservesConfiguredLength()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "ConcatFields");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "CONCAT_FIELDS_LITERAL_TARGET_NAME_MAY_DUPLICATE_INPUT_COLUMN"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
+        contract.keyListPointers());
+    assertEquals(Shape.STRING, property(descriptor, "ConcatFields", "targetFieldName").shape());
+    assertEquals(Shape.NUMBER, property(descriptor, "ConcatFields", "targetFieldLength").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ConcatFields");
+    assertNotNull(plugin);
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Object extra = meta.getClass().getMethod("getExtraFields").invoke(meta);
+    String literal = "${CONCAT_TARGET}";
+    extra.getClass().getMethod("setTargetFieldName", String.class).invoke(extra, literal);
+    extra.getClass().getMethod("setTargetFieldLength", int.class).invoke(extra, 47);
+    extra.getClass().getMethod("setRemoveSelectedFields", boolean.class).invoke(extra, false);
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("CONCAT_TARGET", "已解析的目标<&>");
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("来源<&>列"));
+    var existing = new org.apache.hop.core.row.value.ValueMetaString(literal);
+    existing.setLength(12);
+    row.addValueMeta(existing);
+
+    meta.getFields(row, "concat-compat", null, null, variables, new MemoryMetadataProvider());
+    assertEquals(List.of("来源<&>列", literal, literal),
+        row.getValueMetaList().stream().map(v -> v.getName()).toList(),
+        "Native getFields appends the literal target name without resolving or deduplicating it");
+    assertEquals(12, row.getValueMeta(1).getLength(),
+        "The existing same-named field must not be overwritten");
+    assertEquals(47, row.getValueMeta(2).getLength(),
+        "The appended STRING column must use configured targetFieldLength");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        row.getValueMeta(2).getType());
+    assertEquals("concat-compat", row.getValueMeta(2).getOrigin());
+    System.out.println("PROD_P0_CONCATFIELDS_LITERAL_DUPLICATE_TARGET_METADATA=PASS");
   }
 
   private static Object newScriptField(Class<?> type, String name, String rename,
