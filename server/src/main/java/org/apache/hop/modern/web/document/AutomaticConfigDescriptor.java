@@ -153,6 +153,10 @@ public final class AutomaticConfigDescriptor {
                   List.of("/fields/field"),
                   "Each fields.field[*].name must exist in incoming row metadata. Missing selected fields are errors; an empty selection is a warning, not an unknown-field error."),
               new RuntimePrecondition(
+                  "CHECKSUM_RESULT_NAME_COLLISION_AND_RESOLVED_EMPTY",
+                  List.of("/resultfieldName"),
+                  "CheckSumMeta.getFields() tests the configured resultfieldName for emptiness before resolving Hop variables. A non-empty expression that resolves to an empty string still appends a field with an empty name; an empty configured name appends no field. The resolved name is added through RowMeta.addValueMeta(), which preserves upstream columns and suffixes collisions (including case-insensitive collisions) with the next available numeric suffix. Diagnose the actual downstream output name after variable resolution and RowMeta collision handling; do not reject draft saves."),
+              new RuntimePrecondition(
                   "CHECKSUM_RESULT_ROW_TYPE_DEPENDS_ON_ALGORITHM_AND_ENCODING",
                   List.of("/checksumtype", "/resultType", "/resultfieldName"),
                   "CheckSumMeta.getFields() emits INTEGER for CRC32 and ADLER32 regardless of resultType. Other algorithms emit BINARY only when resultType is BINARY, otherwise STRING (including HEXADECIMAL). Binary MD5 has length 16. An empty resultfieldName adds no output column, and non-empty names resolve variables. Diagnose downstream row metadata from both checksumtype and resultType; this is not a save-time validator."));
