@@ -2595,6 +2595,91 @@ class TransformP0L2RoundTripTest {
 
 
   @Test
+  void checkSumResultNameCollisionAndResolvedEmptySurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "CheckSum");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "CHECKSUM_RESULT_NAME_COLLISION_AND_RESOLVED_EMPTY"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/resultfieldName"), contract.keyListPointers());
+    assertEquals(Shape.STRING, property(descriptor, "resultfieldName").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "CheckSum");
+    assertNotNull(plugin, "production CheckSum plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("CHECKSUM_TARGET", "摘要<&>雪");
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("checksum-result-name.hpl");
+    org.apache.hop.pipeline.PipelineMeta pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("checksum-result-name");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "CheckSum", "checksum-node", meta));
+    store.save(hpl, pipeline);
+    org.apache.hop.pipeline.PipelineMeta loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("checksum-name-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    jakarta.ws.rs.core.Response read = resource.read(
+        "checksum-name-doc", new PipelineConfigResource.ReadRequest("checksum-node"));
+    assertEquals(200, read.getStatus());
+    PipelineConfigResource.ConfigResponse initial =
+        (PipelineConfigResource.ConfigResponse) read.getEntity();
+    com.fasterxml.jackson.databind.node.ObjectNode changed =
+        ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("resultfieldName", "${CHECKSUM_TARGET}");
+    changed.put("checksumtype", "CRC32");
+    jakarta.ws.rs.core.Response write = resource.write(
+        "checksum-name-doc", new PipelineConfigResource.WriteRequest("checksum-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    org.apache.hop.pipeline.PipelineMeta disk = store.open(hpl);
+    org.apache.hop.pipeline.transform.TransformMeta transform =
+        disk.findTransform("checksum-node");
+    assertNotNull(transform);
+    ITransformMeta nativeMeta = transform.getTransform();
+    com.fasterxml.jackson.databind.JsonNode wire =
+        org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(nativeMeta, provider);
+    assertEquals("${CHECKSUM_TARGET}", wire.at("/resultfieldName").asText());
+    assertEquals("CRC32", wire.at("/checksumtype").asText());
+
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("摘要<&>雪"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("摘要<&>雪_1"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("保留"));
+    nativeMeta.getFields(row, "checksum-node", new org.apache.hop.core.row.IRowMeta[0],
+        null, variables, provider);
+    assertEquals(List.of("摘要<&>雪", "摘要<&>雪_1", "保留", "摘要<&>雪_2"),
+        row.getValueMetaList().stream().map(v -> v.getName()).toList());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER, row.getValueMeta(3).getType());
+    assertEquals("checksum-node", row.getValueMeta(3).getOrigin());
+
+    variables.setVariable("CHECKSUM_TARGET", "");
+    var resolvedEmpty = new org.apache.hop.core.row.RowMeta();
+    resolvedEmpty.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("保留"));
+    nativeMeta.getFields(resolvedEmpty, "checksum-node",
+        new org.apache.hop.core.row.IRowMeta[0], null, variables, provider);
+    assertEquals(2, resolvedEmpty.size(),
+        "nonempty configured expression is checked before variable resolution");
+    assertEquals("", resolvedEmpty.getValueMeta(1).getName());
+
+    nativeMeta.getClass().getMethod("setResultFieldName", String.class)
+        .invoke(nativeMeta, "");
+    var configuredEmpty = new org.apache.hop.core.row.RowMeta();
+    nativeMeta.getFields(configuredEmpty, "checksum-node",
+        new org.apache.hop.core.row.IRowMeta[0], null, variables, provider);
+    assertEquals(0, configuredEmpty.size(),
+        "empty configured name must not append a result field");
+    System.out.println("PROD_P0_CHECKSUM_RESOLVED_NAME_COLLISION_DISK_REOPEN=PASS");
+  }
+
+  @Test
   void concatFieldsNestedObjectAndNumericWireSurviveRealHplDiskReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
