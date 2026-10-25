@@ -316,6 +316,67 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_HTTP_RESULT_FIELD_VARIABLE_RESOLUTION=PASS");
   }
 
+  @Test
+  void httpResultFieldsDistinguishRawEmptyNamesFromResolvedEmptyVariables()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "Http");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "HTTP_RESULT_FIELD_NAMES_MIX_LITERAL_AND_RESOLVED_VARIABLES"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/result/name", "/result/code", "/result/response_time",
+        "/result/response_header"), contract.keyListPointers());
+    assertTrue(contract.explanation().contains("before variable resolution"));
+    assertTrue(contract.explanation().contains("after variable resolution"));
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "Http");
+    assertNotNull(plugin, "production HTTP plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Object result = meta.getClass().getMethod("getResultFields").invoke(meta);
+    Class<?> resultType = result.getClass();
+    resultType.getMethod("setFieldName", String.class).invoke(result, "${HTTP_EMPTY}");
+    resultType.getMethod("setResultCodeFieldName", String.class)
+        .invoke(result, "${HTTP_EMPTY}");
+    resultType.getMethod("setResponseTimeFieldName", String.class)
+        .invoke(result, "${HTTP_TIME}");
+    resultType.getMethod("setResponseHeaderFieldName", String.class)
+        .invoke(result, "${HTTP_EMPTY}");
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("HTTP_EMPTY", "");
+    variables.setVariable("HTTP_TIME", "耗时<&>雪");
+    var provider = new MemoryMetadataProvider();
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("上游字段"));
+    meta.getFields(row, "http-empty", null, null, variables, provider);
+
+    assertEquals(4, row.size(), "Resolved-empty header is omitted, but status is not");
+    assertEquals("上游字段", row.getValueMeta(0).getName());
+    assertEquals("${HTTP_EMPTY}", row.getValueMeta(1).getName(),
+        "Body output name remains literal even when the variable resolves empty");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        row.getValueMeta(1).getType());
+    assertEquals("", row.getValueMeta(2).getName(),
+        "Status raw non-empty placeholder is checked before variable resolution");
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        row.getValueMeta(2).getType());
+    assertEquals("耗时<&>雪", row.getValueMeta(3).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        row.getValueMeta(3).getType());
+
+    resultType.getMethod("setFieldName", String.class).invoke(result, "");
+    resultType.getMethod("setResultCodeFieldName", String.class).invoke(result, "");
+    resultType.getMethod("setResponseTimeFieldName", String.class).invoke(result, "");
+    var noResults = new org.apache.hop.core.row.RowMeta();
+    noResults.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("上游字段"));
+    meta.getFields(noResults, "http-empty", null, null, variables, provider);
+    assertEquals(1, noResults.size(),
+        "Raw-empty body/code/time and resolved-empty header add no columns");
+    System.out.println("PROD_P0_HTTP_RAW_VS_RESOLVED_EMPTY_RESULT_NAMES=PASS");
+  }
+
   @Test void httpDynamicUrlFieldNativeCheckFalsePositiveIsDocumentedByProductionDescriptor()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
