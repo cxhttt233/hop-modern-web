@@ -314,7 +314,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "STRING_CUT_ALIAS_APPENDS_VARIABLE_RESOLVED_FIXED_LENGTH_STRING",
                   List.of("/fields/field"),
-                  "For each fields.field[*], StringCutMeta.getFields() preserves incoming columns and appends a STRING field of length 100 only when out_stream_name is non-empty. The appended name resolves Hop variables; a blank alias updates the original field in place without appending a column. Multiple rules can reference the same input field, and their non-empty output aliases append in rule order. Diagnose downstream field names, order, and length without blocking draft saves."));
+                  "For each fields.field[*], StringCutMeta.getFields() preserves incoming columns and appends a STRING field of length 100 only when out_stream_name is non-empty. The appended name resolves Hop variables; a blank alias updates the original field in place without appending a column. Multiple rules can reference the same input field, and their non-empty output aliases append in rule order. Diagnose downstream field names, order, and length without blocking draft saves."),
+              new RuntimePrecondition(
+                  "STRING_CUT_ALIAS_FRESH_METADATA_AND_INPLACE_STORAGE_NORMALIZATION",
+                  List.of("/fields/field"),
+                  "StringCutMeta.getFields() creates a fresh ValueMetaString for each non-empty fields.field[*].out_stream_name, with resolved alias, length 100, default string encoding and the StringCut transform origin. Unlike ReplaceString, it does not clone the input field encoding or require the source to exist at this metadata-projection stage; native check separately validates source fields. With an empty alias, getFields() normalizes the matching incoming field to STORAGE_TYPE_NORMAL without adding a column, and silently skips missing sources; unrelated columns retain their storage type. Derive downstream encoding and storage from these distinct branches; this is a diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta" ->
           List.of(
               new RuntimePrecondition(
