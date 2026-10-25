@@ -4299,6 +4299,104 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void restStreamingSplitPathRejectsBeforeHttpAfterRealHplConfigEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("REST_STREAMING_SPLIT_PATH_REJECTED_BEFORE_HTTP"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/streamingEnabled", "/resultSplitPath", "/result/binary",
+        "/paginationEnabled"), contract.keyListPointers());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "streamingEnabled").shape());
+    assertEquals(Shape.STRING, property(descriptor, "resultSplitPath").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "paginationEnabled").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "result", "binary").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/river?station=雪");
+    Object result = original.getClass().getMethod("getResultField").invoke(original);
+    result.getClass().getMethod("setFieldName", String.class)
+        .invoke(result, "响应<&雪>");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("rest-streaming-split-path-guard.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-streaming-split-path-guard");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-stream-node", original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("rest-stream-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("rest-stream-doc",
+        new PipelineConfigResource.ReadRequest("rest-stream-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertTrue(initial.config().at("/streamingEnabled").isBoolean());
+    assertFalse(initial.config().at("/streamingEnabled").booleanValue());
+
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("streamingEnabled", true);
+    changed.put("resultSplitPath", "$.measurements[*]");
+    changed.put("paginationEnabled", false);
+    ((com.fasterxml.jackson.databind.node.ObjectNode) changed.path("result"))
+        .put("binary", false);
+    var write = resource.write("rest-stream-doc",
+        new PipelineConfigResource.WriteRequest("rest-stream-node", changed));
+    assertEquals(200, write.getStatus(),
+        "streaming/split-path conflict must remain an editable draft");
+    var written = (PipelineConfigResource.ConfigResponse) write.getEntity();
+    assertTrue(written.config().at("/streamingEnabled").booleanValue());
+    assertEquals("$.measurements[*]", written.config().at("/resultSplitPath").asText());
+
+    store.save(hpl, loaded);
+    var reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("rest-stream-node").getTransform();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertTrue(wire.at("/streamingEnabled").isBoolean());
+    assertTrue(wire.at("/streamingEnabled").booleanValue());
+    assertEquals("$.measurements[*]", wire.at("/resultSplitPath").asText());
+    assertFalse(wire.at("/paginationEnabled").booleanValue());
+    assertFalse(wire.at("/result/binary").booleanValue());
+    assertEquals("响应<&雪>", wire.at("/result/name").asText());
+
+    ClassLoader loader = diskMeta.getClass().getClassLoader();
+    Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+    Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+    var ctor = runtimeType.getConstructor(
+        org.apache.hop.pipeline.transform.TransformMeta.class,
+        diskMeta.getClass(), dataType, int.class,
+        org.apache.hop.pipeline.PipelineMeta.class,
+        org.apache.hop.pipeline.Pipeline.class);
+    Object nativeRest = ctor.newInstance(
+        reopened.findTransform("rest-stream-node"), diskMeta,
+        dataType.getConstructor().newInstance(), 0, reopened,
+        org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+    runtimeType.getMethod("setMetadataProvider",
+        org.apache.hop.metadata.api.IHopMetadataProvider.class)
+        .invoke(nativeRest, provider);
+    assertTrue((Boolean) runtimeType.getMethod("init").invoke(nativeRest),
+        "native init accepts the persisted editable draft before processing rows");
+
+    var thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,
+        () -> runtimeType.getMethod("processRow").invoke(nativeRest));
+    assertTrue(thrown.getCause() instanceof org.apache.hop.core.exception.HopException);
+    assertTrue(thrown.getCause().getMessage().contains("result split path"),
+        "native first-row guard must reject streaming plus a complete-document split path");
+    System.out.println("PROD_P0_REST_STREAMING_SPLIT_PATH_PRE_HTTP_DISK_REOPEN=PASS");
+  }
+
+  @Test
   void restPaginationRejectsBinaryResultAtNativeInitAfterRealHplConfigEdit(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
