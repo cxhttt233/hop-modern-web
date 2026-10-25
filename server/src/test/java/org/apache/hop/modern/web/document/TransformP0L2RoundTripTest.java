@@ -4299,6 +4299,114 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void restSplitPathUsesJsonPathForFormRequestsAndXPathForXmlAfterRealHplEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "REST_SPLIT_PATH_JSONPATH_OVERRIDES_REQUEST_TYPE_XPATH_REQUIRES_XML"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/applicationType", "/resultSplitPath", "/result/name"),
+        contract.keyListPointers());
+    assertEquals(Shape.STRING, property(descriptor, "applicationType").shape());
+    assertEquals(Shape.STRING, property(descriptor, "resultSplitPath").shape());
+    assertEquals(Shape.STRING, property(descriptor, "result", "name").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/split?station=雪");
+    Object result = original.getClass().getMethod("getResultField").invoke(original);
+    result.getClass().getMethod("setFieldName", String.class)
+        .invoke(result, "响应<&雪>");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("rest-split-json-xpath.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-split-json-xpath");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-split-node", original));
+    store.save(hpl, pipeline);
+
+    String[] types = {"FORM URLENCODED", "XML", "TEXT PLAIN"};
+    String[] paths = {"$.items[*]", "/root/item", "/root/item"};
+    String json = "{\\"items\\":[{\\"name\\":\\"黄河<&>\\"},{\\"name\\":\\"雪\\"}]}";
+    String xml = "<root><item>黄河&lt;&amp;&gt;</item><item>雪</item></root>";
+    String[] bodies = {json, xml, xml};
+    for (int index = 0; index < types.length; index++) {
+      var loaded = store.open(hpl);
+      PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("rest-split-doc", hpl, loaded));
+      PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("rest-split-doc",
+          new PipelineConfigResource.ReadRequest("rest-split-node"));
+      assertEquals(200, read.getStatus());
+      var changed = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      changed.put("applicationType", types[index]);
+      changed.put("resultSplitPath", paths[index]);
+      var write = resource.write("rest-split-doc",
+          new PipelineConfigResource.WriteRequest("rest-split-node", changed));
+      assertEquals(200, write.getStatus(), "split-path drafts remain editable");
+      store.save(hpl, loaded);
+
+      var reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform("rest-split-node").getTransform();
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertEquals(types[index], wire.at("/applicationType").asText());
+      assertEquals(paths[index], wire.at("/resultSplitPath").asText());
+      assertEquals("响应<&雪>", wire.at("/result/name").asText());
+      assertTrue(wire.at("/resultSplitPath").isTextual());
+
+      ClassLoader loader = diskMeta.getClass().getClassLoader();
+      Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+      var ctor = runtimeType.getConstructor(
+          org.apache.hop.pipeline.transform.TransformMeta.class,
+          diskMeta.getClass(), dataType, int.class,
+          org.apache.hop.pipeline.PipelineMeta.class,
+          org.apache.hop.pipeline.Pipeline.class);
+      Object nativeRest = ctor.newInstance(
+          reopened.findTransform("rest-split-node"), diskMeta,
+          dataType.getConstructor().newInstance(), 0, reopened,
+          org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+      runtimeType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class)
+          .invoke(nativeRest, provider);
+      assertTrue((Boolean) runtimeType.getMethod("init").invoke(nativeRest));
+      var split = runtimeType.getDeclaredMethod("splitResultItems", String.class, String.class);
+      split.setAccessible(true);
+
+      if (index == 2) {
+        var thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,
+            () -> split.invoke(nativeRest, bodies[2], paths[2]));
+        assertTrue(thrown.getCause() instanceof org.apache.hop.core.exception.HopException);
+        assertTrue(thrown.getCause().getMessage().contains("JsonPath (starting with $)"),
+            "plain-text request type plus XPath must fail when splitting a response");
+      } else {
+        @SuppressWarnings("unchecked")
+        List<String> pieces = (List<String>) split.invoke(nativeRest, bodies[index], paths[index]);
+        assertEquals(2, pieces.size(), "ordered split fragments survive native parsing");
+        if (index == 0) {
+          var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+          assertEquals("黄河<&>", mapper.readTree(pieces.get(0)).path("name").asText());
+          assertEquals("雪", mapper.readTree(pieces.get(1)).path("name").asText());
+        } else {
+          assertTrue(pieces.get(0).contains("黄河<&>"));
+          assertTrue(pieces.get(1).contains("雪"));
+        }
+      }
+    }
+    System.out.println("PROD_P0_REST_SPLIT_JSONPATH_XPATH_DISK_REOPEN=PASS");
+  }
+
+  @Test
   void restStreamingSplitPathRejectsBeforeHttpAfterRealHplConfigEdit(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
