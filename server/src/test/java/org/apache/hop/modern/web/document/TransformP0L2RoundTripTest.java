@@ -1133,6 +1133,79 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_STRINGCUT_ALIAS_OUTPUT_SCHEMA=PASS");
   }
 
+  @Test
+  void stringCutFreshAliasMetadataDoesNotInheritSourceEncodingAndInPlaceNormalizesStorage()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "StringCut");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "STRING_CUT_ALIAS_FRESH_METADATA_AND_INPLACE_STORAGE_NORMALIZATION"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+    assertEquals(Shape.STRING, property(descriptor, "field", "in_stream_name").shape());
+    assertEquals(Shape.STRING, property(descriptor, "field", "out_stream_name").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "StringCut");
+    assertNotNull(plugin, "production StringCut plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> item = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.stringcut.StringCutField");
+    Object append = item.getConstructor().newInstance();
+    item.getMethod("setFieldInStream", String.class).invoke(append, "编码源");
+    item.getMethod("setFieldOutStream", String.class).invoke(append, "${CUT_ALIAS}");
+    Object inPlace = item.getConstructor().newInstance();
+    item.getMethod("setFieldInStream", String.class).invoke(inPlace, "原地截取");
+    item.getMethod("setFieldOutStream", String.class).invoke(inPlace, "");
+    var setRules = meta.getClass().getMethod("setFields", List.class);
+    setRules.invoke(meta, List.of(append, inPlace));
+
+    var source = new org.apache.hop.core.row.value.ValueMetaString("编码源");
+    source.setStringEncoding("UTF-16LE");
+    var changed = new org.apache.hop.core.row.value.ValueMetaString("原地截取");
+    changed.setStorageType(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_BINARY_STRING);
+    var untouched = new org.apache.hop.core.row.value.ValueMetaString("旁路字段");
+    untouched.setStorageType(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_BINARY_STRING);
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(source);
+    row.addValueMeta(changed);
+    row.addValueMeta(untouched);
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("CUT_ALIAS", "截取<&黄河>");
+    meta.getFields(row, "string-cut-metadata", null, null,
+        variables, new MemoryMetadataProvider());
+    assertEquals(4, row.size());
+    assertEquals(List.of("编码源", "原地截取", "旁路字段", "截取<&黄河>"),
+        row.getValueMetaList().stream().map(v -> v.getName()).toList());
+    var output = row.getValueMeta(3);
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING, output.getType());
+    assertEquals(100, output.getLength());
+    assertEquals("string-cut-metadata", output.getOrigin());
+    assertEquals(new org.apache.hop.core.row.value.ValueMetaString("fresh").getStringEncoding(),
+        output.getStringEncoding(), "alias uses fresh string metadata, not the source encoding");
+    assertNotEquals("UTF-16LE", output.getStringEncoding());
+    assertEquals("UTF-16LE", row.getValueMeta(0).getStringEncoding());
+    assertEquals(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_NORMAL,
+        row.getValueMeta(1).getStorageType(), "in-place cut normalizes storage");
+    assertEquals(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_BINARY_STRING,
+        row.getValueMeta(2).getStorageType(), "unrelated storage remains untouched");
+
+    Object missing = item.getConstructor().newInstance();
+    item.getMethod("setFieldInStream", String.class).invoke(missing, "不存在的源");
+    item.getMethod("setFieldOutStream", String.class).invoke(missing, "新字段");
+    setRules.invoke(meta, List.of(missing));
+    var missingRow = new org.apache.hop.core.row.RowMeta();
+    missingRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("原字段"));
+    meta.getFields(missingRow, "string-cut-metadata", null, null,
+        variables, new MemoryMetadataProvider());
+    assertEquals(List.of("原字段", "新字段"),
+        missingRow.getValueMetaList().stream().map(v -> v.getName()).toList(),
+        "native getFields still declares alias even when native check would reject missing source");
+    System.out.println("PROD_P0_STRINGCUT_FRESH_ALIAS_ENCODING_INPLACE_STORAGE=PASS");
+  }
+
   @Test void replaceStringNativeSourceFieldPreconditions() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "ReplaceString");
