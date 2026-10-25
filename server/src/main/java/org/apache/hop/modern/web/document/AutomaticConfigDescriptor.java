@@ -264,6 +264,20 @@ public final class AutomaticConfigDescriptor {
                   List.of("/dynamicMethod", "/methodFieldName", "/method"),
                   "When dynamicMethod is true, methodFieldName must be non-empty and resolve to an incoming row field. The native RestMeta.check() incorrectly reports ERROR even when the field name is present (MethodFieldOk); this is a native-check false positive, not a reason to reject an otherwise valid dynamic-method configuration. Runtime also validates each incoming HTTP method token. When dynamicMethod is false, method must be a valid non-empty HTTP method token."),
               new RuntimePrecondition(
+                  "REST_CUSTOM_METHOD_TOKENS_PRESERVE_CASE_AND_BODY_RULES",
+                  List.of("/method", "/dynamicMethod", "/methodFieldName"),
+                  "RestMeta.normalizeMethod() trims surrounding whitespace and uppercases only "
+                      + "the seven well-known verbs GET, POST, PUT, DELETE, HEAD, OPTIONS and PATCH. "
+                      + "A valid custom HTTP method such as pUrGe or M-SEARCH retains its original "
+                      + "case, since HTTP method tokens are case-sensitive. RestMeta.isValidMethodToken() "
+                      + "accepts RFC 9110 token characters and rejects spaces, CR/LF and empty strings. "
+                      + "After normalization, GET/HEAD/OPTIONS have no request body; HEAD/OPTIONS "
+                      + "have no query or matrix parameters, while custom verbs may use both. "
+                      + "The method field is STRING, not a closed ENUM: preserve custom tokens "
+                      + "through JSON config edits and Hop XML persistence. For dynamicMethod=true, "
+                      + "methodFieldName identifies the incoming row field; diagnose runtime tokens "
+                      + "separately without rejecting draft saves."),
+              new RuntimePrecondition(
                   "REST_BINARY_RESULT_FIELD_CHANGES_OUTPUT_ROW_TYPE",
                   List.of("/result/name", "/result/binary", "/result/code",
                       "/result/response_time", "/result/response_header"),
