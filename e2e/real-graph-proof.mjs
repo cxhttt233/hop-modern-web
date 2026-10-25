@@ -135,7 +135,7 @@ try {
   // Switching back must recover the original disk graph, not in-memory state.
   await page.getByRole("button", { name: "Choose pipeline" }).click();
   const recent = page.getByRole("group", { name: "最近打开的流程" });
-  const recentChoices = recent.getByRole("button");
+  const recentChoices = recent.getByRole("button", { name: /^填入最近流程：/ });
   if (await recentChoices.count() !== 2) {
     throw new Error("Recent real pipelines must contain two distinct successful opens");
   }
@@ -279,7 +279,7 @@ try {
   const cappedRecent = page.getByRole("group", { name: "最近打开的流程" });
   const expectedRecent = [extraPaths[1], extraPaths[0], unicodePath, pipelinePath];
   await cappedRecent.getByRole("button", { name: `填入最近流程：${extraPaths[1]}` }).waitFor({ state: "visible" });
-  const actualRecent = await cappedRecent.getByRole("button").evaluateAll((buttons) =>
+  const actualRecent = await cappedRecent.getByRole("button", { name: /^填入最近流程：/ }).evaluateAll((buttons) =>
     buttons.map((button) => button.getAttribute("aria-label")));
   if (JSON.stringify(actualRecent) !== JSON.stringify(expectedRecent.map((path) => `填入最近流程：${path}`)) ||
       actualRecent.some((name) => name?.includes(alternatePath))) {
@@ -318,7 +318,7 @@ try {
   }
   await page.getByRole("button", { name: "Choose pipeline" }).click();
   const duplicateRecent = page.getByRole("group", { name: "最近打开的流程" });
-  const duplicateLabels = await duplicateRecent.getByRole("button").evaluateAll((buttons) =>
+  const duplicateLabels = await duplicateRecent.getByRole("button", { name: /^填入最近流程：/ }).evaluateAll((buttons) =>
     buttons.map((button) => ({ name: button.getAttribute("aria-label"), text: button.textContent?.trim() })));
   if (duplicateLabels[0]?.name !== `填入最近流程：${duplicatePaths[1]}` ||
       duplicateLabels[1]?.name !== `填入最近流程：${duplicatePaths[0]}` ||
@@ -344,6 +344,23 @@ try {
     throw new Error("Duplicate-basename shortcut did not explicitly reopen the chosen real .hpl");
   }
   console.log("Duplicate-basename recent-file proof passed: distinct visible path suffixes, explicit real reopen.");
+
+  // Clearing session-only history is an explicit UI action: it must not close,
+  // switch, save or reload the current authoritative Hop graph.
+  const beforeClear = requests.filter((url) => url.includes("/api/pipelines/open")).length;
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  const activePathBeforeClear = await page.getByLabel("Server-visible pipeline path").inputValue();
+  await page.getByRole("button", { name: "清空最近打开记录" }).click();
+  if (await page.getByRole("group", { name: "最近打开的流程" }).count() !== 0 ||
+      await page.getByLabel("Server-visible pipeline path").inputValue() !== activePathBeforeClear ||
+      requests.filter((url) => url.includes("/api/pipelines/open")).length !== beforeClear ||
+      await page.locator(".react-flow__node").count() !== selectedGraph.nodes.length ||
+      await page.locator(".react-flow__edge").count() !== selectedGraph.edges.length) {
+    throw new Error("Clearing recent history must not alter the current real Hop document or issue backend requests");
+  }
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
+  console.log("Recent-file clear proof passed: session shortcuts removed without changing real Hop graph or network requests.");
 
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
