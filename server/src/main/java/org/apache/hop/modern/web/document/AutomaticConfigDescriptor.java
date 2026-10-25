@@ -335,6 +335,17 @@ public final class AutomaticConfigDescriptor {
                       + "execution without silently changing either persisted setting or "
                       + "rejecting an editable draft save."),
               new RuntimePrecondition(
+                  "REST_PAGINATION_WITHOUT_PAGING_CONNECTION_FALLS_BACK",
+                  List.of("/paginationEnabled", "/connection_name"),
+                  "The transform-level paginationEnabled flag alone does not activate paging. "
+                      + "Native Rest.supportsPaging() also requires a loaded REST connection "
+                      + "whose pagination type is non-null and not NONE. With no connection, "
+                      + "Rest.processRow() uses the legacy single-request path even when "
+                      + "paginationEnabled=true, emitting only a detailed diagnostic. "
+                      + "Keep the editable draft intact but surface the missing connection "
+                      + "dependency before users expect multiple pages; this is not a "
+                      + "save-time rejection or a claim that network paging was tested."),
+              new RuntimePrecondition(
                   "REST_BASIC_AUTH_PREEMPTIVE_FLAG_IS_INVERTED",
                   List.of("/non_preemptive_basic_auth"),
                   "RestMeta stores non_preemptive_basic_auth as the BOOLEAN inverse of isPreemptive(): false (the default) sends Basic credentials on the first request, while true waits for a 401 challenge. The legacy XML preemptive key was removed because it never affected runtime behavior; an old HPL lacking non_preemptive_basic_auth must retain the default preemptive behavior. Preserve this exact wire boolean through config JSON editing and Hop XML disk reopen; do not reverse the UI label into the persisted value or expose password material. This is a compatibility diagnostic, not a save-time validator."));
