@@ -1312,6 +1312,7 @@ class TransformP0L2RoundTripTest {
     assertEquals(Shape.STRING, property(descriptor, "resultfieldName").shape());
     assertEquals(List.of("CHECKSUM_RESULT_FIELD_REQUIRED",
             "CHECKSUM_SELECTED_FIELDS_REQUIRE_UPSTREAM_FIELDS",
+            "CHECKSUM_RESULT_NAME_COLLISION_AND_RESOLVED_EMPTY",
             "CHECKSUM_RESULT_ROW_TYPE_DEPENDS_ON_ALGORITHM_AND_ENCODING"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     assertEquals(List.of("/resultfieldName"),
