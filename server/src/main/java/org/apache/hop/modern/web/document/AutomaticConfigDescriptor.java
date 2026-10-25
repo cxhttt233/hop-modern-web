@@ -350,7 +350,12 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "TABLE_OUTPUT_RETURN_KEYS_REQUIRES_RETURN_FIELD_FOR_ROW_SCHEMA",
                   List.of("/return_keys", "/return_field"),
-                  "When return_keys is true, return_field must resolve to a non-empty output field name. Native TableOutputMeta.getFields() adds an INTEGER field only when both conditions hold, but TableOutput may append the generated key to successful output rows whenever return_keys is true. An empty return_field therefore risks row-data/metadata width mismatch. The output field name is variable-resolved; diagnose this before execution without blocking draft saves."));
+                  "When return_keys is true, return_field must resolve to a non-empty output field name. Native TableOutputMeta.getFields() adds an INTEGER field only when both conditions hold, but TableOutput may append the generated key to successful output rows whenever return_keys is true. An empty return_field therefore risks row-data/metadata width mismatch. The output field name is variable-resolved; diagnose this before execution without blocking draft saves."),
+              new RuntimePrecondition(
+                  "TABLE_OUTPUT_DYNAMIC_TABLE_NAME_FIELD_CONTROLS_INSERT_PROJECTION",
+                  List.of("/tablename_in_field", "/tablename_field", "/tablename_in_table",
+                      "/specify_fields"),
+                  "When tablename_in_field is true, TableOutput resolves tablename_field as a Hop variable expression and requires that field in each incoming row to choose the destination table; a missing field fails at runtime and an empty row value cannot identify a table. When tablename_in_table is false and specify_fields is false, the runtime excludes the table-name field from its internal INSERT row and column list. With specify_fields true, the explicit fields.field mapping determines inserted columns instead; the table-name field is not automatically removed. This does not remove the field from TableOutputMeta.getFields() downstream row metadata. Diagnose source-field existence and insert projection separately; do not reject draft saves."));
       case "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta" ->
           List.of(new RuntimePrecondition(
               "UNIQUE_ROWS_HASHSET_COMPARE_FIELDS_REQUIRE_INPUT_ROW_FIELDS",
