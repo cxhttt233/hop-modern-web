@@ -92,6 +92,43 @@ try {
   await connect(added[0].id, added[1].id);
   await connect(added[1].id, added[2].id);
 
+  // A newly drawn Hop must be a semantic edit, not merely a rendered SVG.
+  // Undo only the second connection, preserve the first, then redo and
+  // confirm the restored hop survives the existing disk save/reopen below.
+  const firstHop = { from: added[0].id, to: added[1].id };
+  const lastHop = { from: added[1].id, to: added[2].id };
+  const hasHop = (document, hop) => document.edges.some(edge =>
+    edge.source === hop.from && edge.target === hop.to);
+  const lastEdge = graph.edges.find(edge =>
+    edge.source === lastHop.from && edge.target === lastHop.to);
+  if (!lastEdge || !hasHop(graph, firstHop)) throw new Error("Both authoritative Palette hops must exist before undo");
+  await page.locator(`.react-flow__edge[data-id="${lastEdge.id}"]`).waitFor({ state: "attached" });
+
+  const undoPending = post("/edit/undo");
+  await page.getByRole("button", { name: "撤销（Undo）", exact: true }).click();
+  const undoResponse = await undoPending;
+  if (!undoResponse.ok()) throw new Error(`Palette hop undo HTTP ${undoResponse.status()}`);
+  const undone = await undoResponse.json();
+  if (!hasHop(undone, firstHop) || hasHop(undone, lastHop) ||
+      undone.edges.length !== graph.edges.length - 1) {
+    throw new Error("Undo did not remove exactly the last authoritative Hop connection");
+  }
+  await page.locator(`.react-flow__edge[data-id="${lastEdge.id}"]`).waitFor({ state: "detached" });
+
+  const redoPending = post("/edit/redo");
+  await page.getByRole("button", { name: "重做（Redo）", exact: true }).click();
+  const redoResponse = await redoPending;
+  if (!redoResponse.ok()) throw new Error(`Palette hop redo HTTP ${redoResponse.status()}`);
+  const redone = await redoResponse.json();
+  if (!hasHop(redone, firstHop) || !hasHop(redone, lastHop) ||
+      redone.edges.length !== graph.edges.length) {
+    throw new Error("Redo did not restore both authoritative Hop connections");
+  }
+  const restoredEdge = redone.edges.find(edge =>
+    edge.source === lastHop.from && edge.target === lastHop.to);
+  await page.locator(`.react-flow__edge[data-id="${restoredEdge.id}"]`).waitFor({ state: "attached" });
+  graph = redone;
+
   pending = post("/config/read");
   await rf(added[0].id).dblclick();
   const initialRead = await pending;
