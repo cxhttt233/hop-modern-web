@@ -1892,6 +1892,77 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void selectValuesMetadataStageChangesTypeAndFormatsOnlyMatchedPostSelectionField()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "SelectValues");
+    assertEquals(Shape.LIST, property(descriptor, "fields", "meta").shape());
+    for (String key : List.of("name", "rename", "type", "conversion_mask",
+        "encoding", "decimal_symbol", "grouping_symbol")) {
+      assertEquals(Shape.STRING, property(descriptor, "fields", "meta", key).shape(), key);
+    }
+    assertEquals(Shape.NUMBER, property(descriptor, "fields", "meta", "length").shape());
+    assertEquals(Shape.NUMBER, property(descriptor, "fields", "meta", "precision").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SELECT_VALUES_METADATA_CHANGES_TYPE_AND_FORMAT_AFTER_SELECTION"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/meta"), contract.keyListPointers());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(plugin, "production SelectValues plugin missing");
+    var meta = (org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta)
+        registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    var selected = new org.apache.hop.pipeline.transforms.selectvalues.SelectField();
+    selected.setName("原始测站");
+    selected.setRename("测站<&>雪");
+    var retained = new org.apache.hop.pipeline.transforms.selectvalues.SelectField();
+    retained.setName("保留列");
+    meta.getSelectOption().setSelectFields(List.of(selected, retained));
+
+    var change = new org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange();
+    change.setName("测站<&>雪");
+    change.setRename("流量_数值");
+    change.setType(org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
+        org.apache.hop.core.row.IValueMeta.TYPE_NUMBER));
+    change.setLength(18);
+    change.setPrecision(3);
+    change.setConversionMask("#,##0.000");
+    change.setDecimalSymbol(".");
+    change.setGroupingSymbol(",");
+    change.setEncoding("UTF-16LE");
+    change.setStorageType(null);
+    meta.getSelectOption().setMeta(List.of(change));
+
+    var row = new org.apache.hop.core.row.RowMeta();
+    var source = new org.apache.hop.core.row.value.ValueMetaString("原始测站");
+    source.setStorageType(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_BINARY_STRING);
+    row.addValueMeta(source);
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("保留列"));
+    meta.getFields(row, "select-metadata", null, null,
+        new org.apache.hop.core.variables.Variables(), new MemoryMetadataProvider());
+
+    assertEquals(2, row.size(), "metadata conversion must not add output columns");
+    var number = row.getValueMeta(0);
+    assertEquals("流量_数值", number.getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER, number.getType());
+    assertEquals(org.apache.hop.core.row.IValueMeta.STORAGE_TYPE_NORMAL,
+        number.getStorageType(), "type conversion normalizes binary-string storage");
+    assertEquals(18, number.getLength());
+    assertEquals(3, number.getPrecision());
+    assertEquals("#,##0.000", number.getConversionMask());
+    assertEquals(".", number.getDecimalSymbol());
+    assertEquals(",", number.getGroupingSymbol());
+    assertEquals("UTF-16LE", number.getStringEncoding());
+    assertEquals("select-metadata", number.getOrigin());
+    assertEquals("保留列", row.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        row.getValueMeta(1).getType(), "unmatched column must retain original type");
+    System.out.println("PROD_P0_SELECTVALUES_METADATA_TYPE_FORMAT_OUTPUT=PASS");
+  }
+
+  @Test
   void filterRowsNestedConditionReferencesMatchNativeOrphanFieldChecks()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
