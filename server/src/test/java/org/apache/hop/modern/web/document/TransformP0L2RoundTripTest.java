@@ -4221,6 +4221,82 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_HTTP_DUPLICATE_HEADER_JSON_ARRAY_DISK_REOPEN=PASS");
   }
 
+  @Test
+  void restMatrixParametersUsePathEncodingAndPrecedeOrderedQueryParameters()
+      throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "REST_MATRIX_PARAMETERS_USE_PATH_ENCODING_BEFORE_QUERY"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/url", "/matrixParameters/matrixParameter",
+        "/parameters/parameter"), contract.keyListPointers());
+    assertEquals(Shape.LIST, property(descriptor, "matrixParameter").shape());
+    assertEquals("matrixParameters", property(descriptor, "matrixParameter").groupKey());
+    assertEquals(Shape.LIST, property(descriptor, "parameter").shape());
+    assertEquals("parameters", property(descriptor, "parameter").groupKey());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    ClassLoader loader = original.getClass().getClassLoader();
+    Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+    var encodePath = runtimeType.getDeclaredMethod("encodePathValue", String.class);
+    var encodeQuery = runtimeType.getDeclaredMethod("encodeQueryValue", String.class);
+    encodePath.setAccessible(true);
+    encodeQuery.setAccessible(true);
+    assertEquals("A%20B%2BC%2F%E9%9B%AA", encodePath.invoke(null, "A B+C/雪"));
+    assertEquals("A+B%2BC%2F%E9%9B%AA", encodeQuery.invoke(null, "A B+C/雪"));
+
+    // Exercise the real native Rest URL builder without making an HTTP request.
+    Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+    Object data = dataType.getConstructor().newInstance();
+    var incoming = new org.apache.hop.core.row.RowMeta();
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("站点"));
+    incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("条件"));
+    dataType.getField("inputRowMeta").set(data, incoming);
+    dataType.getField("useMatrixParams").setBoolean(data, true);
+    dataType.getField("nrMatrixParams").setInt(data, 2);
+    dataType.getField("indexOfMatrixParamFields").set(data, new int[] {0, 1});
+    dataType.getField("matrixParamNames").set(data, new String[] {"station", "zone"});
+    dataType.getField("useParams").setBoolean(data, true);
+    dataType.getField("nrParams").setInt(data, 1);
+    dataType.getField("indexOfParamFields").set(data, new int[] {1});
+    dataType.getField("paramNames").set(data, new String[] {"search"});
+
+    var pipelineMeta = new org.apache.hop.pipeline.PipelineMeta();
+    pipelineMeta.setName("rest-matrix-encoding");
+    var transform = new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-parameter-node", original);
+    var ctor = runtimeType.getConstructor(
+        org.apache.hop.pipeline.transform.TransformMeta.class,
+        original.getClass(), dataType, int.class,
+        org.apache.hop.pipeline.PipelineMeta.class,
+        org.apache.hop.pipeline.Pipeline.class);
+    Object nativeRest = ctor.newInstance(transform, original, data, 0, pipelineMeta, null);
+    var build = runtimeType.getDeclaredMethod("buildRequestUri", String.class, Object[].class);
+    build.setAccessible(true);
+    String url = (String) build.invoke(nativeRest,
+        "https://api.example.invalid/v1/stations?existing=1",
+        (Object) new Object[] {"A B+C/雪", "q value+雪"});
+    java.net.URI parsed = java.net.URI.create(url);
+    String rawPath = parsed.getRawPath();
+    assertTrue(rawPath.contains(";station=A%20B%2BC%2F%E9%9B%AA"), url);
+    assertTrue(rawPath.contains(";zone=q%20value%2B%E9%9B%AA"), url);
+    assertTrue(rawPath.indexOf(";station=") < rawPath.indexOf(";zone="), url);
+    assertTrue(url.indexOf(";zone=") < url.indexOf("?"), url);
+    String rawQuery = parsed.getRawQuery();
+    assertTrue(rawQuery.startsWith("existing=1&"), url);
+    String search = java.util.Arrays.stream(rawQuery.split("&"))
+        .filter(part -> part.startsWith("search="))
+        .findFirst().orElseThrow().substring("search=".length());
+    assertEquals("q value+雪", java.net.URLDecoder.decode(
+        search, java.nio.charset.StandardCharsets.UTF_8));
+    System.out.println("PROD_P0_REST_MATRIX_PATH_VS_QUERY_ENCODING=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
