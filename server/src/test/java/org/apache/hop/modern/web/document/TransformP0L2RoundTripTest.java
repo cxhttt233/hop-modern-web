@@ -4397,6 +4397,113 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void restStreamingBinaryResultRejectsBeforeHttpAfterRealHplConfigEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("REST_STREAMING_BINARY_RESULT_REJECTED_BEFORE_HTTP"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/streamingEnabled", "/result/binary", "/paginationEnabled",
+        "/resultSplitPath"), contract.keyListPointers());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "streamingEnabled").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "result", "binary").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "paginationEnabled").shape());
+    assertEquals(Shape.STRING, property(descriptor, "resultSplitPath").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/binary?station=雪");
+    Object result = original.getClass().getMethod("getResultField").invoke(original);
+    result.getClass().getMethod("setFieldName", String.class)
+        .invoke(result, "原始字节<&雪>");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("rest-streaming-binary-pre-http.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-streaming-binary-pre-http");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-binary-stream-node", original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("rest-binary-stream-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("rest-binary-stream-doc",
+        new PipelineConfigResource.ReadRequest("rest-binary-stream-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertFalse(initial.config().at("/streamingEnabled").booleanValue());
+    assertFalse(initial.config().at("/result/binary").booleanValue());
+
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("streamingEnabled", true);
+    changed.put("paginationEnabled", false);
+    changed.put("resultSplitPath", "");
+    ((com.fasterxml.jackson.databind.node.ObjectNode) changed.path("result"))
+        .put("binary", true);
+    var write = resource.write("rest-binary-stream-doc",
+        new PipelineConfigResource.WriteRequest("rest-binary-stream-node", changed));
+    assertEquals(200, write.getStatus(),
+        "runtime-incompatible streaming/binary options remain editable draft values");
+    var written = (PipelineConfigResource.ConfigResponse) write.getEntity();
+    assertTrue(written.config().at("/streamingEnabled").booleanValue());
+    assertTrue(written.config().at("/result/binary").booleanValue());
+    assertFalse(written.config().at("/paginationEnabled").booleanValue());
+    assertEquals("", written.config().at("/resultSplitPath").asText());
+
+    store.save(hpl, loaded);
+    var reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("rest-binary-stream-node").getTransform();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertTrue(wire.at("/streamingEnabled").isBoolean());
+    assertTrue(wire.at("/streamingEnabled").booleanValue());
+    assertTrue(wire.at("/result/binary").isBoolean());
+    assertTrue(wire.at("/result/binary").booleanValue());
+    assertFalse(wire.at("/paginationEnabled").booleanValue());
+    assertEquals("", wire.at("/resultSplitPath").asText());
+    assertEquals("原始字节<&雪>", wire.at("/result/name").asText());
+
+    var projected = new org.apache.hop.core.row.RowMeta();
+    diskMeta.getFields(projected, "rest-binary-stream-node", null, null, variables, provider);
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_BINARY,
+        projected.getValueMeta(0).getType(),
+        "getFields still projects BINARY before native first-row incompatibility check");
+
+    ClassLoader loader = diskMeta.getClass().getClassLoader();
+    Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+    Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+    var ctor = runtimeType.getConstructor(
+        org.apache.hop.pipeline.transform.TransformMeta.class,
+        diskMeta.getClass(), dataType, int.class,
+        org.apache.hop.pipeline.PipelineMeta.class,
+        org.apache.hop.pipeline.Pipeline.class);
+    Object nativeRest = ctor.newInstance(
+        reopened.findTransform("rest-binary-stream-node"), diskMeta,
+        dataType.getConstructor().newInstance(), 0, reopened,
+        org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+    runtimeType.getMethod("setMetadataProvider",
+        org.apache.hop.metadata.api.IHopMetadataProvider.class)
+        .invoke(nativeRest, provider);
+    assertTrue((Boolean) runtimeType.getMethod("init").invoke(nativeRest),
+        "native init accepts binary streaming when pagination is disabled");
+
+    var thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,
+        () -> runtimeType.getMethod("processRow").invoke(nativeRest));
+    assertTrue(thrown.getCause() instanceof org.apache.hop.core.exception.HopException);
+    assertTrue(thrown.getCause().getMessage().contains("a binary result field"),
+        "first-row guard must reject binary streaming before HTTP rather than corrupt bytes");
+    System.out.println("PROD_P0_REST_STREAMING_BINARY_PRE_HTTP_DISK_REOPEN=PASS");
+  }
+
+  @Test
   void restPaginationRejectsBinaryResultAtNativeInitAfterRealHplConfigEdit(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
