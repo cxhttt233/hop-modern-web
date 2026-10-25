@@ -324,6 +324,20 @@ public final class AutomaticConfigDescriptor {
                       "/result/response_header"),
                   "Unlike HttpMeta, RestMeta.getFields() resolves Hop variables in all four result output names. It appends non-empty configured result.name (STRING or BINARY), result.code (INTEGER), and result.response_time (INTEGER) in that order, followed by a STRING response_header only when its resolved name is non-empty. For the first three names, the native empty check precedes variable resolution; the header empty check follows resolution. Preserve upstream fields and the native output order when diagnosing downstream row schemas. This is not a save-time validator."),
               new RuntimePrecondition(
+                  "REST_SPLIT_PATH_JSONPATH_OVERRIDES_REQUEST_TYPE_XPATH_REQUIRES_XML",
+                  List.of("/applicationType", "/resultSplitPath", "/result/name"),
+                  "For non-streaming REST response splitting, a resultSplitPath starting with $ "
+                      + "selects JsonPath even when applicationType is FORM URLENCODED or TEXT "
+                      + "PLAIN: applicationType describes the request content type, not necessarily "
+                      + "the response. An XPath such as /root/item instead requires an XML "
+                      + "applicationType (XML, TEXT XML, ATOM XML, SVG XML, or XHTML); TEXT PLAIN "
+                      + "with XPath raises HopException when native splitResultItems() processes "
+                      + "the response. JsonPath array matches produce ordered JSON fragments, "
+                      + "while XPath node matches produce ordered XML fragments. Preserve the "
+                      + "literal STRING paths in the JSON/HPL draft and diagnose this format "
+                      + "dependency without inventing a save-time rejection. The split behavior "
+                      + "can be verified locally without issuing an HTTP request."),
+              new RuntimePrecondition(
                   "REST_STREAMING_SPLIT_PATH_REJECTED_BEFORE_HTTP",
                   List.of("/streamingEnabled", "/resultSplitPath", "/result/binary",
                       "/paginationEnabled"),
