@@ -4933,6 +4933,107 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REST_NO_INPUT_FIELD_OPTIONS_PRE_HTTP_DISK_REOPEN=PASS");
   }
 
+  @Test
+  void restResponseCharsetHeaderOverridesRequestTypeAndFallsBackAfterHplReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "REST_RESPONSE_CHARSET_HEADER_OVERRIDES_REQUEST_TYPE_UTF8_FALLBACK"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/applicationType", "/result/name", "/result/binary"),
+        contract.keyListPointers());
+    assertEquals(Shape.STRING, property(descriptor, "applicationType").shape());
+    assertEquals(Shape.STRING, property(descriptor, "result", "name").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "result", "binary").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/charset?river=雪");
+    Object result = original.getClass().getMethod("getResultField").invoke(original);
+    result.getClass().getMethod("setFieldName", String.class)
+        .invoke(result, "响应文本<&雪>");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("rest-response-charset.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-response-charset");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", "rest-charset-node", original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("rest-charset-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("rest-charset-doc",
+        new PipelineConfigResource.ReadRequest("rest-charset-node"));
+    assertEquals(200, read.getStatus());
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    changed.put("applicationType", "FORM URLENCODED");
+    ((com.fasterxml.jackson.databind.node.ObjectNode) changed.path("result"))
+        .put("binary", false);
+    var write = resource.write("rest-charset-doc",
+        new PipelineConfigResource.WriteRequest("rest-charset-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    var reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("rest-charset-node").getTransform();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertEquals("FORM URLENCODED", wire.at("/applicationType").asText());
+    assertEquals("响应文本<&雪>", wire.at("/result/name").asText());
+    assertTrue(wire.at("/result/binary").isBoolean());
+    assertFalse(wire.at("/result/binary").booleanValue());
+
+    var projected = new org.apache.hop.core.row.RowMeta();
+    diskMeta.getFields(projected, "rest-charset-node", null, null, variables, provider);
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        projected.getValueMeta(0).getType());
+
+    ClassLoader loader = diskMeta.getClass().getClassLoader();
+    Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+    Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+    var ctor = runtimeType.getConstructor(
+        org.apache.hop.pipeline.transform.TransformMeta.class,
+        diskMeta.getClass(), dataType, int.class,
+        org.apache.hop.pipeline.PipelineMeta.class,
+        org.apache.hop.pipeline.Pipeline.class);
+    Object nativeRest = ctor.newInstance(
+        reopened.findTransform("rest-charset-node"), diskMeta,
+        dataType.getConstructor().newInstance(), 0, reopened,
+        org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+    var resolve = runtimeType.getDeclaredMethod("resolveCharset", String.class);
+    resolve.setAccessible(true);
+
+    var explicit = (java.nio.charset.Charset)
+        resolve.invoke(nativeRest, "text/plain; charset=UTF-16LE");
+    var noCharset = (java.nio.charset.Charset)
+        resolve.invoke(nativeRest, "application/json");
+    var noHeader = (java.nio.charset.Charset)
+        resolve.invoke(nativeRest, (Object) null);
+    var malformed = (java.nio.charset.Charset)
+        resolve.invoke(nativeRest, "text/plain; charset=not-a-real-charset-9999");
+    assertEquals(java.nio.charset.StandardCharsets.UTF_16LE, explicit,
+        "response charset overrides the configured FORM URLENCODED request type");
+    assertEquals(java.nio.charset.StandardCharsets.UTF_8, noCharset);
+    assertEquals(java.nio.charset.StandardCharsets.UTF_8, noHeader);
+    assertEquals(java.nio.charset.StandardCharsets.UTF_8, malformed);
+
+    String payload = "黄河<&>雪";
+    assertEquals(payload, new String(payload.getBytes(explicit), explicit));
+    assertEquals(payload, new String(payload.getBytes(noCharset), noCharset));
+    System.out.println("PROD_P0_REST_RESPONSE_CHARSET_HEADER_FALLBACK_DISK_REOPEN=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
