@@ -3535,6 +3535,82 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_GROUPBY_LITERAL_LINE_NUMBER_DISK_REOPEN=PASS");
   }
 
+  @Test
+  void tableOutputDynamicTableNameMetadataSurvivesRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "TableOutput");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "TABLE_OUTPUT_DYNAMIC_TABLE_NAME_FIELD_CONTROLS_INSERT_PROJECTION"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/tablename_in_field", "/tablename_field", "/tablename_in_table",
+        "/specify_fields"), contract.keyListPointers());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "tablename_in_field").shape());
+    assertEquals(Shape.STRING, property(descriptor, "tablename_field").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "tablename_in_table").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "specify_fields").shape());
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.getClass().getMethod("setTableNameInField", boolean.class).invoke(meta, true);
+    meta.getClass().getMethod("setTableNameField", String.class)
+        .invoke(meta, "${DYNAMIC_TABLE_FIELD}");
+    meta.getClass().getMethod("setTableNameInTable", boolean.class).invoke(meta, false);
+    meta.getClass().getMethod("setSpecifyFields", boolean.class).invoke(meta, false);
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("DYNAMIC_TABLE_FIELD", "动态表名<&>雪");
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("table-output-dynamic-name.hpl");
+    org.apache.hop.pipeline.PipelineMeta pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("table-output-dynamic-name");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", "table-output-node", meta));
+    store.save(hpl, pipeline);
+
+    org.apache.hop.pipeline.PipelineMeta reopened = store.open(hpl);
+    org.apache.hop.pipeline.transform.TransformMeta diskTransform =
+        reopened.findTransform("table-output-node");
+    assertNotNull(diskTransform);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("table-output-doc", hpl, reopened));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    jakarta.ws.rs.core.Response read = resource.read(
+        "table-output-doc", new PipelineConfigResource.ReadRequest("table-output-node"));
+    assertEquals(200, read.getStatus());
+    PipelineConfigResource.ConfigResponse response =
+        (PipelineConfigResource.ConfigResponse) read.getEntity();
+    com.fasterxml.jackson.databind.JsonNode wire = response.config();
+    assertTrue(wire.at("/tablename_in_field").isBoolean());
+    assertTrue(wire.at("/tablename_in_field").booleanValue());
+    assertEquals("${DYNAMIC_TABLE_FIELD}", wire.at("/tablename_field").asText());
+    assertTrue(wire.at("/tablename_in_table").isBoolean());
+    assertFalse(wire.at("/tablename_in_table").booleanValue());
+    assertTrue(wire.at("/specify_fields").isBoolean());
+    assertFalse(wire.at("/specify_fields").booleanValue());
+
+    ITransformMeta nativeMeta = diskTransform.getTransform();
+    assertEquals("${DYNAMIC_TABLE_FIELD}",
+        nativeMeta.getClass().getMethod("getTableNameField").invoke(nativeMeta));
+    assertEquals("动态表名<&>雪", variables.resolve(
+        (String) nativeMeta.getClass().getMethod("getTableNameField").invoke(nativeMeta)));
+    var row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("动态表名<&>雪"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("业务值"));
+    nativeMeta.getFields(row, "table-output-node", null, null, variables, provider);
+    assertEquals(List.of("动态表名<&>雪", "业务值"),
+        row.getValueMetaList().stream().map(v -> v.getName()).toList(),
+        "TableOutput's internal SQL insert projection must not remove downstream fields");
+
+    // This checks native metadata and HPL persistence, not a live database INSERT.
+    // The actual SQL-row omission branch is in TableOutput's runtime, not getFields().
+    System.out.println("PROD_P0_TABLEOUTPUT_DYNAMIC_TABLE_NAME_DISK_METADATA=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
