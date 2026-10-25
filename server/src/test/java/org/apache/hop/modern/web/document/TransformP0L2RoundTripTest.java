@@ -4335,7 +4335,7 @@ class TransformP0L2RoundTripTest {
 
     String[] types = {"FORM URLENCODED", "XML", "TEXT PLAIN"};
     String[] paths = {"$.items[*]", "/root/item", "/root/item"};
-    String json = "{\\"items\\":[{\\"name\\":\\"黄河<&>\\"},{\\"name\\":\\"雪\\"}]}";
+    String json = "{\"items\":[{\"name\":\"黄河<&>\"},{\"name\":\"雪\"}]}";
     String xml = "<root><item>黄河&lt;&amp;&gt;</item><item>雪</item></root>";
     String[] bodies = {json, xml, xml};
     for (int index = 0; index < types.length; index++) {
