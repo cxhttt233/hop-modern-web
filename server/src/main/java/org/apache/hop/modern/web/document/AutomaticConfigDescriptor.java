@@ -336,6 +336,19 @@ public final class AutomaticConfigDescriptor {
                       + "execution rather than silently dropping the split path or streaming "
                       + "setting. This runtime guard does not prove HTTP streaming works."),
               new RuntimePrecondition(
+                  "REST_STREAMING_BINARY_RESULT_REJECTED_BEFORE_HTTP",
+                  List.of("/streamingEnabled", "/result/binary", "/paginationEnabled",
+                      "/resultSplitPath"),
+                  "With streamingEnabled=true and result.binary=true, Rest.processRow() "
+                      + "rejects the first row before issuing HTTP, even when paginationEnabled "
+                      + "is false and resultSplitPath is empty. Rest.init() accepts this pair "
+                      + "when pagination is disabled, and RestMeta.getFields() still projects "
+                      + "the configured result.name as BINARY. Keep both BOOLEAN settings "
+                      + "editable and persisted through JSON/HPL, but diagnose the incompatible "
+                      + "runtime combination rather than silently converting response bytes "
+                      + "to text or clearing the streaming option. This is not a save-time "
+                      + "validator or a network execution proof."),
+              new RuntimePrecondition(
                   "REST_PAGINATION_REJECTS_BINARY_RESULT_AT_INIT",
                   List.of("/paginationEnabled", "/result/binary", "/result/name"),
                   "Native Rest.init() rejects paginationEnabled=true together with result.binary=true "
