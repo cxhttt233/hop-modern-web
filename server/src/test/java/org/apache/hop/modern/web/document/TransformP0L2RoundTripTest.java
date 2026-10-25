@@ -449,6 +449,71 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REST_BINARY_RESULT_OUTPUT_SCHEMA=PASS");
   }
 
+  @Test
+  void restResultOutputNamesResolveVariablesAndOmitResolvedEmptyHeader() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(registry, "Rest");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "REST_RESULT_FIELD_NAMES_RESOLVE_VARIABLES_AND_OMIT_EMPTY_HEADER"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/result/name", "/result/code", "/result/response_time",
+        "/result/response_header"), contract.keyListPointers());
+    for (String key : List.of("name", "code", "response_time", "response_header")) {
+      assertEquals(Shape.STRING, property(descriptor, "result", key).shape());
+    }
+
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin, "production REST plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Object result = metadataField(meta.getClass(), "resultField").get(meta);
+    var resultClass = result.getClass();
+    resultClass.getMethod("setFieldName", String.class).invoke(result, "${REST_BODY_NAME}");
+    resultClass.getMethod("setCode", String.class).invoke(result, "${REST_STATUS_NAME}");
+    resultClass.getMethod("setResponseTime", String.class).invoke(result, "${REST_TIME_NAME}");
+    resultClass.getMethod("setResponseHeader", String.class).invoke(result, "${REST_HEADER_NAME}");
+    resultClass.getMethod("setBinary", boolean.class).invoke(result, false);
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("REST_BODY_NAME", "正文<&>雪");
+    variables.setVariable("REST_STATUS_NAME", "状态_甲");
+    variables.setVariable("REST_TIME_NAME", "耗时_乙");
+    variables.setVariable("REST_HEADER_NAME", "响应头_丙");
+    var provider = new MemoryMetadataProvider();
+
+    var output = new org.apache.hop.core.row.RowMeta();
+    output.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("上游"));
+    meta.getFields(output, "rest-output", new org.apache.hop.core.row.IRowMeta[0],
+        null, variables, provider);
+    assertEquals(List.of("上游", "正文<&>雪", "状态_甲", "耗时_乙", "响应头_丙"),
+        output.getValueMetaList().stream().map(v -> v.getName()).toList());
+    assertEquals(List.of(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        org.apache.hop.core.row.IValueMeta.TYPE_STRING),
+        output.getValueMetaList().subList(1, 5).stream().map(v -> v.getType()).toList());
+    for (int i = 1; i < output.size(); i++) {
+      assertEquals("rest-output", output.getValueMeta(i).getOrigin());
+    }
+
+    variables.setVariable("REST_HEADER_NAME", "");
+    var noHeader = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(noHeader, "rest-output", new org.apache.hop.core.row.IRowMeta[0],
+        null, variables, provider);
+    assertEquals(List.of("正文<&>雪", "状态_甲", "耗时_乙"),
+        noHeader.getValueMetaList().stream().map(v -> v.getName()).toList(),
+        "REST resolves the response-header name before checking whether to add a column");
+
+    resultClass.getMethod("setFieldName", String.class).invoke(result, "");
+    resultClass.getMethod("setCode", String.class).invoke(result, "");
+    resultClass.getMethod("setResponseTime", String.class).invoke(result, "");
+    var none = new org.apache.hop.core.row.RowMeta();
+    meta.getFields(none, "rest-output", new org.apache.hop.core.row.IRowMeta[0],
+        null, variables, provider);
+    assertEquals(0, none.size(), "Empty configured names and resolved empty header add no fields");
+    System.out.println("PROD_P0_REST_RESULT_NAME_RESOLUTION_EMPTY_HEADER=PASS");
+  }
+
   @Test void restDynamicMethodNativeCheckFalsePositiveIsDocumentedByProductionDescriptor()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
