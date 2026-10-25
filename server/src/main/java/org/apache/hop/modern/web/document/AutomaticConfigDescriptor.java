@@ -137,7 +137,11 @@ public final class AutomaticConfigDescriptor {
                   "CONCAT_FIELDS_REMOVE_SELECTED_FIELDS_CHANGES_OUTPUT_SCHEMA",
                   List.of("/ConcatFields/removeSelectedFields", "/fields/field",
                       "/ConcatFields/targetFieldName"),
-                  "When ConcatFields.removeSelectedFields is false, ConcatFieldsMeta.getFields() preserves incoming columns and appends targetFieldName as STRING. When true with selected fields, it removes each selected fields.field[*].name from the output metadata before appending the target; when true with an empty fields.field list, it clears every incoming output field before appending only the target. This is an output-row-schema compatibility diagnostic, not a save-time validator."));
+                  "When ConcatFields.removeSelectedFields is false, ConcatFieldsMeta.getFields() preserves incoming columns and appends targetFieldName as STRING. When true with selected fields, it removes each selected fields.field[*].name from the output metadata before appending the target; when true with an empty fields.field list, it clears every incoming output field before appending only the target. This is an output-row-schema compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "CONCAT_FIELDS_LITERAL_TARGET_NAME_MAY_DUPLICATE_INPUT_COLUMN",
+                  List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
+                  "Native ConcatFieldsMeta.getFields() appends a fresh STRING ValueMeta using the literal targetFieldName (without resolving Hop variables) and the configured targetFieldLength. It does not check whether the output name already exists in the incoming row schema: with removeSelectedFields=false, a target matching an existing input name yields two same-named columns. Diagnose duplicate output names and variable-literal naming for downstream consumers, without rejecting draft saves."));
       case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta" ->
           List.of(
               new RuntimePrecondition(
