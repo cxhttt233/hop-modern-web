@@ -45,6 +45,38 @@ try {
   const sqlField = panel.locator(`#config-${sqlDescriptor.javaField}`);
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
   if (await sqlField.inputValue() !== "SELECT id, name FROM customers") throw new Error("Authoritative SQL not visible");
+  // A malformed LIST JSON draft must fail closed in the real Hop editor:
+  // no config/write, no enabled Save, and Cancel must restore server state.
+  // This tests the existing JSON fallback, not unverified typed LIST editing.
+  const listDescriptor = initial.descriptor?.properties?.find(p => p.key === "field" && p.shape === "LIST");
+  if (!listDescriptor) throw new Error("Real TableInput LIST descriptor missing");
+  const listField = panel.locator(`#config-${listDescriptor.javaField}`);
+  const originalListText = await listField.inputValue();
+  const configWriteCount = () => requests.filter(({url, method}) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeInvalid = configWriteCount();
+  await listField.fill('[{"name":');
+  await panel.getByRole("alert").waitFor({ state: "visible" });
+  if (await panel.getByRole("button", { name: "Save" }).isEnabled() ||
+      configWriteCount() !== writesBeforeInvalid) {
+    throw new Error("Malformed LIST JSON must disable Save without sending config/write");
+  }
+  await panel.getByRole("button", { name: "Cancel" }).click();
+  const invalidRecoveryPending = page.waitForResponse(r => match(r, "/config/read"));
+  await node.click();
+  await page.getByRole("button", { name: "Configure" }).click();
+  const invalidRecoveryResponse = await invalidRecoveryPending;
+  const invalidRecovered = await invalidRecoveryResponse.json();
+  if (!invalidRecoveryResponse.ok() ||
+      JSON.stringify(invalidRecovered.config) !== JSON.stringify(initial.config)) {
+    throw new Error("Cancel after invalid LIST JSON changed authoritative Hop config");
+  }
+  await panel.waitFor({ state: "visible" });
+  if (await listField.inputValue() !== originalListText ||
+      await panel.getByRole("alert").count() !== 0 ||
+      configWriteCount() !== writesBeforeInvalid) {
+    throw new Error("Invalid LIST JSON state leaked into reopened configuration");
+  }
   // Chinese aliases and a Chinese literal must survive runtime config and .hpl disk XML.
   const sql = 'SELECT id AS "黄河编号", name AS "水库名称" FROM customers WHERE name = \'三门峡\'';
   await sqlField.fill(sql);
