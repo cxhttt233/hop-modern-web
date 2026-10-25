@@ -27,10 +27,42 @@ try {
   await page.locator(`.file-identity[data-document-name="${graph.name}"]`).waitFor({ state: "visible" });
   await page.locator(".react-flow").waitFor({ state: "visible" });
 
+  // The complete P0 Palette must be usable in Chinese on a real opened Hop
+  // graph. Assert every plugin identity, visible Chinese name, and category;
+  // do not infer availability from a mocked catalog or offline helper.
+  const expectedPalette = {
+    "输入与接入": [["DataGrid", "数据网格"], ["Http", "HTTP 客户端"], ["JsonInput", "JSON 输入"], ["Rest", "REST 客户端"], ["TableInput", "表输入"]],
+    "输出与写入": [["ExecSql", "执行 SQL"], ["InsertUpdate", "插入 / 更新"], ["SetVariable", "设置变量"], ["TableOutput", "表输出"]],
+    "字段处理": [["CheckSum", "校验和"], ["ConcatFields", "字段拼接"], ["ReplaceString", "字符串替换"], ["ScriptValueMod", "脚本计算"], ["SelectValues", "选择字段"], ["StringCut", "字符串截取"]],
+    "流程与关联": [["FilterRows", "过滤记录"], ["GroupBy", "分组汇总"], ["MergeJoin", "合并连接"], ["StreamLookup", "流查询"], ["UniqueRowsByHashSet", "记录去重"]],
+  };
+  const palette = page.locator("aside.transform-palette");
+  const groups = palette.locator(".transform-group");
+  if (await groups.count() !== Object.keys(expectedPalette).length) {
+    throw new Error("Real Hop Palette lacks the four Chinese P0 groups");
+  }
+  for (const [groupName, entries] of Object.entries(expectedPalette)) {
+    const group = groups.filter({ has: page.getByText(groupName, { exact: true }) });
+    if (await group.count() !== 1 || await group.locator(".transform-items button").count() !== entries.length) {
+      throw new Error(`Palette group ${groupName} does not contain its expected P0 transforms`);
+    }
+    for (const [pluginId, chineseName] of entries) {
+      const button = group.getByRole("button", { name: `${chineseName}（${pluginId}）`, exact: true });
+      if (await button.count() !== 1 ||
+          await button.locator(".palette-item-copy strong").innerText() !== chineseName ||
+          await button.locator(".palette-item-copy small").innerText() !== pluginId ||
+          await button.getAttribute("draggable") !== "true") {
+        throw new Error(`P0 Palette identity/localization/drag mismatch: ${groupName}/${pluginId}`);
+      }
+    }
+  }
+  console.log("V6 full P0 Chinese Palette proof passed: 20 distinct plugins in four categories on real Hop graph.");
+
+
   const canvas = page.locator(".react-flow__pane");
   const added = [];
   const plugins = ["TableInput", "SelectValues", "FilterRows"];
-  const chineseNames = { TableInput: "表输入", SelectValues: "选择字段", FilterRows: "过滤记录" };
+  const chineseNames = { TableInput: "表输入", SelectValues: "选择字段", FilterRows: "过滤记录", Rest: "REST 客户端", ScriptValueMod: "脚本计算" };
   const accessibleName = pluginId => `${chineseNames[pluginId]}（${pluginId}）`;
   const positions = [{ x: 560, y: 260 }, { x: 760, y: 360 }, { x: 960, y: 260 }];
 
@@ -202,7 +234,7 @@ try {
   }
   let activationGraph = reopened;
   const activated = [];
-  for (const [pluginId, method] of [["TableInput", "click"], ["SelectValues", "Enter"]]) {
+  for (const [pluginId, method] of [["TableInput", "click"], ["SelectValues", "Enter"], ["Rest", "click"], ["ScriptValueMod", "Enter"]]) {
     const beforeIds = new Set(activationGraph.nodes.map(node => node.id));
     const countAdds = () => requests.filter(({ url, method: verb }) =>
       verb === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
@@ -250,7 +282,7 @@ try {
   });
   if (rap.length) throw new Error("RAP /ui entered");
 
-  console.log("V6 Palette authoritative proof passed: drag TableInput/SelectValues/FilterRows; click TableInput; Enter SelectValues; disk reopen");
+  console.log("V6 Palette authoritative proof passed: full 20-plugin Chinese catalog; drag TableInput/SelectValues/FilterRows; click TableInput/Rest; Enter SelectValues/ScriptValueMod; real disk reopen");
 } finally {
   await browser.close();
 }
