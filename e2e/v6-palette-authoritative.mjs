@@ -380,6 +380,70 @@ try {
   await assertRecentOrder(["TableInput", "SelectValues", "FilterRows"]);
   console.log("V6 recent Palette proof passed: successful drag/click/Enter recency, 3-item dedupe, shortcut real add, disk reopen.");
 
+  // REST is visible in the P0 Chinese catalog, but a real Hop runtime may
+  // reject creating this plugin (currently HTTP 422). Verify the actual
+  // response instead of treating a rendered Palette entry as runnable.
+  // If T3 later enables REST, prove the successful path against disk too.
+  const restBeforeNodes = new Set(recentReopened.nodes.map(node => node.id));
+  const restBeforeEdges = recentReopened.edges.map(edge => edge.id).sort();
+  const restBeforeRecent = await recent.locator(".transform-items button").evaluateAll(buttons =>
+    buttons.map(button => button.getAttribute("aria-label")));
+  const restAddCount = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
+  const restAddsBefore = restAddCount();
+  const restPending = post("/edit/add");
+  await palette.getByRole("button", { name: "REST 客户端（Rest）", exact: true }).click();
+  const restResponse = await restPending;
+  if (restAddCount() !== restAddsBefore + 1) {
+    throw new Error("REST Palette activation issued duplicate or missing real add requests");
+  }
+  if (restResponse.status() === 422) {
+    await page.locator(".preview-note.error-note[role=alert]").waitFor({ state: "visible" });
+    const recentAfterReject = await recent.locator(".transform-items button").evaluateAll(buttons =>
+      buttons.map(button => button.getAttribute("aria-label")));
+    if (await page.locator(".react-flow__node").count() !== restBeforeNodes.size ||
+        await page.locator(".react-flow__edge").count() !== restBeforeEdges.length ||
+        await page.getByRole("button", { name: "保存（Save）", exact: true }).isEnabled() ||
+        JSON.stringify(recentAfterReject) !== JSON.stringify(restBeforeRecent)) {
+      throw new Error("Rejected REST add corrupted the real graph, dirty state or recent Palette");
+    }
+    const rejectedReopenPending = post("/api/pipelines/open");
+    await page.getByRole("button", { name: "Choose pipeline" }).click();
+    await page.getByRole("button", { name: "Open pipeline" }).click();
+    const rejectedReopenResponse = await rejectedReopenPending;
+    if (!rejectedReopenResponse.ok()) throw new Error("Real Hop reopen after REST rejection failed");
+    const rejectedReopened = await rejectedReopenResponse.json();
+    if (rejectedReopened.nodes.length !== restBeforeNodes.size ||
+        !rejectedReopened.nodes.every(node => restBeforeNodes.has(node.id)) ||
+        JSON.stringify(rejectedReopened.edges.map(edge => edge.id).sort()) !== JSON.stringify(restBeforeEdges)) {
+      throw new Error("REST rejection changed the authoritative disk graph");
+    }
+    console.log("V6 REST runtime rejection proof passed: real HTTP 422, no phantom node/recent item, clean disk reopen.");
+  } else if (restResponse.ok()) {
+    const restGraph = await restResponse.json();
+    const restAdded = restGraph.nodes.filter(node => !restBeforeNodes.has(node.id));
+    if (restAdded.length !== 1 || restAdded[0].pluginId !== "Rest" ||
+        await recent.getByRole("button", { name: "最近使用：REST 客户端（Rest）", exact: true }).count() !== 1) {
+      throw new Error("Successful REST add lacks exactly one authoritative Rest node and recent shortcut");
+    }
+    const restSavePending = post("/save");
+    await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+    const restSaveResponse = await restSavePending;
+    if (!restSaveResponse.ok()) throw new Error("Real REST disk save failed after successful add");
+    const restReopenPending = post("/api/pipelines/open");
+    await page.getByRole("button", { name: "Choose pipeline" }).click();
+    await page.getByRole("button", { name: "Open pipeline" }).click();
+    const restReopenResponse = await restReopenPending;
+    const restReopened = await restReopenResponse.json();
+    if (!restReopenResponse.ok() ||
+        !restReopened.nodes.some(node => node.id === restAdded[0].id && node.pluginId === "Rest")) {
+      throw new Error("Real REST add did not survive authoritative disk reopen");
+    }
+    console.log("V6 REST runtime success proof passed: real add, recent shortcut, disk save and reopen.");
+  } else {
+    throw new Error("Unexpected REST runtime HTTP status " + restResponse.status());
+  }
+
   const rap = requests.filter(({ url }) => {
     const pathname = new URL(url).pathname;
     return pathname === "/ui" || pathname.startsWith("/ui/");
