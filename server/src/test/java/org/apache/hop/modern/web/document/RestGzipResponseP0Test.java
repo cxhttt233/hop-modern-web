@@ -186,7 +186,7 @@ class RestGzipResponseP0Test {
               Object[].class, exchange.getClass());
           assemble.setAccessible(true);
           Object[] row = (Object[]) assemble.invoke(rest, new Object[0], exchange);
-          assertEquals(2, row.length);
+          // RowDataUtil may allocate spare capacity; assert the two populated fields below.
           if (binary) {
             assertNull(bodyField.get(exchange));
             assertArrayEquals(decoded, (byte[]) bytesField.get(exchange),
