@@ -73,6 +73,8 @@ export function App() {
   const [paletteQuery, setPaletteQuery] = useState("");
   // Keep only successfully opened server paths, in memory for this editor session.
   const [recentPipelinePaths, setRecentPipelinePaths] = useState<string[]>([]);
+  // Show only successfully added plugin types; never record failed Hop requests.
+  const [recentTransformIds, setRecentTransformIds] = useState<string[]>([]);
   const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -158,11 +160,12 @@ export function App() {
     setNodes(graphNodes(graph));
   }, []);
 
-  const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>) => {
+  const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>, onSuccess?: () => void) => {
     if (source.kind !== "server" || savingRef.current) return;
     command().then((graph) => {
       reconcileGraph(graph);
       setDirty(true);
+      onSuccess?.();
     }).catch((error: unknown) => {
       setConfigError(error instanceof Error ? error.message : "Pipeline edit failed");
       setNodes(graphNodes(document));
@@ -172,7 +175,9 @@ export function App() {
   const addTransformAt = useCallback((pluginId: string, x: number, y: number) => {
     if (source.kind !== "server" || savingRef.current) return;
     const nodeId = uniqueTransformId(pluginId, document);
-    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId, x: Math.round(x), y: Math.round(y) }));
+    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId, x: Math.round(x), y: Math.round(y) }), () => {
+      setRecentTransformIds((current) => [pluginId, ...current.filter((id) => id !== pluginId)].slice(0, 3));
+    });
   }, [document, runGraphCommand, source]);
 
   // Palette buttons must work with mouse clicks and keyboard activation too:
@@ -393,6 +398,23 @@ export function App() {
               <input aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} />
             </div>
             <div className="transform-list">
+              {recentTransformIds.length > 0 && !paletteQuery.trim() && (
+                <section className="recent-transform-section" aria-label="最近使用的组件" style={{ paddingBottom: 8, borderBottom: "1px solid #e4e8ef", marginBottom: 8 }}>
+                  <div className="transform-group-title"><span>最近使用</span><small>{recentTransformIds.length}</small></div>
+                  <div className="transform-items">
+                    {recentTransformIds.map((pluginId) => {
+                      const meta = transformMeta(pluginId);
+                      return <button key={pluginId} type="button" aria-label={`最近使用：${meta.name}（${pluginId}）`}
+                        draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)}
+                        onClick={() => addTransformFromPalette(pluginId)} title={`${meta.name} · ${pluginId} · 点击再次添加或拖动放置`}>
+                        <span className={`palette-icon category-${meta.category}`}>{TRANSFORM_ICONS[pluginId] ? <img src={TRANSFORM_ICONS[pluginId]} alt="" /> : meta.glyph}</span>
+                        <span className="palette-item-copy"><strong>{meta.name}</strong><small>{pluginId}</small></span>
+                        <span className="drag-grip" aria-hidden="true">⋮⋮</span>
+                      </button>;
+                    })}
+                  </div>
+                </section>
+              )}
               {CATEGORY_ORDER.map((category) => {
                 const items = filteredTransforms.filter((pluginId) => transformMeta(pluginId).category === category.id);
                 if (!items.length) return null;
