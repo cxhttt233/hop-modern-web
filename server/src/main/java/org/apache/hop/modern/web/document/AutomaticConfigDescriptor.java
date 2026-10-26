@@ -508,16 +508,19 @@ public final class AutomaticConfigDescriptor {
                   List.of("/non_preemptive_basic_auth"),
                   "RestMeta stores non_preemptive_basic_auth as the BOOLEAN inverse of isPreemptive(): false (the default) sends Basic credentials on the first request, while true waits for a 401 challenge. The legacy XML preemptive key was removed because it never affected runtime behavior; an old HPL lacking non_preemptive_basic_auth must retain the default preemptive behavior. Preserve this exact wire boolean through config JSON editing and Hop XML disk reopen; do not reverse the UI label into the persisted value or expose password material. This is a compatibility diagnostic, not a save-time validator."),
               new RuntimePrecondition(
-                  "REST_RETRY_AFTER_HEADER_DOES_NOT_OVERRIDE_CONFIGURED_BACKOFF",
+                  "REST_HTTPCLIENT_DEFAULT_429_503_RETRIES_ARE_INDEPENDENT_OF_HOP_LISTS",
                   List.of("/method", "/retryMethods/retryMethod",
                       "/retryStatusCodes/retryStatusCode", "/retryTimes", "/retryDelayMs"),
-                  "Rest.executeWithRetry() retries matching HTTP statuses using the configured "
-                      + "retryDelayMs exponential backoff and does not inspect a response's "
-                      + "Retry-After header, even for HTTP 429. A 429 carrying Retry-After: 3600 "
-                      + "can therefore be retried immediately when retryDelayMs is small. "
-                      + "Preserve the grouped retry method/status LISTs and numeric delay "
-                      + "through JSON/HPL editing; diagnose API rate-limit expectations "
-                      + "before execution rather than promising Retry-After compliance."),
+                  "RestClientFactory builds HttpClient5 without disabling automatic retries. "
+                      + "The default HttpClient retry strategy may retry HTTP 429 and 503 once "
+                      + "for a GET request and uses the response Retry-After header to determine "
+                      + "its delay. This happens inside a single Rest.executeWithRetry() supplier "
+                      + "call, independently of the Hop retryMethods/retryMethod and "
+                      + "retryStatusCodes/retryStatusCode lists; empty Hop retry lists therefore "
+                      + "do not guarantee one network request. If Hop-level retries are also "
+                      + "enabled, network attempts can multiply. Preserve both grouped LISTs "
+                      + "and typed numeric retry settings through JSON/HPL, and diagnose the "
+                      + "two retry layers without silently rewriting user configuration."),
               // Hop's retry method and status-code lists use exact string membership.
               // They are not case-folded or trimmed by the runtime.
               new RuntimePrecondition(
