@@ -83,6 +83,12 @@ class SortRowsFullPipelineP0Test {
 
     ITransformMeta sort = plugins.loadClass(sortPlugin, ITransformMeta.class);
     sort.setDefault();
+    var compatibility = AutomaticConfigDescriptor.describe(sort.getClass())
+        .runtimePreconditions().stream()
+        .filter(rule -> rule.code().equals(
+            "SORT_ROWS_NONCOLLATOR_STRING_KEYS_USE_JAVA_CODE_UNIT_ORDER"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), compatibility.keyListPointers());
     TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
     TransformMeta target = new TransformMeta("SortRows", "sort-node", sort);
     PipelineMeta pipeline = new PipelineMeta();
