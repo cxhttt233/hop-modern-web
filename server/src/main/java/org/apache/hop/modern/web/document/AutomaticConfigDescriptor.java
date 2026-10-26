@@ -365,6 +365,19 @@ public final class AutomaticConfigDescriptor {
                       + "against incoming row metadata. This describes runtime wire "
                       + "compatibility, not a save-time validator."),
               new RuntimePrecondition(
+                  "REST_REPEATED_QUERY_PARAMETER_NAMES_PRESERVE_ORDER_AND_VALUES",
+                  List.of("/url", "/parameters/parameter"),
+                  "Native Rest.buildRequestUri() starts with the existing URL query and "
+                      + "appends each parameters.parameter[*] row-field value using URIBuilder.addParameter() "
+                      + "in declared LIST order. Repeated parameter names are retained as separate "
+                      + "query pairs rather than collapsed into a Map; existing pairs remain first. "
+                      + "UTF-8 percent encoding preserves Unicode, literal plus and reserved "
+                      + "characters in values. The wire path is /parameters/parameter/<index>/{field,name} "
+                      + "because Hop ConfigJsonSerializer groups the repeated parameter leaf under "
+                      + "its metadata groupKey. Preserve list indexes and duplicate names through "
+                      + "JSON edits and real .hpl disk reopen; this is a runtime compatibility "
+                      + "diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
                   "REST_MATRIX_PARAMETERS_USE_PATH_ENCODING_BEFORE_QUERY",
                   List.of("/url", "/matrixParameters/matrixParameter", "/parameters/parameter"),
                   "Native Rest.buildRequestUri() places ordered matrix parameters on the last URL "
