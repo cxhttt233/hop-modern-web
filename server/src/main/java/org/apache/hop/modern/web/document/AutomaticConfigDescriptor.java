@@ -312,6 +312,21 @@ public final class AutomaticConfigDescriptor {
                       + "effective request target after variable resolution; this is not a "
                       + "save-time validator or a request execution proof."),
               new RuntimePrecondition(
+                  "REST_BINARY_REQUEST_BODY_PRESERVES_BYTES_AND_CLIENT_OWNS_CONTENT_LENGTH",
+                  List.of("/method", "/applicationType", "/bodyField", "/headers/header"),
+                  "When a REST input bodyField resolves to a BINARY upstream row field, "
+                      + "native Rest.invokeRestExchange() passes its byte[] unchanged to "
+                      + "the HTTP entity; do not decode it as text or re-encode it using "
+                      + "applicationType. For active-body methods such as POST, the "
+                      + "HTTP client computes Content-Length from the actual entity. "
+                      + "A configured Content-Length header is deliberately ignored "
+                      + "case-insensitively, even when supplied by an input row, to avoid "
+                      + "a conflicting length. Preserve the literal STRING bodyField, "
+                      + "STRING applicationType, method and ordered headers/header LIST "
+                      + "through config JSON and Hop XML; diagnose BINARY source type "
+                      + "against incoming row metadata. This describes runtime wire "
+                      + "compatibility, not a save-time validator."),
+              new RuntimePrecondition(
                   "REST_MATRIX_PARAMETERS_USE_PATH_ENCODING_BEFORE_QUERY",
                   List.of("/url", "/matrixParameters/matrixParameter", "/parameters/parameter"),
                   "Native Rest.buildRequestUri() places ordered matrix parameters on the last URL "
