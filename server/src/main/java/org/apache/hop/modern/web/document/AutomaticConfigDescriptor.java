@@ -415,7 +415,7 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "REST_BASIC_AUTH_PREEMPTIVE_FLAG_IS_INVERTED",
                   List.of("/non_preemptive_basic_auth"),
-                  "RestMeta stores non_preemptive_basic_auth as the BOOLEAN inverse of isPreemptive(): false (the default) sends Basic credentials on the first request, while true waits for a 401 challenge. The legacy XML preemptive key was removed because it never affected runtime behavior; an old HPL lacking non_preemptive_basic_auth must retain the default preemptive behavior. Preserve this exact wire boolean through config JSON editing and Hop XML disk reopen; do not reverse the UI label into the persisted value or expose password material. This is a compatibility diagnostic, not a save-time validator.")),
+                  "RestMeta stores non_preemptive_basic_auth as the BOOLEAN inverse of isPreemptive(): false (the default) sends Basic credentials on the first request, while true waits for a 401 challenge. The legacy XML preemptive key was removed because it never affected runtime behavior; an old HPL lacking non_preemptive_basic_auth must retain the default preemptive behavior. Preserve this exact wire boolean through config JSON editing and Hop XML disk reopen; do not reverse the UI label into the persisted value or expose password material. This is a compatibility diagnostic, not a save-time validator."),
               // Hop's retry method and status-code lists use exact string membership.
               // They are not case-folded or trimmed by the runtime.
               new RuntimePrecondition(
