@@ -168,6 +168,128 @@ class RestRetryExactTokenP0Test {
     System.out.println("PROD_P0_REST_RETRY_EXACT_LIST_TOKENS_DISK_REOPEN=PASS");
   }
 
+
+  @Test
+  void restHttpClientAutomaticallyRetries429And503WithoutMatchingHopRetryListsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    AtomicInteger count429 = new AtomicInteger();
+    AtomicInteger count503 = new AtomicInteger();
+    com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
+        new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/status429", request -> {
+      try (request) {
+        int status = count429.incrementAndGet() == 1 ? 429 : 200;
+        request.getResponseHeaders().add("Retry-After", "0");
+        byte[] body = "rate-limit-雪".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        request.sendResponseHeaders(status, body.length);
+        request.getResponseBody().write(body);
+      }
+    });
+    server.createContext("/status503", request -> {
+      try (request) {
+        int status = count503.incrementAndGet() == 1 ? 503 : 200;
+        request.getResponseHeaders().add("Retry-After", "0");
+        byte[] body = "temporary-雪".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        request.sendResponseHeaders(status, body.length);
+        request.getResponseBody().write(body);
+      }
+    });
+    server.start();
+    try {
+      String base = "http://127.0.0.1:" + server.getAddress().getPort();
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(plugin);
+      ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+      original.setDefault();
+      original.getClass().getMethod("setUrl", String.class)
+          .invoke(original, base + "/status429");
+
+      var descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+      var contract = descriptor.runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "REST_HTTPCLIENT_DEFAULT_429_503_RETRIES_ARE_INDEPENDENT_OF_HOP_LISTS"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/method", "/retryMethods/retryMethod",
+          "/retryStatusCodes/retryStatusCode", "/retryTimes", "/retryDelayMs"),
+          contract.keyListPointers());
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("rest-httpclient-automatic-retry.hpl");
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("rest-httpclient-automatic-retry");
+      pipeline.addTransform(new TransformMeta("Rest", "rest-auto-retry-node", original));
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("rest-auto-retry-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("rest-auto-retry-doc",
+          new PipelineConfigResource.ReadRequest("rest-auto-retry-node"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("method", "GET");
+      draft.put("retryTimes", 0);
+      draft.put("retryDelayMs", 1);
+      draft.putObject("retryMethods").putArray("retryMethod").add("POST");
+      draft.putObject("retryStatusCodes").putArray("retryStatusCode").add("418");
+      var write = resource.write("rest-auto-retry-doc",
+          new PipelineConfigResource.WriteRequest("rest-auto-retry-node", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform("rest-auto-retry-node").getTransform();
+      JsonNode wire = ConfigJsonSerializer.toJson(diskMeta, provider);
+      assertEquals("GET", wire.at("/method").asText());
+      assertEquals("POST", wire.at("/retryMethods/retryMethod/0").asText());
+      assertEquals("418", wire.at("/retryStatusCodes/retryStatusCode/0").asText());
+      assertTrue(wire.at("/retryTimes").isNumber());
+      assertEquals(0, wire.at("/retryTimes").intValue());
+      assertTrue(wire.at("/retryDelayMs").isNumber());
+      assertEquals(1L, wire.at("/retryDelayMs").longValue());
+
+      ClassLoader loader = diskMeta.getClass().getClassLoader();
+      Class<?> restType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+      Object data = dataType.getConstructor().newInstance();
+      Object rest = restType.getConstructor(TransformMeta.class, diskMeta.getClass(),
+          dataType, int.class, PipelineMeta.class, org.apache.hop.pipeline.Pipeline.class)
+          .newInstance(reopened.findTransform("rest-auto-retry-node"), diskMeta, data, 0,
+              reopened, Mockito.spy(new LocalPipelineEngine()));
+      restType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class).invoke(rest, provider);
+      assertTrue((Boolean) restType.getMethod("init").invoke(rest));
+      Method invoke = restType.getDeclaredMethod("invokeRestExchange", Object[].class,
+          String.class, java.util.LinkedHashMap.class, java.util.LinkedHashMap.class,
+          java.util.LinkedHashMap.class);
+      invoke.setAccessible(true);
+      try {
+        for (int status : new int[] {429, 503}) {
+          dataType.getField("realUrl").set(data, base + "/status" + status);
+          dataType.getField("method").set(data, "GET");
+          Object result = invoke.invoke(rest, (Object) new Object[0], null,
+              new java.util.LinkedHashMap<String, String>(),
+              new java.util.LinkedHashMap<String, String>(),
+              new java.util.LinkedHashMap<String, String>());
+          var code = result.getClass().getDeclaredField("status");
+          code.setAccessible(true);
+          assertEquals(200, code.getInt(result),
+              "the default HttpClient5 retry must return the second response");
+        }
+      } finally {
+        restType.getMethod("dispose").invoke(rest);
+      }
+      assertEquals(2, count429.get(), "Hop-level retry lists do not include GET or 429");
+      assertEquals(2, count503.get(), "HttpClient5 also retries 503 independently");
+      System.out.println("PROD_P0_REST_HTTPCLIENT_DEFAULT_429_503_RETRY_DISK_REOPEN=PASS");
+    } finally {
+      server.stop(0);
+    }
+  }
+
   private static Object exchange(Constructor<?> ctor, int status) {
     try {
       return ctor.newInstance(status, new byte[0], Map.of(), null);
