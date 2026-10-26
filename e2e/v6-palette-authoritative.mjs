@@ -569,6 +569,72 @@ try {
     acceptedCategoryNodes.map(node => node.pluginId).join(",") + " persisted; " +
     rejectedCategoryPlugins.join(",") + " returned real HTTP 422 without phantom edits.");
 
+  // A failed P0 add must not erase a legitimate unsaved edit. This differs
+  // from the clean-graph rejection checks above: the dirty graph must remain
+  // savable and persist the preceding successful transform to real .hpl.
+  const dirtyBaselineIds = new Set(additionalGraph.nodes.map(node => node.id));
+  const dirtyAddPending = post("/edit/add");
+  await palette.getByRole("button", { name: "表输入（TableInput）", exact: true }).click();
+  const dirtyAddResponse = await dirtyAddPending;
+  if (!dirtyAddResponse.ok()) throw new Error(`Dirty-rejection setup TableInput HTTP ${dirtyAddResponse.status()}`);
+  const dirtyGraph = await dirtyAddResponse.json();
+  const dirtyAdded = dirtyGraph.nodes.filter(node => !dirtyBaselineIds.has(node.id));
+  if (dirtyAdded.length !== 1 || dirtyAdded[0].pluginId !== "TableInput") {
+    throw new Error("Dirty-rejection setup must add exactly one real TableInput");
+  }
+  await rf(dirtyAdded[0].id).waitFor({ state: "visible" });
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const dirtyRecent = await recent.locator(".transform-items button").evaluateAll(buttons =>
+    buttons.map(button => button.getAttribute("aria-label")));
+  const dirtyRestPending = post("/edit/add");
+  await palette.getByRole("button", { name: "REST 客户端（Rest）", exact: true }).click();
+  const dirtyRestResponse = await dirtyRestPending;
+  let expectedDirtyGraph = dirtyGraph;
+  if (dirtyRestResponse.status() === 422) {
+    await page.locator(".preview-note.error-note[role=alert]").waitFor({ state: "visible" });
+    await awaitSettledGraph(dirtyGraph);
+    const dirtyRecentAfter = await recent.locator(".transform-items button").evaluateAll(buttons =>
+      buttons.map(button => button.getAttribute("aria-label")));
+    if (JSON.stringify(dirtyRecentAfter) !== JSON.stringify(dirtyRecent) ||
+        await page.locator(".dirty-state.is-dirty").count() !== 1 ||
+        !(await page.getByRole("button", { name: "保存（Save）", exact: true }).isEnabled())) {
+      throw new Error("Rejected REST add erased or contaminated an unsaved real TableInput edit");
+    }
+    console.log("V6 dirty-rejection preservation proof passed: real REST HTTP 422 retained unsaved TableInput and Save.");
+  } else if (dirtyRestResponse.ok()) {
+    expectedDirtyGraph = await dirtyRestResponse.json();
+    const newlyAcceptedRest = expectedDirtyGraph.nodes.filter(node =>
+      !dirtyGraph.nodes.some(before => before.id === node.id));
+    if (newlyAcceptedRest.length !== 1 || newlyAcceptedRest[0].pluginId !== "Rest") {
+      throw new Error("Newly supported REST add must create exactly one authoritative Rest node");
+    }
+  } else {
+    throw new Error(`Unexpected dirty-graph REST HTTP ${dirtyRestResponse.status()}`);
+  }
+  const dirtySavePending = post("/save");
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+  const dirtySaveResponse = await dirtySavePending;
+  if (!dirtySaveResponse.ok()) throw new Error("Dirty graph failed to save after REST runtime response");
+  const dirtySaved = await dirtySaveResponse.json();
+  if (dirtySaved.nodes.length !== expectedDirtyGraph.nodes.length ||
+      !dirtySaved.nodes.some(node => node.id === dirtyAdded[0].id && node.pluginId === "TableInput")) {
+    throw new Error("Dirty graph save lost the previously accepted TableInput");
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const dirtyReopenPending = post("/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const dirtyReopenResponse = await dirtyReopenPending;
+  if (!dirtyReopenResponse.ok()) throw new Error("Dirty graph disk reopen failed");
+  const dirtyReopened = await dirtyReopenResponse.json();
+  if (dirtyReopened.nodes.length !== expectedDirtyGraph.nodes.length ||
+      !dirtyReopened.nodes.some(node => node.id === dirtyAdded[0].id && node.pluginId === "TableInput") ||
+      JSON.stringify(dirtyReopened.edges.map(edge => edge.id).sort()) !==
+        JSON.stringify(expectedDirtyGraph.edges.map(edge => edge.id).sort())) {
+    throw new Error("Dirty graph disk reopen lost a previously successful edit after REST runtime response");
+  }
+  console.log("V6 dirty-graph disk proof passed: prior successful edit survived REST response, save, and real .hpl reopen.");
+
   const rap = requests.filter(({ url }) => {
     const pathname = new URL(url).pathname;
     return pathname === "/ui" || pathname.startsWith("/ui/");
