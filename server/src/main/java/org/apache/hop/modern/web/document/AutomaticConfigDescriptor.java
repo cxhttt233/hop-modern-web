@@ -365,6 +365,21 @@ public final class AutomaticConfigDescriptor {
                       + "against incoming row metadata. This describes runtime wire "
                       + "compatibility, not a save-time validator."),
               new RuntimePrecondition(
+                  "REST_REQUEST_HEADER_EXACT_DUPLICATES_LAST_WINS_ACCEPT_OVERRIDES_DEFAULT",
+                  List.of("/headers/header", "/applicationType"),
+                  "Native Rest.invokeRestExchange() reads headers.header[*] in configured "
+                      + "order into a LinkedHashMap<String,String>. When the exact header name "
+                      + "occurs more than once, the later row value replaces the earlier value "
+                      + "on the outgoing HTTP request, although both ordered entries remain "
+                      + "in the editable JSON and persisted Hop XML. Unlike query parameters, "
+                      + "these request headers are not a multivalue list at runtime. An explicit "
+                      + "Accept header, detected case-insensitively, suppresses the default "
+                      + "Accept derived from applicationType (or streaming SSE). Keep the "
+                      + "canonical indexed paths /headers/header/<index>/field and "
+                      + "/headers/header/<index>/name; do not deduplicate or silently change "
+                      + "draft entries at save time. Diagnose the effective outgoing headers "
+                      + "separately from the lossless config wire format."),
+              new RuntimePrecondition(
                   "REST_REPEATED_QUERY_PARAMETER_NAMES_PRESERVE_ORDER_AND_VALUES",
                   List.of("/url", "/parameters/parameter"),
                   "Native Rest.buildRequestUri() starts with the existing URL query and "
