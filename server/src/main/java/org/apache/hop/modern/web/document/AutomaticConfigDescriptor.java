@@ -636,7 +636,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "SORT_ROWS_GETFIELDS_PROPAGATES_SORT_FLAGS_AND_NORMALIZES_STORAGE",
                   List.of("/fields/field"),
-                  "SortRowsMeta.getFields() preserves incoming field names, types and positions but annotates each resolved fields.field[*].name with sortedDescending = !ascending, caseInsensitive = !case_sensitive, collatorDisabled = !collator_enabled and collatorStrength from collator_strength. Selected keys are also normalized to STORAGE_TYPE_NORMAL with null storage metadata; unselected or unknown fields are left untouched. The presorted flag does not change this getFields metadata propagation. This is a downstream row-metadata compatibility diagnostic, not a save-time validator."));
+                  "SortRowsMeta.getFields() preserves incoming field names, types and positions but annotates each resolved fields.field[*].name with sortedDescending = !ascending, caseInsensitive = !case_sensitive, collatorDisabled = !collator_enabled and collatorStrength from collator_strength. Selected keys are also normalized to STORAGE_TYPE_NORMAL with null storage metadata; unselected or unknown fields are left untouched. The presorted flag does not change this getFields metadata propagation. This is a downstream row-metadata compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "SORT_ROWS_NONCOLLATOR_STRING_KEYS_USE_JAVA_CODE_UNIT_ORDER",
+                  List.of("/fields/field"),
+                  "For native SortRows string keys with fields.field[*].collator_enabled=false and case_sensitive=true, pinned ValueMetaBase.compare() uses Java String.compareTo, not locale-aware or natural-language ordering. For example, the character 乙 (U+4E59) sorts before 甲 (U+7532) in ascending order. Multi-key SortRows still applies configured ascending/descending flags in list order. To request locale-aware collation, the user must enable the collator and choose a supported strength; do not silently reinterpret the saved key order or compare semantics. This is a runtime compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" ->
           List.of(
               new RuntimePrecondition(
