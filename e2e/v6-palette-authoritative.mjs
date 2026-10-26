@@ -313,8 +313,13 @@ try {
     const target = rf(node.id);
     await target.waitFor({ state: "visible" });
     const visibleName = (await target.locator(".transform-node-copy strong").innerText()).trim();
+    // Use the same selected-node contextual Configure action already proven
+    // by V4; this avoids browser click-count coalescing on the node name.
+    await target.click();
+    const configure = target.locator(".node-context-actions").getByRole("button", { name: `配置转换：${visibleName}（Configure）`, exact: true });
+    await configure.waitFor({ state: "visible" });
     pending = post("/config/read");
-    await target.getByRole("button", { name: `配置转换：${visibleName}`, exact: true }).click();
+    await configure.click();
     const response = await pending;
     const config = await response.json();
     if (!response.ok() || config.nodeId !== node.id || config.pluginId !== "TableInput") {
