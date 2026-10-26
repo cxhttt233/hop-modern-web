@@ -601,6 +601,39 @@ try {
       throw new Error("Rejected REST add erased or contaminated an unsaved real TableInput edit");
     }
     console.log("V6 dirty-rejection preservation proof passed: real REST HTTP 422 retained unsaved TableInput and Save.");
+    // A rejected REST add must not create an undo entry or corrupt the
+    // successful TableInput edit immediately before it. Exercise the real
+    // Hop undo/redo endpoints through the Chinese editor toolbar, then keep
+    // the restored transform for the existing disk save/reopen proof below.
+    const undoAfterRejectPending = post("/edit/undo");
+    await page.getByRole("button", { name: "撤销（Undo）", exact: true }).click();
+    const undoAfterRejectResponse = await undoAfterRejectPending;
+    if (!undoAfterRejectResponse.ok()) throw new Error("Undo after rejected REST add failed");
+    const undoAfterRejectGraph = await undoAfterRejectResponse.json();
+    if (undoAfterRejectGraph.nodes.length !== dirtyBaselineIds.size ||
+        !undoAfterRejectGraph.nodes.every(node => dirtyBaselineIds.has(node.id)) ||
+        JSON.stringify(undoAfterRejectGraph.edges.map(edge => edge.id).sort()) !==
+          JSON.stringify(dirtyGraph.edges.map(edge => edge.id).sort())) {
+      throw new Error("Rejected REST add polluted Hop undo history: undo did not remove the last accepted TableInput");
+    }
+    await awaitSettledGraph(undoAfterRejectGraph);
+    const redoAfterRejectPending = post("/edit/redo");
+    await page.getByRole("button", { name: "重做（Redo）", exact: true }).click();
+    const redoAfterRejectResponse = await redoAfterRejectPending;
+    if (!redoAfterRejectResponse.ok()) throw new Error("Redo after rejected REST add failed");
+    const redoAfterRejectGraph = await redoAfterRejectResponse.json();
+    if (redoAfterRejectGraph.nodes.length !== dirtyGraph.nodes.length ||
+        !redoAfterRejectGraph.nodes.some(node =>
+          node.id === dirtyAdded[0].id && node.pluginId === "TableInput") ||
+        JSON.stringify(redoAfterRejectGraph.edges.map(edge => edge.id).sort()) !==
+          JSON.stringify(dirtyGraph.edges.map(edge => edge.id).sort())) {
+      throw new Error("Redo after rejected REST add did not restore the accepted TableInput and its edges");
+    }
+    await awaitSettledGraph(redoAfterRejectGraph);
+    if (!(await page.getByRole("button", { name: "保存（Save）", exact: true }).isEnabled())) {
+      throw new Error("Redo after rejected REST add left restored unsaved work impossible to save");
+    }
+    console.log("V6 REST rejection undo/redo proof passed: rejected operation did not pollute real Hop history; accepted TableInput restored and remains savable.");
   } else if (dirtyRestResponse.ok()) {
     expectedDirtyGraph = await dirtyRestResponse.json();
     const newlyAcceptedRest = expectedDirtyGraph.nodes.filter(node =>
