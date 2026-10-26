@@ -408,7 +408,7 @@ public final class AutomaticConfigDescriptor {
                   "REST_BINARY_RESULT_FIELD_CHANGES_OUTPUT_ROW_TYPE",
                   List.of("/result/name", "/result/binary", "/result/code",
                       "/result/response_time", "/result/response_header"),
-                  "RestMeta.getFields() emits result.name as BINARY when result.binary is true, otherwise STRING; no result body column is added when result.name is empty. Result code and response_time columns are INTEGER, and response_header is STRING. These names are output columns, not incoming fields; preserve their types when deriving downstream row metadata. This is an output-schema compatibility diagnostic, not a save-time validator."),
+                  "RestMeta.getFields() emits result.name as BINARY when result.binary is true, otherwise STRING; no result body column is added when result.name is empty. Result code and response_time columns are INTEGER, and response_header is STRING. With result.binary true, native Rest.invokeRestExchange() keeps the HTTP response body as raw byte[] without charset decoding, and Rest.assembleResultRow() puts those bytes into the BINARY result.name column before the INTEGER status column. A textual result instead decodes the response bytes using the response charset. These names are output columns, not incoming fields; preserve native types and order when deriving downstream row metadata. This is an output-schema compatibility diagnostic, not a save-time validator."),
               new RuntimePrecondition(
                   "REST_RESULT_FIELD_NAMES_RESOLVE_VARIABLES_AND_OMIT_EMPTY_HEADER",
                   List.of("/result/name", "/result/code", "/result/response_time",
