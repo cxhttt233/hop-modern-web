@@ -1,0 +1,180 @@
+package org.apache.hop.modern.web.document;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
+import org.apache.hop.core.HopClientEnvironment;
+import org.apache.hop.core.plugins.IPlugin;
+import org.apache.hop.core.plugins.PluginRegistry;
+import org.apache.hop.core.plugins.TransformPluginType;
+import org.apache.hop.core.row.IRowMeta;
+import org.apache.hop.core.row.IValueMeta;
+import org.apache.hop.core.variables.Variables;
+import org.apache.hop.metadata.serializer.json.ConfigJsonSerializer;
+import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
+import org.apache.hop.modern.web.ModernWebServer;
+import org.apache.hop.pipeline.PipelineHopMeta;
+import org.apache.hop.pipeline.PipelineMeta;
+import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
+import org.apache.hop.pipeline.transform.ITransform;
+import org.apache.hop.pipeline.transform.ITransformMeta;
+import org.apache.hop.pipeline.transform.RowAdapter;
+import org.apache.hop.pipeline.transform.TransformMeta;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * Native P0 engine acceptance for the three ordered SelectValues stages:
+ * select/rename, remove, then metadata conversion. This verifies emitted
+ * rows after T3 JSON editing and a real HPL disk reopen, rather than only
+ * the serializer's metadata projection.
+ */
+@EnabledIfSystemProperty(named = "prodP0Expected", matches = "true")
+class SelectValuesFullPipelineP0Test {
+  @BeforeAll
+  static void init() throws Exception {
+    HopClientEnvironment.init();
+    ModernWebServer.initializePipelinePlugins();
+  }
+
+  @Test
+  void selectValuesThreeTypedListsConvertAndRemoveRealRowsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin, "pinned DataGrid plugin required");
+    assertNotNull(selectPlugin, "pinned SelectValues plugin required");
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader gridLoader = grid.getClass().getClassLoader();
+    Class<?> fieldType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> gridFields = new ArrayList<>();
+    for (String name : List.of("原始量<&>", "临时", "测站")) {
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, name);
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      gridFields.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, gridFields);
+    List<Object> gridLines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("42", "skip-a", "黄河"),
+        List.of("7", "skip-b", "长江"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      gridLines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, gridLines);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SelectValues", "select-node", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-three-stages-full-pipeline");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-three-stages.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    assertEquals(1, loaded.nrPipelineHops());
+
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-full-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-full-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject(), "SelectValues wire must contain nested fields object");
+    fields.put("select_unspecified", false);
+    ArrayNode selected = fields.putArray("field");
+    selected.addObject().put("name", "测站").put("rename", "站点");
+    selected.addObject().put("name", "原始量<&>").put("rename", "阶段量<&>");
+    selected.addObject().put("name", "临时").put("rename", "待删");
+    fields.putArray("remove").addObject().put("name", "待删");
+    fields.putArray("meta").addObject()
+        .put("name", "阶段量<&>").put("rename", "流量_整数")
+        .put("type", "Integer").put("length", -1).put("precision", -1);
+
+    var write = resource.write("select-full-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertTrue(wire.at("/fields/select_unspecified").isBoolean());
+    assertFalse(wire.at("/fields/select_unspecified").booleanValue());
+    assertEquals(3, wire.at("/fields/field").size());
+    assertEquals("测站", wire.at("/fields/field/0/name").asText());
+    assertEquals("站点", wire.at("/fields/field/0/rename").asText());
+    assertEquals("原始量<&>", wire.at("/fields/field/1/name").asText());
+    assertEquals("阶段量<&>", wire.at("/fields/field/1/rename").asText());
+    assertEquals("临时", wire.at("/fields/field/2/name").asText());
+    assertEquals("待删", wire.at("/fields/remove/0/name").asText());
+    assertEquals("阶段量<&>", wire.at("/fields/meta/0/name").asText());
+    assertEquals("流量_整数", wire.at("/fields/meta/0/rename").asText());
+    assertEquals("Integer", wire.at("/fields/meta/0/type").asText());
+    assertTrue(wire.at("/fields/meta/0/length").isIntegralNumber());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("select-node", 0);
+      assertNotNull(output, "real engine must prepare SelectValues");
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native SelectValues pipeline must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(emittedMeta.get(), "SelectValues must emit real rows");
+    assertEquals(2, emittedMeta.get().size(), "removed column must not be emitted");
+    assertEquals("站点", emittedMeta.get().getValueMeta(0).getName());
+    assertEquals(IValueMeta.TYPE_STRING, emittedMeta.get().getValueMeta(0).getType());
+    assertEquals("流量_整数", emittedMeta.get().getValueMeta(1).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, emittedMeta.get().getValueMeta(1).getType());
+    assertEquals(2, emitted.size());
+    assertEquals("黄河", emitted.get(0)[0]);
+    assertEquals(42L, ((Number) emitted.get(0)[1]).longValue());
+    assertEquals("长江", emitted.get(1)[0]);
+    assertEquals(7L, ((Number) emitted.get(1)[1]).longValue());
+    System.out.println("PROD_P0_SELECTVALUES_FULL_PIPELINE_THREE_STAGES_TYPED_ROWS=PASS");
+  }
+}
