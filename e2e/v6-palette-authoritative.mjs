@@ -609,6 +609,9 @@ try {
     await page.getByRole("button", { name: "撤销（Undo）", exact: true }).click();
     const undoAfterRejectResponse = await undoAfterRejectPending;
     if (!undoAfterRejectResponse.ok()) throw new Error("Undo after rejected REST add failed");
+    // The earlier REST 422 alert must not remain after a new successful
+    // authoritative graph command. A new failure still shows its own alert.
+    await page.locator(".preview-note.error-note[role=alert]").waitFor({ state: "hidden", timeout: 10000 });
     const undoAfterRejectGraph = await undoAfterRejectResponse.json();
     if (undoAfterRejectGraph.nodes.length !== dirtyBaselineIds.size ||
         !undoAfterRejectGraph.nodes.every(node => dirtyBaselineIds.has(node.id)) ||
