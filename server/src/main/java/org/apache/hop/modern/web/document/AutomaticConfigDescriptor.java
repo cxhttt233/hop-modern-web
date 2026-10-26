@@ -350,6 +350,18 @@ public final class AutomaticConfigDescriptor {
                       + "effective request target after variable resolution; this is not a "
                       + "save-time validator or a request execution proof."),
               new RuntimePrecondition(
+                  "REST_BODYLESS_ACTIVE_METHODS_SEND_ZERO_LENGTH_ENTITY",
+                  List.of("/method", "/applicationType", "/bodyField"),
+                  "Native Rest.executeRequest() supplies an empty HTTP entity for active-body "
+                      + "methods such as POST, PUT, PATCH and DELETE when no bodyField or "
+                      + "request body is configured. HttpClient5 therefore sends Content-Length: 0 "
+                      + "with an empty body rather than omitting the entity entirely. The "
+                      + "configured applicationType still determines the entity Content-Type. "
+                      + "Keep method and applicationType as STRING fields and a missing or "
+                      + "empty bodyField distinct from a supplied upstream payload across "
+                      + "JSON configuration and Hop XML disk reopen. This is a wire-level "
+                      + "compatibility diagnostic, not a save-time validation rule."),
+              new RuntimePrecondition(
                   "REST_BINARY_REQUEST_BODY_PRESERVES_BYTES_AND_CLIENT_OWNS_CONTENT_LENGTH",
                   List.of("/method", "/applicationType", "/bodyField", "/headers/header"),
                   "When a REST input bodyField resolves to a BINARY upstream row field, "
