@@ -160,8 +160,10 @@ class ConcatFieldsFullPipelineP0Test {
         "removeSelectedFields must remove both source columns from actual rows");
     assertEquals("拼接<&>雪", emittedMeta.get().getValueMeta(0).getName());
     assertEquals(2, emitted.size());
-    assertArrayEquals(new Object[] {"黄河|水网"}, emitted.get(0));
-    assertArrayEquals(new Object[] {"长江|数字孪生"}, emitted.get(1));
+    // Hop RowDataUtil over-allocates backing Object[] capacity; only the
+    // declared output schema width is semantically meaningful.
+    assertEquals("黄河|水网", emitted.get(0)[0]);
+    assertEquals("长江|数字孪生", emitted.get(1)[0]);
     System.out.println("PROD_P0_CONCATFIELDS_FULL_PIPELINE_JSON_HPL_ROWS=PASS");
   }
 }
