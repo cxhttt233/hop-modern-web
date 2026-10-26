@@ -5110,8 +5110,8 @@ class TransformP0L2RoundTripTest {
     decode.setAccessible(true);
 
     byte[] utf16 = "黄河<&雪>".getBytes(java.nio.charset.StandardCharsets.UTF_16LE);
-    Object latinHeader = contentType.getMethod("parse", String.class)
-        .invoke(null, "text/plain; charset=ISO-8859-1");
+    Object latinHeader = contentType.getMethod("create", String.class, java.nio.charset.Charset.class)
+        .invoke(null, "text/plain", java.nio.charset.StandardCharsets.ISO_8859_1);
     Object body = entityType.getConstructor(byte[].class, contentType)
         .newInstance(utf16, latinHeader);
     assertEquals("黄河<&雪>", decode.invoke(runtime, body));
@@ -5119,8 +5119,8 @@ class TransformP0L2RoundTripTest {
 
     // Reverse the disagreement: UTF-8 config must win over a UTF-16LE header.
     diskMeta.getClass().getMethod("setEncoding", String.class).invoke(diskMeta, "UTF-8");
-    Object utf16Header = contentType.getMethod("parse", String.class)
-        .invoke(null, "text/plain; charset=UTF-16LE");
+    Object utf16Header = contentType.getMethod("create", String.class, java.nio.charset.Charset.class)
+        .invoke(null, "text/plain", java.nio.charset.StandardCharsets.UTF_16LE);
     Object utf8Body = entityType.getConstructor(byte[].class, contentType)
         .newInstance("河流<&>".getBytes(java.nio.charset.StandardCharsets.UTF_8),
             utf16Header);
