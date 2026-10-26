@@ -294,6 +294,46 @@ try {
     }
   }
 
+  // Two real TableInput transforms share the same plugin descriptor but have
+  // different document identities. The Chinese config header must identify the
+  // selected node so edits cannot be mistaken for a neighboring TableInput.
+  // Opening/canceling these panels must not issue any config/write requests.
+  const tableNodes = [added[0], activated.find(node => node.pluginId === "TableInput")];
+  if (tableNodes.some(node => !node) || tableNodes[0].id === tableNodes[1].id) {
+    throw new Error("Two distinct real TableInput nodes are required for config identity proof");
+  }
+  const configRequestCount = suffix => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith(suffix)).length;
+  const readsBeforeIdentity = configRequestCount("/config/read");
+  const writesBeforeIdentity = configRequestCount("/config/write");
+  for (const node of tableNodes) {
+    pending = post("/config/read");
+    await rf(node.id).dblclick();
+    const response = await pending;
+    const config = await response.json();
+    if (!response.ok() || config.nodeId !== node.id || config.pluginId !== "TableInput") {
+      throw new Error("Config identity read did not target the selected real TableInput: " + node.id);
+    }
+    const visibleName = (await rf(node.id).locator(".transform-node-copy strong").innerText()).trim();
+    const configPanel = page.locator("form.generic-config");
+    await configPanel.waitFor({ state: "visible" });
+    const heading = (await configPanel.locator("header strong").innerText()).trim();
+    const detail = (await configPanel.locator("header small").innerText()).trim();
+    if (heading !== `转换配置：${visibleName}` ||
+        !detail.startsWith(`节点：${node.id} · `) ||
+        !detail.includes(config.descriptor.className)) {
+      throw new Error("Config panel mislabeled selected TableInput identity: " +
+        JSON.stringify({ nodeId: node.id, heading, detail }));
+    }
+    await configPanel.getByRole("button", { name: "取消配置（Cancel）", exact: true }).click();
+    await configPanel.waitFor({ state: "hidden" });
+  }
+  if (configRequestCount("/config/read") !== readsBeforeIdentity + 2 ||
+      configRequestCount("/config/write") !== writesBeforeIdentity) {
+    throw new Error("Inspecting two TableInput identities must read twice without writing config");
+  }
+  console.log("V6 config identity proof passed: two distinct real TableInput nodes, Chinese target labels, no config writes.");
+
   // Native click and keyboard additions also update the same recent section;
   // reopening a real file must not discard session-only component shortcuts.
   await assertRecentOrder(["SelectValues", "TableInput", "FilterRows"]);
