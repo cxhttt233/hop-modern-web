@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.Consumes;
@@ -124,7 +123,7 @@ class PipelineFiniteJsonEntityABTest {
         return request == null || request.path() == null
             ? Response.status(400).entity("invalid_json").build()
             : Response.ok("accepted").build();
-      } catch (JsonProcessingException invalid) {
+      } catch (java.io.IOException invalid) {
         return Response.status(400).entity("invalid_json").build();
       }
     }
