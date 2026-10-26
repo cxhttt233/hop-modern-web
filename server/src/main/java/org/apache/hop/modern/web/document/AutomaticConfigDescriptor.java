@@ -227,7 +227,19 @@ public final class AutomaticConfigDescriptor {
                       + "A redirect-only header is not copied into the final response "
                       + "header JSON. Preserve the editable URL and output field names "
                       + "through JSON/HPL transport; this is a runtime compatibility "
-                      + "diagnostic, not a save-time validator."));
+                      + "diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "HTTP_GZIP_RESPONSE_DECODES_BEFORE_CONFIGURED_TEXT_AND_BYTE_COUNT",
+                  List.of("/url", "/encoding", "/result/name", "/result/code"),
+                  "The pinned Http transform uses the default HttpClient 5 content-compression "
+                      + "handling for GET responses. For a Content-Encoding: gzip response, "
+                      + "the entity passed to Http.readResponseBody() is already decompressed. "
+                      + "The configured encoding then converts those decompressed bytes into "
+                      + "the result.name STRING; the status remains the final HTTP status in "
+                      + "result.code. HttpData.lastHttpResponseBodyBytes counts decompressed "
+                      + "entity bytes, not the compressed wire Content-Length. Preserve the "
+                      + "editable URL, encoding and result field names through JSON/HPL; "
+                      + "this is a runtime diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           List.of(
               new RuntimePrecondition(
