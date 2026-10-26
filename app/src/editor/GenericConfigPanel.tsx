@@ -8,6 +8,7 @@ export interface ConfigPropertyDescriptor {
 export interface ConfigDescriptor { className: string; properties: ConfigPropertyDescriptor[]; }
 export interface GenericConfigPanelProps {
   descriptor: ConfigDescriptor; config: Record<string, unknown>; disabled?: boolean;
+  transformName?: string; transformId?: string;
   onCancel: () => void; onSave: (config: Record<string, unknown>) => void | Promise<void>;
 }
 
@@ -76,7 +77,7 @@ export function applyGenericConfigDraft(original: Record<string, unknown>, descr
   }, { ...original });
 }
 
-export function GenericConfigPanel({ descriptor, config, disabled, onCancel, onSave }: GenericConfigPanelProps) {
+export function GenericConfigPanel({ descriptor, config, transformName, transformId, disabled, onCancel, onSave }: GenericConfigPanelProps) {
   const [draft, setDraft] = useState<Record<string, unknown>>(() => Object.fromEntries(
     descriptor.properties.filter((p) => !p.sensitive).map((p) => [p.key, read(config, p.key)])));
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
@@ -111,7 +112,7 @@ export function GenericConfigPanel({ descriptor, config, disabled, onCancel, onS
   };
 
   return <form className="config-panel generic-config" onSubmit={(e) => { e.preventDefault(); if (!Object.values(invalid).some(Boolean)) void onSave(applyGenericConfigDraft(config, descriptor, draft)); }}>
-    <header><strong>转换配置</strong><small>{descriptor.className}</small></header>
+    <header><strong>转换配置{transformName ? `：${transformName}` : ""}</strong><small>{transformId ? `节点：${transformId} · ` : ""}{descriptor.className}</small></header>
     {groups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
       <label key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
     <footer><button type="button" aria-label="取消配置（Cancel）" onClick={onCancel}>取消</button><button type="submit" aria-label="保存配置（Save）" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
