@@ -366,20 +366,25 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "REST_NONSTREAMING_204_AND_HTTP_ERRORS_EMIT_TYPED_RESULT_ROWS",
                   List.of("/url", "/method", "/streamingEnabled", "/result/name",
-                      "/result/code", "/result/response_header", "/result/binary"),
-                  "In non-streaming mode, native Rest.invokeRestExchange() materializes "
-                      + "HTTP responses without requiring a 2xx status. A 204 No Content "
-                      + "response produces an empty STRING body, while 401, 404 and 500 "
-                      + "responses with UTF-8 entities retain their response text. The "
-                      + "result.code field is declared INTEGER in Hop row metadata and "
-                      + "carried as a Java Long in the native result row; the configured "
+                      "/result/code", "/result/response_header", "/result/binary",
+                      "/retryMethods/retryMethod", "/retryStatusCodes/retryStatusCode",
+                      "/retryTimes"),
+                  "In non-streaming mode when Hop retry rules do not match the outgoing "
+                      + "method or response status, native Rest.invokeRestExchange() "
+                      + "materializes HTTP responses without requiring a 2xx status. "
+                      + "A 204 No Content response produces an empty STRING body, while "
+                      + "401, 404 and 500 responses with UTF-8 entities retain their text. "
+                      + "The result.code field is declared INTEGER in Hop row metadata "
+                      + "and carried as a Java Long in the native result row; the "
                       + "response-header field carries final-response header JSON. "
-                      + "Status >=400 is logged but does not by itself throw a HopException "
-                      + "in this non-streaming path. Streaming non-2xx behavior differs and "
-                      + "must not be inferred from this contract. Preserve the typed "
-                      + "result.binary flag, output names and status across JSON edits "
-                      + "and Hop XML disk reopen; this is a runtime compatibility "
-                      + "diagnostic, not a save-time validator."),
+                      + "Status >=400 is logged but does not by itself throw in this path. "
+                      + "If retryMethods includes the outgoing method and retryStatusCodes "
+                      + "includes the status, executeWithRetry() can instead exhaust "
+                      + "retries and throw, even with retryTimes=0. Do not promise an "
+                      + "output row for matching retry rules; streaming non-2xx behavior "
+                      + "also differs. Preserve typed result fields and the grouped "
+                      + "retry LISTs across JSON edits and Hop XML disk reopen; this "
+                      + "is a runtime diagnostic, not a save-time validator."),
               new RuntimePrecondition(
                   "REST_BODYLESS_ACTIVE_METHODS_SEND_ZERO_LENGTH_ENTITY",
                   List.of("/method", "/applicationType", "/bodyField"),
