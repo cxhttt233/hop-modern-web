@@ -468,6 +468,73 @@ try {
     throw new Error("Unexpected REST runtime HTTP status " + restResponse.status());
   }
 
+
+  // Prove two more P0 categories are genuinely executable in the browser,
+  // not merely present as localized Palette labels. Both additions must be
+  // accepted by the real Hop backend and survive a real .hpl disk reopen.
+  const additionalOpenPending = post("/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const additionalOpenResponse = await additionalOpenPending;
+  if (!additionalOpenResponse.ok()) throw new Error("P0 cross-category baseline reopen failed");
+  let additionalGraph = await additionalOpenResponse.json();
+  const baselineEdges = additionalGraph.edges.map(edge => edge.id).sort();
+  await page.waitForFunction(({ nodeCount, edgeCount }) =>
+    document.querySelectorAll(".react-flow__node").length === nodeCount &&
+    document.querySelectorAll(".react-flow__edge").length === edgeCount,
+    { nodeCount: additionalGraph.nodes.length, edgeCount: baselineEdges.length },
+    { timeout: 10000 });
+  const addedCategoryNodes = [];
+  for (const [pluginId, chineseName] of [["DataGrid", "数据网格"], ["TableOutput", "表输出"]]) {
+    const beforeIds = new Set(additionalGraph.nodes.map(node => node.id));
+    const beforeAddCount = requests.filter(({ url, method }) =>
+      method === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
+    const categoryAddPending = post("/edit/add");
+    await palette.getByRole("button", { name: `${chineseName}（${pluginId}）`, exact: true }).click();
+    const categoryAddResponse = await categoryAddPending;
+    if (!categoryAddResponse.ok()) {
+      throw new Error(`Real P0 ${pluginId} Palette add returned HTTP ${categoryAddResponse.status()}`);
+    }
+    const requestBody = categoryAddResponse.request().postDataJSON();
+    const nextGraph = await categoryAddResponse.json();
+    const addedNodes = nextGraph.nodes.filter(node => !beforeIds.has(node.id));
+    const afterAddCount = requests.filter(({ url, method }) =>
+      method === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
+    if (requestBody?.pluginId !== pluginId || addedNodes.length !== 1 ||
+        addedNodes[0].pluginId !== pluginId ||
+        nextGraph.nodes.length !== beforeIds.size + 1 ||
+        afterAddCount !== beforeAddCount + 1 ||
+        JSON.stringify(nextGraph.edges.map(edge => edge.id).sort()) !== JSON.stringify(baselineEdges)) {
+      throw new Error(`Real P0 ${pluginId} add changed the wrong graph identity or issued duplicate requests`);
+    }
+    await rf(addedNodes[0].id).waitFor({ state: "visible" });
+    if (await rf(addedNodes[0].id).locator(".transform-node-content").getAttribute("data-plugin-id") !== pluginId ||
+        await recent.getByRole("button", { name: `最近使用：${chineseName}（${pluginId}）`, exact: true }).count() !== 1) {
+      throw new Error(`Real P0 ${pluginId} node or recent shortcut did not match authoritative identity`);
+    }
+    addedCategoryNodes.push({ id: addedNodes[0].id, pluginId });
+    additionalGraph = nextGraph;
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const categorySavePending = post("/save");
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+  const categorySaveResponse = await categorySavePending;
+  if (!categorySaveResponse.ok()) throw new Error("Real P0 cross-category .hpl save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const categoryReopenPending = post("/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const categoryReopenResponse = await categoryReopenPending;
+  if (!categoryReopenResponse.ok()) throw new Error("Real P0 cross-category .hpl disk reopen failed");
+  const categoryReopened = await categoryReopenResponse.json();
+  if (categoryReopened.nodes.length !== additionalGraph.nodes.length ||
+      JSON.stringify(categoryReopened.edges.map(edge => edge.id).sort()) !== JSON.stringify(baselineEdges) ||
+      !addedCategoryNodes.every(({ id, pluginId }) =>
+        categoryReopened.nodes.some(node => node.id === id && node.pluginId === pluginId))) {
+    throw new Error("Real P0 DataGrid/TableOutput node identities were lost on disk reopen");
+  }
+  console.log("V6 cross-category runtime proof passed: real DataGrid and TableOutput Palette add, one request each, disk save/reopen.");
+
   const rap = requests.filter(({ url }) => {
     const pathname = new URL(url).pathname;
     return pathname === "/ui" || pathname.startsWith("/ui/");
