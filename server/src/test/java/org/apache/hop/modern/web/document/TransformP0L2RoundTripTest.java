@@ -5034,6 +5034,100 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REST_RESPONSE_CHARSET_HEADER_FALLBACK_DISK_REOPEN=PASS");
   }
 
+
+  @Test
+  void httpConfiguredEncodingOverridesResponseCharsetAfterRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "Http");
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "HTTP_RESPONSE_BODY_DECODING_USES_CONFIG_ENCODING_NOT_RESPONSE_CHARSET"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/encoding", "/result/name"), contract.keyListPointers());
+    assertEquals(Shape.STRING, property(descriptor, "encoding").shape());
+    assertEquals(Shape.OBJECT, property(descriptor, "result").shape());
+    assertEquals(Shape.STRING, property(descriptor, "result", "name").shape());
+
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Http");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/响应?name=雪");
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("http-config-encoding-vs-header.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("http-config-encoding-vs-header");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Http", "http-encoding-node", original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("http-encoding-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("http-encoding-doc",
+        new PipelineConfigResource.ReadRequest("http-encoding-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("encoding", "UTF-16LE");
+    ((com.fasterxml.jackson.databind.node.ObjectNode) changed.path("result"))
+        .put("name", "响应正文<&雪>");
+    var write = resource.write("http-encoding-doc",
+        new PipelineConfigResource.WriteRequest("http-encoding-node", changed));
+    assertEquals(200, write.getStatus());
+
+    store.save(hpl, loaded);
+    var reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("http-encoding-node").getTransform();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertTrue(wire.at("/encoding").isTextual());
+    assertEquals("UTF-16LE", wire.at("/encoding").asText());
+    assertEquals("响应正文<&雪>", wire.at("/result/name").asText());
+
+    // Deliberately contradictory Content-Type: native Http must use its saved encoding.
+    ClassLoader loader = diskMeta.getClass().getClassLoader();
+    Class<?> contentType = loader.loadClass("org.apache.hc.core5.http.ContentType");
+    Class<?> entityType = loader.loadClass("org.apache.hc.core5.http.io.entity.ByteArrayEntity");
+    Class<?> httpEntity = loader.loadClass("org.apache.hc.core5.http.HttpEntity");
+    Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.http.HttpData");
+    Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.http.Http");
+    Object data = dataType.getConstructor().newInstance();
+    var ctor = runtimeType.getConstructor(
+        org.apache.hop.pipeline.transform.TransformMeta.class,
+        diskMeta.getClass(), dataType, int.class,
+        org.apache.hop.pipeline.PipelineMeta.class,
+        org.apache.hop.pipeline.Pipeline.class);
+    Object runtime = ctor.newInstance(
+        reopened.findTransform("http-encoding-node"), diskMeta, data, 0, reopened,
+        org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+    var decode = runtimeType.getDeclaredMethod("readResponseBody", httpEntity);
+    decode.setAccessible(true);
+
+    byte[] utf16 = "黄河<&雪>".getBytes(java.nio.charset.StandardCharsets.UTF_16LE);
+    Object latinHeader = contentType.getMethod("parse", String.class)
+        .invoke(null, "text/plain; charset=ISO-8859-1");
+    Object body = entityType.getConstructor(byte[].class, contentType)
+        .newInstance(utf16, latinHeader);
+    assertEquals("黄河<&雪>", decode.invoke(runtime, body));
+    assertEquals(utf16.length, dataType.getField("lastHttpResponseBodyBytes").getInt(data));
+
+    // Reverse the disagreement: UTF-8 config must win over a UTF-16LE header.
+    diskMeta.getClass().getMethod("setEncoding", String.class).invoke(diskMeta, "UTF-8");
+    Object utf16Header = contentType.getMethod("parse", String.class)
+        .invoke(null, "text/plain; charset=UTF-16LE");
+    Object utf8Body = entityType.getConstructor(byte[].class, contentType)
+        .newInstance("河流<&>".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            utf16Header);
+    assertEquals("河流<&>", decode.invoke(runtime, utf8Body));
+    System.out.println("PROD_P0_HTTP_CONFIG_ENCODING_OVERRIDES_HEADER_DISK_REOPEN=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
