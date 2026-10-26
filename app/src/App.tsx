@@ -162,6 +162,9 @@ export function App() {
 
   const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>, onSuccess?: () => void) => {
     if (source.kind !== "server" || savingRef.current) return;
+    // A new authoritative edit supersedes an earlier failure notice.
+    // If this request also fails, its own error will be displayed below.
+    setConfigError(undefined);
     command().then((graph) => {
       reconcileGraph(graph);
       setDirty(true);
