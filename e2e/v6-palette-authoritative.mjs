@@ -386,6 +386,14 @@ try {
   // If T3 later enables REST, prove the successful path against disk too.
   const restBeforeNodes = new Set(recentReopened.nodes.map(node => node.id));
   const restBeforeEdges = recentReopened.edges.map(edge => edge.id).sort();
+  // A real open response can precede the React Flow commit. The REST failure
+  // proof must compare against the fully rendered reopened graph, not against
+  // a transient canvas from the preceding document generation.
+  await page.waitForFunction(({ nodeCount, edgeCount }) =>
+    document.querySelectorAll(".react-flow__node").length === nodeCount &&
+    document.querySelectorAll(".react-flow__edge").length === edgeCount,
+    { nodeCount: restBeforeNodes.size, edgeCount: restBeforeEdges.length },
+    { timeout: 10000 });
   const restBeforeRecent = await recent.locator(".transform-items button").evaluateAll(buttons =>
     buttons.map(button => button.getAttribute("aria-label")));
   const restAddCount = () => requests.filter(({ url, method }) =>
@@ -401,11 +409,18 @@ try {
     await page.locator(".preview-note.error-note[role=alert]").waitFor({ state: "visible" });
     const recentAfterReject = await recent.locator(".transform-items button").evaluateAll(buttons =>
       buttons.map(button => button.getAttribute("aria-label")));
-    if (await page.locator(".react-flow__node").count() !== restBeforeNodes.size ||
-        await page.locator(".react-flow__edge").count() !== restBeforeEdges.length ||
-        await page.getByRole("button", { name: "保存（Save）", exact: true }).isEnabled() ||
-        JSON.stringify(recentAfterReject) !== JSON.stringify(restBeforeRecent)) {
-      throw new Error("Rejected REST add corrupted the real graph, dirty state or recent Palette");
+    const actualNodes = await page.locator(".react-flow__node").count();
+    const actualEdges = await page.locator(".react-flow__edge").count();
+    const saveEnabled = await page.getByRole("button", { name: "保存（Save）", exact: true }).isEnabled();
+    const recentUnchanged = JSON.stringify(recentAfterReject) === JSON.stringify(restBeforeRecent);
+    if (actualNodes !== restBeforeNodes.size || actualEdges !== restBeforeEdges.length ||
+        saveEnabled || !recentUnchanged) {
+      // Keep diagnostics to non-sensitive counts and booleans only.
+      throw new Error("Rejected REST add changed editor state: " + JSON.stringify({
+        expectedNodes: restBeforeNodes.size, actualNodes,
+        expectedEdges: restBeforeEdges.length, actualEdges,
+        saveEnabled, recentUnchanged,
+      }));
     }
     const rejectedReopenPending = post("/api/pipelines/open");
     await page.getByRole("button", { name: "Choose pipeline" }).click();
