@@ -407,6 +407,15 @@ try {
   }
   if (restResponse.status() === 422) {
     await page.locator(".preview-note.error-note[role=alert]").waitFor({ state: "visible" });
+    // Failed edits reconcile React Flow nodes from the authoritative graph.
+    // Edge DOM elements may briefly unmount while the unchanged nodes are
+    // remeasured; assert the settled UI, not that intermediate render frame.
+    // This must still time out if any real edge or node remains missing.
+    await page.waitForFunction(({ nodeCount, edgeCount }) =>
+      document.querySelectorAll(".react-flow__node").length === nodeCount &&
+      document.querySelectorAll(".react-flow__edge").length === edgeCount,
+      { nodeCount: restBeforeNodes.size, edgeCount: restBeforeEdges.length },
+      { timeout: 10000 });
     const recentAfterReject = await recent.locator(".transform-items button").evaluateAll(buttons =>
       buttons.map(button => button.getAttribute("aria-label")));
     const actualNodes = await page.locator(".react-flow__node").count();
