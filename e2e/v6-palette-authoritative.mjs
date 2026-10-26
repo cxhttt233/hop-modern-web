@@ -313,15 +313,13 @@ try {
     const target = rf(node.id);
     await target.waitFor({ state: "visible" });
     const visibleName = (await target.locator(".transform-node-copy strong").innerText()).trim();
-    // Use the same selected-node contextual Configure action already proven
-    // by V4; this avoids browser click-count coalescing on the node name.
-    // Select through the icon, not the name button (which itself opens config).
-    // React Flow renders NodeToolbar in a viewport portal, outside the node DOM.
-    await target.locator(".transform-node-icon").click();
-    const configure = page.locator(".node-context-actions").getByRole("button", { name: `配置转换：${visibleName}（Configure）`, exact: true });
-    await configure.waitFor({ state: "visible" });
+    // Native keyboard activation remains possible when auto-placed nodes
+    // visually overlap: focus the actual node-name button and press Enter.
+    // This must invoke the same real Hop config/read as pointer activation.
+    const configure = target.getByRole("button", { name: `配置转换：${visibleName}`, exact: true });
+    await configure.focus();
     pending = post("/config/read");
-    await configure.click();
+    await page.keyboard.press("Enter");
     const response = await pending;
     const config = await response.json();
     if (!response.ok() || config.nodeId !== node.id || config.pluginId !== "TableInput") {
