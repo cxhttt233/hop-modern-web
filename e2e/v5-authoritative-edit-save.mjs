@@ -1,4 +1,7 @@
 import { chromium } from "playwright";
+import { copyFile, mkdtemp, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const pipelinePath=process.env.REAL_HPL_PATH;
 if(!pipelinePath) throw new Error("REAL_HPL_PATH is required");
 const browser=await chromium.launch({headless:true});
@@ -9,14 +12,25 @@ const post=s=>page.waitForResponse(r=>r.request().method()==="POST"&&new URL(r.u
 const rf=id=>page.locator('.react-flow__node[data-id="'+id+'"]');
 try{
  await page.goto("http://127.0.0.1:5173",{waitUntil:"networkidle"});
+ // Chinese-first accessibility must work in the real browser file-open flow.
+ if(await page.getByRole("textbox",{name:"服务器流程路径（Server-visible pipeline path）",exact:true}).count()!==1 ||
+    await page.getByRole("button",{name:"打开文件（Open pipeline）",exact:true}).count()!==1)
+   throw new Error("Chinese file-open controls are missing accessible names");
  let p=post("/api/pipelines/open");
  await page.getByLabel("Server-visible pipeline path").fill(pipelinePath);
  await page.getByRole("button",{name:"Open pipeline"}).click();
  const opened=await (await p).json(); const original=opened.nodes[0]?.id;
  if(!original) throw new Error("real pipeline has no transform");
+ // Verify screen-reader names on the real editor before exercising undo/redo/save.
+ for(const name of ["打开流程（Choose pipeline）","适配画布（Fit canvas）","撤销（Undo）","重做（Redo）","保存（Save）"])
+   if(await page.getByRole("button",{name,exact:true}).count()!==1)
+     throw new Error("Missing localized toolbar accessible name: "+name);
+ if(await page.getByRole("textbox",{name:"搜索组件（Search transforms）",exact:true}).count()!==1)
+   throw new Error("Missing localized Palette search accessible name");
+
  await rf(original).waitFor();
  if(await page.getByRole("button",{name:"Save"}).isEnabled()) throw new Error("freshly opened authoritative graph must start clean");
- if(await page.getByText("Unsaved",{exact:true}).count()) throw new Error("freshly opened authoritative graph must not show dirty state");
+ if(await page.locator(".dirty-state.is-dirty").count()) throw new Error("freshly opened authoritative graph must not show dirty state");
  p=post("/edit/add");
  const paletteTableInput=page.getByRole("button",{name:"TableInput"});
  const canvas=page.locator(".react-flow__pane");
@@ -25,7 +39,7 @@ try{
  const added=addedGraph.nodes.find(n=>!opened.nodes.some(o=>o.id===n.id));
  if(!added) throw new Error("authoritative add missing new transform");
  await rf(added.id).waitFor();
- await page.getByText("Unsaved",{exact:true}).waitFor({state:"visible"});
+ await page.locator(".dirty-state.is-dirty").waitFor({state:"visible"});
  if(!(await page.getByRole("button",{name:"Save"}).isEnabled())) throw new Error("authoritative edit must enable Save");
  p=post("/edit/undo"); await page.getByRole("button",{name:"Undo"}).click();
  const undone=await (await p).json();
@@ -61,11 +75,123 @@ try{
  p=post("/save"); await page.getByRole("button",{name:"Save"}).click();
  const saved=await (await p).json();
  if(!saved.nodes.some(n=>n.id===added.id)||!saved.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("save lost semantics");
- await page.getByText("Unsaved",{exact:true}).waitFor({state:"hidden"});
+ await page.locator(".dirty-state.is-dirty").waitFor({state:"hidden"});
  if(await page.getByRole("button",{name:"Save"}).isEnabled()) throw new Error("successful save must return editor to clean state");
- p=post("/api/pipelines/open"); await page.getByRole("button",{name:"Open pipeline"}).click();
+ p=post("/api/pipelines/open");
+ await page.getByRole("button",{name:"Choose pipeline"}).click();
+ await page.getByRole("button",{name:"Open pipeline"}).click();
  const reopened=await (await p).json();
  if(!reopened.nodes.some(n=>n.id===added.id)||!reopened.edges.some(e=>e.source===original&&e.target===added.id)) throw new Error("disk reopen lost semantics");
+ // Deleting a connected transform must remove its incident Hop, not leave
+ // an invisible/dangling edge in the authoritative graph or disk XML.
+ // Undo must restore BOTH the transform and its connection; redo must remove
+ // both again. This is distinct from V6's undo/redo of a newly drawn Hop.
+ const incidentEdge=reopened.edges.find(e=>e.source===original&&e.target===added.id);
+ if(!incidentEdge) throw new Error("connected-node cascade fixture has no incident Hop");
+ await rf(added.id).click();
+ let cascadePending=post("/edit/delete");
+ await page.getByRole("button",{name:"Delete"}).click();
+ const cascadeDeleteResponse=await cascadePending;
+ if(!cascadeDeleteResponse.ok()) throw new Error("connected-node cascade delete HTTP "+cascadeDeleteResponse.status());
+ const cascadeDeleted=await cascadeDeleteResponse.json();
+ const dangling=g=>g.edges.some(e=>e.source===added.id||e.target===added.id);
+ if(cascadeDeleted.nodes.some(n=>n.id===added.id)||dangling(cascadeDeleted))
+   throw new Error("connected-node delete left the transform or a dangling Hop");
+ await rf(added.id).waitFor({state:"detached"});
+ await page.locator('.react-flow__edge[data-id="'+incidentEdge.id+'"]').waitFor({state:"detached"});
+ cascadePending=post("/edit/undo");
+ await page.getByRole("button",{name:"撤销（Undo）",exact:true}).click();
+ const cascadeUndoResponse=await cascadePending;
+ if(!cascadeUndoResponse.ok()) throw new Error("connected-node undo HTTP "+cascadeUndoResponse.status());
+ const cascadeRestored=await cascadeUndoResponse.json();
+ if(!cascadeRestored.nodes.some(n=>n.id===added.id)||
+    !cascadeRestored.edges.some(e=>e.source===original&&e.target===added.id))
+   throw new Error("undo connected-node deletion did not restore node and Hop");
+ await rf(added.id).waitFor({state:"visible"});
+ cascadePending=post("/edit/redo");
+ await page.getByRole("button",{name:"重做（Redo）",exact:true}).click();
+ const cascadeRedoResponse=await cascadePending;
+ if(!cascadeRedoResponse.ok()) throw new Error("connected-node redo HTTP "+cascadeRedoResponse.status());
+ const cascadeRedone=await cascadeRedoResponse.json();
+ if(cascadeRedone.nodes.some(n=>n.id===added.id)||dangling(cascadeRedone))
+   throw new Error("redo connected-node deletion left a node or dangling Hop");
+ cascadePending=post("/save");
+ await page.getByRole("button",{name:"保存（Save）",exact:true}).click();
+ const cascadeSaveResponse=await cascadePending;
+ if(!cascadeSaveResponse.ok()) throw new Error("connected-node cascade disk save HTTP "+cascadeSaveResponse.status());
+ const cascadeSaved=await cascadeSaveResponse.json();
+ if(cascadeSaved.nodes.some(n=>n.id===added.id)||dangling(cascadeSaved))
+   throw new Error("connected-node cascade disk save returned dangling graph");
+ cascadePending=post("/api/pipelines/open");
+ await page.getByRole("button",{name:"Choose pipeline"}).click();
+ await page.getByRole("button",{name:"Open pipeline"}).click();
+ const cascadeReopenResponse=await cascadePending;
+ if(!cascadeReopenResponse.ok()) throw new Error("connected-node cascade disk reopen HTTP "+cascadeReopenResponse.status());
+ const cascadeReopened=await cascadeReopenResponse.json();
+ if(cascadeReopened.nodes.some(n=>n.id===added.id)||dangling(cascadeReopened)||
+    !cascadeReopened.nodes.some(n=>n.id===original))
+   throw new Error("disk reopen retained deleted transform/Hop or lost unaffected source");
+ await rf(added.id).waitFor({state:"detached"});
+ console.log("V5 connected-node cascade proof passed: delete removes incident Hop; undo restores both; redo removes both; disk reopen has no dangling edge.");
+ // Real filesystem save failure must not mark a dirty graph as saved.
+ // Keep this case isolated from the shared .hpl fixtures and restore the
+ // original path before retrying, with no HTTP mocks or intercepted responses.
+ const recoveryRoot=await mkdtemp(join(tmpdir(),"hop-modern-save-recovery-"));
+ try{
+   const liveDir=join(recoveryRoot,"live");
+   const offlineDir=join(recoveryRoot,"offline");
+   await mkdir(liveDir);
+   const recoveryPath=join(liveDir,"recovery.hpl");
+   await copyFile(pipelinePath,recoveryPath);
+   let pending=post("/api/pipelines/open");
+   await page.getByRole("button",{name:"Choose pipeline"}).click();
+   await page.getByLabel("Server-visible pipeline path").fill(recoveryPath);
+   await page.getByRole("button",{name:"Open pipeline"}).click();
+   const openedResponse=await pending;
+   if(!openedResponse.ok()) throw new Error("recovery fixture open failed");
+   const recoveryOpened=await openedResponse.json();
+   pending=post("/edit/add");
+   await page.getByRole("button",{name:"表输入（TableInput）",exact:true}).click();
+   const editedResponse=await pending;
+   if(!editedResponse.ok()) throw new Error("recovery fixture edit failed");
+   const edited=await editedResponse.json();
+   const recoveryAdded=edited.nodes.find(n=>!recoveryOpened.nodes.some(o=>o.id===n.id));
+   if(!recoveryAdded) throw new Error("recovery fixture did not add a real transform");
+   await page.locator(".dirty-state.is-dirty").waitFor({state:"visible"});
+
+   // Moving the parent directory makes the original path unwritable even
+   // when the CI runner has permission to write individual files.
+   await rename(liveDir,offlineDir);
+   pending=post("/save");
+   await page.getByRole("button",{name:"保存（Save）",exact:true}).click();
+   const failedSave=await pending;
+   if(failedSave.status()!==500) throw new Error("missing-path save must return HTTP 500");
+   await page.getByRole("alert").waitFor({state:"visible"});
+   await page.locator(".dirty-state.is-dirty").waitFor({state:"visible"});
+   if(!(await page.getByRole("button",{name:"Save"}).isEnabled()))
+     throw new Error("failed save must retain the dirty graph and retry action");
+
+   await rename(offlineDir,liveDir);
+   pending=post("/save");
+   await page.getByRole("button",{name:"保存（Save）",exact:true}).click();
+   const retriedSave=await pending;
+   if(!retriedSave.ok()) throw new Error("save retry after restoring path failed");
+   await page.locator(".dirty-state.is-dirty").waitFor({state:"hidden"});
+   if(await page.getByRole("button",{name:"Save"}).isEnabled())
+     throw new Error("successful save retry must clear the dirty indicator");
+   if(!(await readFile(recoveryPath,"utf8")).includes(recoveryAdded.id))
+     throw new Error("save retry did not persist the added transform to .hpl XML");
+
+   pending=post("/api/pipelines/open");
+   await page.getByRole("button",{name:"Choose pipeline"}).click();
+   await page.getByRole("button",{name:"Open pipeline"}).click();
+   const recovered=await (await pending).json();
+   if(!recovered.nodes.some(n=>n.id===recoveryAdded.id))
+     throw new Error("disk reopen after failed-save retry lost the transform");
+   console.log("V5 real save failure/retry proof passed: HTTP 500 retains dirty state; restored path saves and disk reopens.");
+ }finally{
+   await rm(recoveryRoot,{recursive:true,force:true});
+ }
  for(const s of ["/edit/add","/edit/delete","/edit/connect","/edit/undo","/edit/redo","/save"])
    if(!requests.some(r=>r.method==="POST"&&new URL(r.url).pathname.endsWith(s))) throw new Error("missing product request "+s);
  if(requests.some(r=>{const x=new URL(r.url).pathname;return x==="/ui"||x.startsWith("/ui/")})) throw new Error("RAP /ui entered");
