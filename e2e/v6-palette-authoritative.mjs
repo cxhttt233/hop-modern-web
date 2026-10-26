@@ -315,8 +315,10 @@ try {
     const visibleName = (await target.locator(".transform-node-copy strong").innerText()).trim();
     // Use the same selected-node contextual Configure action already proven
     // by V4; this avoids browser click-count coalescing on the node name.
-    await target.click();
-    const configure = target.locator(".node-context-actions").getByRole("button", { name: `配置转换：${visibleName}（Configure）`, exact: true });
+    // Select through the icon, not the name button (which itself opens config).
+    // React Flow renders NodeToolbar in a viewport portal, outside the node DOM.
+    await target.locator(".transform-node-icon").click();
+    const configure = page.locator(".node-context-actions").getByRole("button", { name: `配置转换：${visibleName}（Configure）`, exact: true });
     await configure.waitFor({ state: "visible" });
     pending = post("/config/read");
     await configure.click();
