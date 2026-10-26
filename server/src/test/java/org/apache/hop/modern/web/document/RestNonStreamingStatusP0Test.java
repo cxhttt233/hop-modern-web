@@ -83,8 +83,9 @@ class RestNonStreamingStatusP0Test {
               "REST_NONSTREAMING_204_AND_HTTP_ERRORS_EMIT_TYPED_RESULT_ROWS"))
           .findFirst().orElseThrow();
       assertEquals(List.of("/url", "/method", "/streamingEnabled", "/result/name",
-          "/result/code", "/result/response_header", "/result/binary"),
-          contract.keyListPointers());
+          "/result/code", "/result/response_header", "/result/binary",
+          "/retryMethods/retryMethod", "/retryStatusCodes/retryStatusCode",
+          "/retryTimes"), contract.keyListPointers());
 
       var provider = new MemoryMetadataProvider();
       var variables = new Variables();
@@ -107,6 +108,11 @@ class RestNonStreamingStatusP0Test {
       draft.put("url", base + "/status204");
       draft.put("method", "GET");
       draft.put("streamingEnabled", false);
+      // Deliberately exclude GET/204/401/404/500 from Hop-level retry matching.
+      // Otherwise a configured retry status may throw after exhaustion rather than emit a row.
+      draft.put("retryTimes", 0);
+      draft.putObject("retryMethods").putArray("retryMethod").add("POST");
+      draft.putObject("retryStatusCodes").putArray("retryStatusCode").add("418");
       ObjectNode result = (ObjectNode) draft.path("result");
       assertTrue(result.isObject());
       result.put("name", "响应正文_雪<&>");
@@ -126,6 +132,10 @@ class RestNonStreamingStatusP0Test {
       assertEquals("GET", wire.at("/method").asText());
       assertTrue(wire.at("/streamingEnabled").isBoolean());
       assertFalse(wire.at("/streamingEnabled").booleanValue());
+      assertEquals("POST", wire.at("/retryMethods/retryMethod/0").asText());
+      assertEquals("418", wire.at("/retryStatusCodes/retryStatusCode/0").asText());
+      assertTrue(wire.at("/retryTimes").isNumber());
+      assertEquals(0, wire.at("/retryTimes").intValue());
       assertEquals("响应正文_雪<&>", wire.at("/result/name").asText());
       assertEquals("HTTP状态码", wire.at("/result/code").asText());
       assertEquals("响应头", wire.at("/result/response_header").asText());
