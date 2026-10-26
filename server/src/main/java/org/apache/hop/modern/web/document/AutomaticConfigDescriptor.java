@@ -193,6 +193,19 @@ public final class AutomaticConfigDescriptor {
                       + "value has the same JSON shape. This is a response-payload "
                       + "compatibility diagnostic, not a save-time validator."),
               new RuntimePrecondition(
+                  "HTTP_401_FATAL_204_EMPTY_OTHER_ERROR_STATUS_BODY",
+                  List.of("/url", "/encoding", "/result/name", "/result/code",
+                      "/result/response_header"),
+                  "The native Http.callHttpService() treats HTTP 401 Unauthorized as a "
+                      + "HopTransformException instead of producing the configured result "
+                      + "columns. HTTP 204 No Content produces an empty STRING body, while "
+                      + "HTTP 404 and other non-401 error responses return their response "
+                      + "body and numeric status in the configured output fields. Preserve "
+                      + "the saved result.name/result.code/result.response_header wire "
+                      + "configuration; do not treat every HTTP 4xx response as a returned "
+                      + "row or every non-2xx response as fatal. This is a runtime "
+                      + "compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
                   "HTTP_RESPONSE_BODY_DECODING_USES_CONFIG_ENCODING_NOT_RESPONSE_CHARSET",
                   List.of("/encoding", "/result/name"),
                   "Http.readResponseBody() buffers the response bytes, then wraps them in a "
