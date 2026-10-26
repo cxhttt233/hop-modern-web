@@ -410,6 +410,20 @@ public final class AutomaticConfigDescriptor {
                       "/result/response_time", "/result/response_header"),
                   "RestMeta.getFields() emits result.name as BINARY when result.binary is true, otherwise STRING; no result body column is added when result.name is empty. Result code and response_time columns are INTEGER, and response_header is STRING. With result.binary true, native Rest.invokeRestExchange() keeps the HTTP response body as raw byte[] without charset decoding, and Rest.assembleResultRow() puts those bytes into the BINARY result.name column before the INTEGER status column. A textual result instead decodes the response bytes using the response charset. These names are output columns, not incoming fields; preserve native types and order when deriving downstream row metadata. This is an output-schema compatibility diagnostic, not a save-time validator."),
               new RuntimePrecondition(
+                  "REST_GZIP_CONTENT_ENCODING_DECOMPRESSES_BEFORE_TEXT_AND_BINARY_RESULT",
+                  List.of("/url", "/result/name", "/result/binary", "/result/code"),
+                  "For a non-streaming REST response with Content-Encoding: gzip, the "
+                      + "native HttpClient5 response entity is transparently decompressed "
+                      + "before Rest.materialize() consumes its bytes. With result.binary=false, "
+                      + "the decompressed bytes are decoded using the response Content-Type "
+                      + "charset and emitted as STRING. With result.binary=true, the BINARY "
+                      + "result contains the decompressed entity bytes, not the compressed "
+                      + "transfer representation. HTTP status remains the final numeric code. "
+                      + "Preserve result.binary as BOOLEAN and result.name/result.code as "
+                      + "STRING through JSON config and Hop XML; do not interpret binary mode "
+                      + "as a guarantee of wire-level compressed bytes. This is a runtime "
+                      + "compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
                   "REST_RESULT_FIELD_NAMES_RESOLVE_VARIABLES_AND_OMIT_EMPTY_HEADER",
                   List.of("/result/name", "/result/code", "/result/response_time",
                       "/result/response_header"),
