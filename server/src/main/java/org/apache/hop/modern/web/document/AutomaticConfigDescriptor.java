@@ -350,6 +350,20 @@ public final class AutomaticConfigDescriptor {
                       + "effective request target after variable resolution; this is not a "
                       + "save-time validator or a request execution proof."),
               new RuntimePrecondition(
+                  "REST_GET_RELATIVE_302_307_REDIRECTS_RETURN_FINAL_RESPONSE",
+                  List.of("/url", "/method", "/result/name", "/result/code",
+                      "/result/response_header"),
+                  "The pinned REST transform creates an HttpClient5 client with default "
+                      + "redirect handling. For GET, same-origin relative 302 and 307 "
+                      + "Location redirects are followed; the result.name STRING body, "
+                      + "result.code INTEGER status and result.response_header STRING JSON "
+                      + "describe the final response, not the intermediate redirect. "
+                      + "A header present only on the 3xx response is not carried into "
+                      + "the final header JSON. Keep the configured URL and output-field "
+                      + "names losslessly editable across config JSON and Hop XML disk "
+                      + "reopen; this is a native runtime compatibility diagnostic, "
+                      + "not a save-time validator."),
+              new RuntimePrecondition(
                   "REST_BODYLESS_ACTIVE_METHODS_SEND_ZERO_LENGTH_ENTITY",
                   List.of("/method", "/applicationType", "/bodyField"),
                   "Native Rest.executeRequest() supplies an empty HTTP entity for active-body "
