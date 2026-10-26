@@ -153,9 +153,15 @@ class HttpRedirectP0Test {
           assertEquals(200L, output[1],
               "the status column must describe the final response, not the redirect");
           JsonNode headers = mapper.readTree((String) output[2]);
-          assertEquals("yes", headers.path("X-Final-Only").asText());
-          assertFalse(headers.has("X-Intermediate-Only"),
-              "headers from the intermediate 3xx must not leak into final output");
+          String finalHeaderKey = null;
+          for (var names = headers.fieldNames(); names.hasNext();) {
+            String key = names.next();
+            if (key.equalsIgnoreCase("X-Final-Only")) finalHeaderKey = key;
+            assertFalse(key.equalsIgnoreCase("X-Intermediate-Only"),
+                "headers from the intermediate 3xx must not leak into final output");
+          }
+          assertNotNull(finalHeaderKey, "final response header must be present");
+          assertEquals("yes", headers.path(finalHeaderKey).asText());
         }
       } finally {
         httpType.getMethod("dispose").invoke(nativeHttp);
