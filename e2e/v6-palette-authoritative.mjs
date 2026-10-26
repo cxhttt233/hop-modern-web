@@ -304,17 +304,23 @@ try {
   }
   const configRequestCount = suffix => requests.filter(({ url, method }) =>
     method === "POST" && new URL(url).pathname.endsWith(suffix)).length;
+  // The real file-open response can arrive before React has switched from
+  // loading to the new graph; wait for the server-backed editor identity.
+  await page.locator(`.file-identity[data-document-name="${activatedReopened.name}"]`).waitFor({ state: "visible" });
   const readsBeforeIdentity = configRequestCount("/config/read");
   const writesBeforeIdentity = configRequestCount("/config/write");
   for (const node of tableNodes) {
+    const target = rf(node.id);
+    await target.waitFor({ state: "visible" });
+    const visibleName = (await target.locator(".transform-node-copy strong").innerText()).trim();
     pending = post("/config/read");
-    await rf(node.id).dblclick();
+    await target.getByRole("button", { name: `配置转换：${visibleName}`, exact: true }).click();
     const response = await pending;
     const config = await response.json();
     if (!response.ok() || config.nodeId !== node.id || config.pluginId !== "TableInput") {
       throw new Error("Config identity read did not target the selected real TableInput: " + node.id);
     }
-    const visibleName = (await rf(node.id).locator(".transform-node-copy strong").innerText()).trim();
+
     const configPanel = page.locator("form.generic-config");
     await configPanel.waitFor({ state: "visible" });
     const heading = (await configPanel.locator("header strong").innerText()).trim();
