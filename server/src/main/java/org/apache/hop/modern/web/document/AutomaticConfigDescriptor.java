@@ -191,7 +191,17 @@ public final class AutomaticConfigDescriptor {
                       + "with different casing remain distinct JSON keys. Consumers must "
                       + "not collapse repeated header values or infer that every header "
                       + "value has the same JSON shape. This is a response-payload "
-                      + "compatibility diagnostic, not a save-time validator."));
+                      + "compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "HTTP_RESPONSE_BODY_DECODING_USES_CONFIG_ENCODING_NOT_RESPONSE_CHARSET",
+                  List.of("/encoding", "/result/name"),
+                  "Http.readResponseBody() buffers the response bytes, then wraps them in a "
+                      + "new application/octet-stream entity before decoding. This discards "
+                      + "the original response Content-Type charset. HttpMeta.encoding "
+                      + "(default UTF-8) selects the decoding charset when non-empty; do "
+                      + "not reuse REST's response-header charset rules for Http. The "
+                      + "result.name column remains STRING. This is a native response "
+                      + "decoding compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           List.of(
               new RuntimePrecondition(
