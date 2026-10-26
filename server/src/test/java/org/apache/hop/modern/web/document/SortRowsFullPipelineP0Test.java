@@ -180,12 +180,12 @@ class SortRowsFullPipelineP0Test {
     assertEquals("站点", emittedMeta.get().getValueMeta(1).getName());
     assertFalse(emittedMeta.get().getValueMeta(1).isSortedDescending());
     assertEquals(4, emitted.size());
-    assertEquals(List.of("r3", "r2", "r1", "r4"),
+    // Native non-collator String comparison follows UTF-16 code-unit order:\n    // 乙 (U+4E59) precedes 甲 (U+7532), despite common spoken ordering.\n    assertEquals(List.of("r2", "r3", "r4", "r1"),
         emitted.stream().map(row -> (String) row[2]).toList(),
         "primary key descending and secondary key ascending must both affect real rows");
     assertEquals(List.of("2", "2", "1", "1"),
         emitted.stream().map(row -> (String) row[0]).toList());
-    assertEquals(List.of("甲", "乙", "甲", "乙"),
+    assertEquals(List.of("乙", "甲", "乙", "甲"),
         emitted.stream().map(row -> (String) row[1]).toList());
     System.out.println("PROD_P0_SORTROWS_FULL_PIPELINE_TWO_ORDERED_KEYS_JSON_HPL_ROWS=PASS");
   }
