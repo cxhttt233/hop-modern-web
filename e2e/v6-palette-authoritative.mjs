@@ -37,6 +37,8 @@ try {
     "流程与关联": [["FilterRows", "过滤记录"], ["GroupBy", "分组汇总"], ["MergeJoin", "合并连接"], ["StreamLookup", "流查询"], ["UniqueRowsByHashSet", "记录去重"]],
   };
   const palette = page.locator("aside.transform-palette");
+  const recent = palette.locator(".recent-transform-section");
+  if (await recent.count() !== 0) throw new Error("Recent transforms must start empty before any successful Hop add");
   const groups = palette.locator(".transform-group");
   if (await groups.count() !== Object.keys(expectedPalette).length) {
     throw new Error("Real Hop Palette lacks the four Chinese P0 groups");
@@ -64,6 +66,14 @@ try {
   const plugins = ["TableInput", "SelectValues", "FilterRows"];
   const chineseNames = { TableInput: "表输入", SelectValues: "选择字段", FilterRows: "过滤记录" };
   const accessibleName = pluginId => `${chineseNames[pluginId]}（${pluginId}）`;
+  const assertRecentOrder = async ids => {
+    const actual = await recent.locator(".transform-items button").evaluateAll(buttons =>
+      buttons.map(button => button.getAttribute("aria-label")));
+    const expected = ids.map(id => `最近使用：${chineseNames[id]}（${id}）`);
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new Error(`Recent Hop Palette order mismatch: ${JSON.stringify({ actual, expected })}`);
+    }
+  };
   const positions = [{ x: 560, y: 260 }, { x: 760, y: 360 }, { x: 960, y: 260 }];
 
   for (let i = 0; i < plugins.length; i++) {
@@ -98,6 +108,14 @@ try {
         `Palette drop center mismatch for ${plugins[i]}: drop=(${dropX},${dropY}), nodeCenter=(${nodeCenterX},${nodeCenterY})`
       );
     }
+  }
+
+  // Successful real drag-to-add operations populate a deduplicated, bounded
+  // session-only recent Palette; the authoritative 20-plugin catalog stays intact.
+  await recent.waitFor({ state: "visible" });
+  await assertRecentOrder(["FilterRows", "SelectValues", "TableInput"]);
+  if (await groups.count() !== Object.keys(expectedPalette).length) {
+    throw new Error("Recent Palette section must not replace the four canonical groups");
   }
 
   async function connect(from, to) {
@@ -275,6 +293,41 @@ try {
       throw new Error(`Palette click/Enter node ${node.pluginId} missing after real save/reopen`);
     }
   }
+
+  // Native click and keyboard additions also update the same recent section;
+  // reopening a real file must not discard session-only component shortcuts.
+  await assertRecentOrder(["SelectValues", "TableInput", "FilterRows"]);
+  const beforeRecentAdd = new Set(activatedReopened.nodes.map(node => node.id));
+  const addRequestsBefore = requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
+  pending = post("/edit/add");
+  await recent.getByRole("button", { name: "最近使用：表输入（TableInput）", exact: true }).click();
+  const recentAddResponse = await pending;
+  if (!recentAddResponse.ok()) throw new Error(`Recent Palette click HTTP ${recentAddResponse.status()}`);
+  const recentAddedGraph = await recentAddResponse.json();
+  const recentAdded = recentAddedGraph.nodes.find(node => !beforeRecentAdd.has(node.id));
+  if (!recentAdded || recentAdded.pluginId !== "TableInput" ||
+      recentAddedGraph.nodes.length !== beforeRecentAdd.size + 1) {
+    throw new Error("Recent Palette click did not create exactly one authoritative TableInput");
+  }
+  await rf(recentAdded.id).waitFor({ state: "visible" });
+  await assertRecentOrder(["TableInput", "SelectValues", "FilterRows"]);
+  const addRequestsAfter = requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/edit/add")).length;
+  if (addRequestsAfter !== addRequestsBefore + 1) throw new Error("Recent Palette shortcut issued duplicate add requests");
+  pending = post("/save");
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+  const recentSaved = await (await pending).json();
+  if (!recentSaved.nodes.some(node => node.id === recentAdded.id)) throw new Error("Recent shortcut add missing after disk save");
+  pending = post("/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const recentReopened = await (await pending).json();
+  if (!recentReopened.nodes.some(node => node.id === recentAdded.id && node.pluginId === "TableInput")) {
+    throw new Error("Recent shortcut add missing after real .hpl disk reopen");
+  }
+  await assertRecentOrder(["TableInput", "SelectValues", "FilterRows"]);
+  console.log("V6 recent Palette proof passed: successful drag/click/Enter recency, 3-item dedupe, shortcut real add, disk reopen.");
 
   const rap = requests.filter(({ url }) => {
     const pathname = new URL(url).pathname;
