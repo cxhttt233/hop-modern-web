@@ -478,7 +478,9 @@ export function App() {
 
         {configError && <div className="preview-note error-note" role="alert">操作失败：{configError}</div>}
         {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
-          <GenericConfigPanel descriptor={serverConfig.descriptor} config={serverConfig.config} disabled={configLoading || saving}
+          <GenericConfigPanel descriptor={serverConfig.descriptor} config={serverConfig.config}
+            transformName={String(configured.data.title ?? configured.id)} transformId={configured.id}
+            disabled={configLoading || saving}
             onCancel={() => { configRequestGeneration.current += 1; setConfigId(undefined); setServerConfig(undefined); setConfigLoading(false); setConfigError(undefined); }}
             onSave={(value) => applyTransformConfig(configured.id, value)} />
         )}
