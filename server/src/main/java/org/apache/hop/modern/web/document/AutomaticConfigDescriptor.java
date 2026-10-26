@@ -214,7 +214,20 @@ public final class AutomaticConfigDescriptor {
                       + "(default UTF-8) selects the decoding charset when non-empty; do "
                       + "not reuse REST's response-header charset rules for Http. The "
                       + "result.name column remains STRING. This is a native response "
-                      + "decoding compatibility diagnostic, not a save-time validator."));
+                      + "decoding compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "HTTP_GET_REDIRECTS_RETURN_FINAL_STATUS_BODY_AND_HEADERS",
+                  List.of("/url", "/encoding", "/result/name", "/result/code",
+                      "/result/response_header"),
+                  "The native Http.callHttpService() uses the HttpClient 5 GET redirect "
+                      + "policy: same-origin relative HTTP 302 and 307 Location redirects "
+                      + "are followed, and the configured result.name, result.code and "
+                      + "result.response_header columns describe the final response "
+                      + "(HTTP 200 in the local fixture), not the intermediate 3xx. "
+                      + "A redirect-only header is not copied into the final response "
+                      + "header JSON. Preserve the editable URL and output field names "
+                      + "through JSON/HPL transport; this is a runtime compatibility "
+                      + "diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           List.of(
               new RuntimePrecondition(
