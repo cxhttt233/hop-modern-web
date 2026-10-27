@@ -11,11 +11,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
+import org.apache.hop.core.row.IRowMeta;
+import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.row.RowMeta;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.serializer.json.ConfigJsonSerializer;
@@ -23,7 +26,9 @@ import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.modern.web.ModernWebServer;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
+import org.apache.hop.pipeline.transform.ITransform;
 import org.apache.hop.pipeline.transform.ITransformMeta;
+import org.apache.hop.pipeline.transform.RowAdapter;
 import org.apache.hop.pipeline.transform.TransformMeta;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -336,4 +341,135 @@ class RestNonStreamingStatusP0Test {
     }
   }
 
+
+  @Test
+  void restPaginationFlagWithoutConnectionFallsBackToSingleRequestAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    AtomicInteger firstPageRequests = new AtomicInteger();
+    AtomicInteger nextPageRequests = new AtomicInteger();
+    String responseBody = "{\"items\":[{\"station\":\"黄河<&>\"}],\"next\":\"/page2\"}";
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    String base = "http://127.0.0.1:" + server.getAddress().getPort();
+    server.createContext("/page1", exchange -> {
+      try (exchange) {
+        firstPageRequests.incrementAndGet();
+        exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+        exchange.getResponseHeaders().set("Link", "<" + base + "/page2>; rel=\"next\"");
+        byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(200, body.length);
+        exchange.getResponseBody().write(body);
+      }
+    });
+    server.createContext("/page2", exchange -> {
+      try (exchange) {
+        nextPageRequests.incrementAndGet();
+        byte[] body = "{\"items\":[{\"station\":\"长江\"}]}".getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(200, body.length);
+        exchange.getResponseBody().write(body);
+      }
+    });
+    server.start();
+    try {
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(plugin, "source-derived REST plugin must be installed");
+      ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+      original.setDefault();
+      original.getClass().getMethod("setUrl", String.class).invoke(original, base + "/page1");
+
+      var contract = AutomaticConfigDescriptor.describe(original.getClass())
+          .runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "REST_PAGINATION_WITHOUT_PAGING_CONNECTION_FALLS_BACK"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/paginationEnabled", "/connection_name"),
+          contract.keyListPointers());
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("rest-pagination-no-connection.hpl");
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("rest-pagination-no-connection");
+      pipeline.addTransform(new TransformMeta("Rest", "rest-pagination-source", original));
+      store.save(hpl, pipeline);
+
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("rest-pagination-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("rest-pagination-doc",
+          new PipelineConfigResource.ReadRequest("rest-pagination-source"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("url", base + "/page1");
+      draft.put("method", "GET");
+      draft.put("connection_name", "");
+      draft.put("paginationEnabled", true);
+      draft.put("maxPagesLoops", 3);
+      draft.put("resultSplitPath", "");
+      ObjectNode result = (ObjectNode) draft.path("result");
+      assertTrue(result.isObject());
+      result.put("name", "分页响应_雪");
+      result.put("code", "HTTP状态");
+      result.put("response_time", "");
+      result.put("response_header", "");
+      result.put("binary", false);
+      var write = resource.write("rest-pagination-doc",
+          new PipelineConfigResource.WriteRequest("rest-pagination-source", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      assertEquals(1, reopened.nrTransforms());
+      ITransformMeta diskMeta = reopened.findTransform("rest-pagination-source").getTransform();
+      JsonNode wire = ConfigJsonSerializer.toJson(diskMeta, provider);
+      assertEquals(base + "/page1", wire.at("/url").asText());
+      assertEquals("GET", wire.at("/method").asText());
+      assertTrue(wire.at("/paginationEnabled").isBoolean());
+      assertTrue(wire.at("/paginationEnabled").booleanValue());
+      assertEquals("", wire.at("/connection_name").asText());
+      assertEquals(3, wire.at("/maxPagesLoops").intValue());
+      assertEquals("分页响应_雪", wire.at("/result/name").asText());
+      assertEquals("HTTP状态", wire.at("/result/code").asText());
+      assertFalse(wire.at("/result/binary").booleanValue());
+
+      List<Object[]> rows = new CopyOnWriteArrayList<>();
+      List<IRowMeta> rowMetas = new CopyOnWriteArrayList<>();
+      LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+      engine.setMetadataProvider(provider);
+      try {
+        engine.prepareExecution();
+        ITransform source = engine.getRunThread("rest-pagination-source", 0);
+        assertNotNull(source);
+        source.addRowListener(new RowAdapter() {
+          @Override
+          public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+            rowMetas.add(rowMeta.clone());
+            rows.add(row.clone());
+          }
+        });
+        engine.startThreads();
+        engine.waitUntilFinished();
+        assertEquals(0, engine.getErrors(), "REST source pipeline must complete");
+      } finally {
+        if (!engine.isFinishedOrStopped()) engine.stopAll();
+        engine.cleanup();
+      }
+
+      assertEquals(1, firstPageRequests.get(), "no connection means one legacy HTTP exchange");
+      assertEquals(0, nextPageRequests.get(), "Link rel=next must not activate paging");
+      assertEquals(1, rows.size(), "one input-free REST source produces one result row");
+      assertEquals(1, rowMetas.size());
+      assertEquals(List.of("分页响应_雪", "HTTP状态"),
+          rowMetas.get(0).getValueMetaList().stream().map(IValueMeta::getName).toList());
+      assertEquals(IValueMeta.TYPE_STRING, rowMetas.get(0).getValueMeta(0).getType());
+      assertEquals(IValueMeta.TYPE_INTEGER, rowMetas.get(0).getValueMeta(1).getType());
+      assertEquals(responseBody, rows.get(0)[0]);
+      assertEquals(200L, rows.get(0)[1]);
+      System.out.println("PROD_P0_REST_PAGINATION_NO_CONNECTION_SINGLE_REQUEST_JSON_HPL=PASS");
+    } finally {
+      server.stop(0);
+    }
+  }
 }
