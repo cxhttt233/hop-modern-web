@@ -141,7 +141,12 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "CONCAT_FIELDS_LITERAL_TARGET_NAME_AUTO_SUFFIXES_COLLISIONS",
                   List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
-                  "Native ConcatFieldsMeta.getFields() appends a fresh STRING ValueMeta using the literal targetFieldName (without resolving Hop variables) and the configured targetFieldLength. RowMeta.addValueMeta() automatically renames the appended field to targetFieldName_1 (or the next unused numeric suffix) when the literal target already exists, preserving the original input field. Diagnose the resulting renamed output field and variable-literal naming for downstream consumers without rejecting draft saves."));
+                  "Native ConcatFieldsMeta.getFields() appends a fresh STRING ValueMeta using the literal targetFieldName (without resolving Hop variables) and the configured targetFieldLength. RowMeta.addValueMeta() automatically renames the appended field to targetFieldName_1 (or the next unused numeric suffix) when the literal target already exists, preserving the original input field. Diagnose the resulting renamed output field and variable-literal naming for downstream consumers without rejecting draft saves."),
+              new RuntimePrecondition(
+                  "CONCAT_FIELDS_SKIP_EMPTY_BEFORE_FORCED_ENCLOSURE",
+                  List.of("/fields/field", "/skip_value_empty", "/force_enclosure",
+                      "/enclosure", "/separator"),
+                  "With skip_value_empty=true, native ConcatFieldHelper first converts each selected field to a STRING and filters empty converted values before joining. With force_enclosure=true, each surviving value is wrapped with the configured enclosure and the remaining values are joined using separator. Empty selected values contribute neither enclosure nor an extra separator; a non-empty value containing the separator is wrapped. The helper does not escape embedded enclosure characters, so this behavior alone does not guarantee RFC-compliant CSV quoting. Preserve the selected field order and root-level BOOLEAN/STRING settings across JSON editing and HPL disk reopen; this is a runtime compatibility diagnostic, not a draft-save validator."));
       case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta" ->
           List.of(
               new RuntimePrecondition(
