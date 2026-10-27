@@ -626,7 +626,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "REPLACE_STRING_OUTPUT_ENCODING_FOLLOWS_SOURCE_AND_INPLACE_NORMALIZES_STORAGE",
                   List.of("/fields/field"),
-                  "ReplaceStringMeta.getFields() copies the source field's string encoding onto a newly appended STRING field when fields.field[*].out_stream_name is non-empty and the source field exists. With an empty out_stream_name, it does not append a field; it normalizes the matched input field's storage type to STORAGE_TYPE_NORMAL, leaving unrelated fields unchanged. A missing source is silently skipped in this metadata projection for in-place rules, although native check reports an error; do not treat getFields() success as validation. This is a downstream field-metadata compatibility diagnostic, not a save-time validator."));
+                  "ReplaceStringMeta.getFields() copies the source field's string encoding onto a newly appended STRING field when fields.field[*].out_stream_name is non-empty and the source field exists. With an empty out_stream_name, it does not append a field; it normalizes the matched input field's storage type to STORAGE_TYPE_NORMAL, leaving unrelated fields unchanged. A missing source is silently skipped in this metadata projection for in-place rules, although native check reports an error; do not treat getFields() success as validation. This is a downstream field-metadata compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "REPLACE_STRING_REPLACEMENT_FIELD_RESOLVES_PER_INPUT_ROW",
+                  List.of("/fields/field"),
+                  "When fields.field[*].replace_field_by_string is non-empty, native ReplaceString.processRow() looks up that upstream STRING-convertible field once at initialization and takes its replacement text separately from every incoming row. This overrides the configured replace_by_string literal; set_empty_string=true takes precedence over both. An absent replacement field fails native initialization even when the source field exists. Preserve the literal field reference, BOOLEAN flags, and ordered LIST across JSON editing and HPL disk reopen; this is a runtime diagnostic, not a draft-save validator."));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" ->
           List.of(
               new RuntimePrecondition(
