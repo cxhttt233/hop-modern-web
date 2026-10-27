@@ -226,4 +226,171 @@ class HttpDynamicUrlFullPipelineP0Test {
       server.stop(0);
     }
   }
+
+  /**
+   * A single HTTP response header is a JSON STRING, but repeated header names
+   * are an ordered JSON ARRAY. Prove both shapes on actual rows after a real
+   * config API edit and HPL disk reopen, not only by calling the native helper.
+   */
+  @Test
+  void httpRepeatedResponseHeadersKeepArrayAndSingleValueAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    AtomicInteger requests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/headers/", exchange -> {
+      try (exchange) {
+        requests.incrementAndGet();
+        boolean duplicate = exchange.getRequestURI().getPath().endsWith("/duplicate");
+        exchange.getResponseHeaders().add("X-Test-Values", "first");
+        if (duplicate) exchange.getResponseHeaders().add("X-Test-Values", "second");
+        byte[] bytes = (duplicate ? "黄河双值" : "长江单值")
+            .getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    server.start();
+    try {
+      String base = "http://127.0.0.1:" + server.getAddress().getPort();
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+      IPlugin httpPlugin = plugins.findPluginWithId(TransformPluginType.class, "Http");
+      assertNotNull(gridPlugin);
+      assertNotNull(httpPlugin);
+
+      ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+      grid.setDefault();
+      ClassLoader loader = grid.getClass().getClassLoader();
+      Class<?> fieldType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+      Class<?> lineType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, "请求地址<&>");
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      grid.getClass().getMethod("setDataGridFields", List.class)
+          .invoke(grid, List.of(field));
+      List<Object> lines = new ArrayList<>();
+      for (String suffix : List.of("single", "duplicate")) {
+        Object line = lineType.getConstructor().newInstance();
+        lineType.getMethod("setDatalines", List.class)
+            .invoke(line, List.of(base + "/headers/" + suffix));
+        lines.add(line);
+      }
+      grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+      ITransformMeta http = plugins.loadClass(httpPlugin, ITransformMeta.class);
+      http.setDefault();
+      TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+      TransformMeta target = new TransformMeta("Http", "http-node", http);
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("http-repeated-header-wire-shapes");
+      pipeline.addTransform(source);
+      pipeline.addTransform(target);
+      pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("http-repeated-header-shapes.hpl");
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("http-headers-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("http-headers-doc",
+          new PipelineConfigResource.ReadRequest("http-node"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("urlInField", true);
+      draft.put("urlField", "请求地址<&>");
+      draft.put("url", base + "/unused");
+      draft.put("encoding", "UTF-8");
+      ObjectNode result = (ObjectNode) draft.path("result");
+      result.put("name", "响应正文");
+      result.put("code", "响应状态");
+      result.put("response_header", "响应头");
+      result.put("response_time", "");
+      var write = resource.write("http-headers-doc",
+          new PipelineConfigResource.WriteRequest("http-node", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      assertEquals(2, reopened.nrTransforms());
+      assertEquals(1, reopened.nrPipelineHops());
+      JsonNode wire = ConfigJsonSerializer.toJson(
+          reopened.findTransform("http-node").getTransform(), provider);
+      assertTrue(wire.at("/urlInField").isBoolean());
+      assertTrue(wire.at("/urlInField").booleanValue());
+      assertEquals("请求地址<&>", wire.at("/urlField").asText());
+      assertEquals("响应头", wire.at("/result/response_header").asText());
+      var contract = AutomaticConfigDescriptor.describe(
+          reopened.findTransform("http-node").getTransform().getClass())
+          .runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "HTTP_REPEATED_RESPONSE_HEADER_NAMES_SERIALIZE_AS_JSON_ARRAY"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/result/response_header"), contract.keyListPointers());
+
+      List<Object[]> rows = new CopyOnWriteArrayList<>();
+      AtomicReference<IRowMeta> rowMeta = new AtomicReference<>();
+      LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+      engine.setMetadataProvider(provider);
+      try {
+        engine.prepareExecution();
+        ITransform output = engine.getRunThread("http-node", 0);
+        assertNotNull(output);
+        output.addRowListener(new RowAdapter() {
+          @Override
+          public void rowWrittenEvent(IRowMeta metadata, Object[] row) {
+            rowMeta.set(metadata.clone());
+            rows.add(row.clone());
+          }
+        });
+        engine.startThreads();
+        engine.waitUntilFinished();
+        assertEquals(0, engine.getErrors());
+      } finally {
+        if (!engine.isFinishedOrStopped()) engine.stopAll();
+        engine.cleanup();
+      }
+
+      assertNotNull(rowMeta.get());
+      assertEquals(List.of("请求地址<&>", "响应正文", "响应状态", "响应头"),
+          rowMeta.get().getValueMetaList().stream().map(IValueMeta::getName).toList());
+      assertEquals(IValueMeta.TYPE_STRING, rowMeta.get().getValueMeta(3).getType());
+      assertEquals(2, rows.size());
+      ObjectMapper mapper = new ObjectMapper();
+      for (Object[] row : rows) {
+        boolean duplicate = ((String) row[0]).endsWith("/duplicate");
+        assertEquals(duplicate ? "黄河双值" : "长江单值", row[1]);
+        assertEquals(200L, row[2]);
+        JsonNode headers = mapper.readTree((String) row[3]);
+        JsonNode values = null;
+        for (var names = headers.fieldNames(); names.hasNext();) {
+          String name = names.next();
+          if (name.equalsIgnoreCase("X-Test-Values")) {
+            values = headers.get(name);
+            break;
+          }
+        }
+        assertNotNull(values, "custom header must survive response JSON");
+        if (duplicate) {
+          assertTrue(values.isArray(), "repeated header must not be flattened");
+          assertEquals(List.of("first", "second"),
+              java.util.stream.StreamSupport.stream(values.spliterator(), false)
+                  .map(JsonNode::asText).toList());
+        } else {
+          assertTrue(values.isTextual(), "single header must remain a JSON string");
+          assertEquals("first", values.asText());
+        }
+      }
+      assertEquals(2, requests.get());
+      System.out.println("PROD_P0_HTTP_REPEATED_HEADERS_ARRAY_SINGLE_FULL_PIPELINE=PASS");
+    } finally {
+      server.stop(0);
+    }
+  }
 }
