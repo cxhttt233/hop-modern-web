@@ -173,10 +173,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "DATA_GRID_EXPLICIT_EMPTY_STRING_OVERRIDES_CONFIGURED_CELL",
                   List.of("/fields/field", "/data/line"),
-                  "For a STRING output field with fields.field[*].set_empty_string=true, "
+                  "For a STRING output field whose canonical "
+                      + "/fields/field/<index>/field/set_empty_string is true, "
                       + "native DataGrid.processRow() emits an actual empty Java String "
                       + "for that column, ignoring the corresponding non-empty "
-                      + "data.line[*].item cell literal. When false, the configured "
+                      + "/data/line/<index>/item cell literal. When false, the configured "
                       + "cell string is converted using the declared field type "
                       + "(for example, Integer becomes a Java Long). Preserve "
                       + "the BOOLEAN flag and both ordered LISTs across JSON editing "
