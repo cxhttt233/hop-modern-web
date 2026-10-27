@@ -334,6 +334,18 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.rest.RestMeta" ->
           List.of(
               new RuntimePrecondition(
+                  "REST_DYNAMIC_GET_POST_BODY_REQUIRES_STATIC_BODY_CAPABLE_METHOD",
+                  List.of("/dynamicMethod", "/methodFieldName", "/method", "/bodyField",
+                      "/urlInField", "/urlField"),
+                  "For mixed GET/POST input rows, dynamicMethod selects the effective HTTP verb "
+                      + "and urlInField selects the URL independently for every row. Native "
+                      + "Rest.processRow() binds bodyField only if the configured static method "
+                      + "is body-capable, even when dynamicMethod is true: use method=POST for "
+                      + "a dynamic GET/POST pipeline that needs POST request bodies. The GET "
+                      + "rows send no entity, while POST rows send the current row's body. "
+                      + "This is a native runtime compatibility diagnostic, not a draft-save "
+                      + "validator."),
+              new RuntimePrecondition(
                   "REST_DYNAMIC_METHOD_NATIVE_CHECK_FALSE_POSITIVE",
                   List.of("/dynamicMethod", "/methodFieldName", "/method"),
                   "When dynamicMethod is true, methodFieldName must be non-empty and resolve to an incoming row field. The native RestMeta.check() incorrectly reports ERROR even when the field name is present (MethodFieldOk); this is a native-check false positive, not a reason to reject an otherwise valid dynamic-method configuration. Runtime also validates each incoming HTTP method token. When dynamicMethod is false, method must be a valid non-empty HTTP method token."),
