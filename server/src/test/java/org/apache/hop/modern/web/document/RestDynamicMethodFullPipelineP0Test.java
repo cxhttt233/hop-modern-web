@@ -264,8 +264,8 @@ class RestDynamicMethodFullPipelineP0Test {
     try {
       String url = "http://127.0.0.1:" + server.getAddress().getPort()
           + "/custom-methods";
-      String firstBody = "{\\"station\\":\\"黄河<&>\\"}";
-      String secondBody = "{\\"station\\":\\"长江_雪\\"}";
+      String firstBody = "{\"station\":\"黄河<&>\"}";
+      String secondBody = "{\"station\":\"长江_雪\"}";
       PluginRegistry plugins = PluginRegistry.getInstance();
       IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
       IPlugin restPlugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
