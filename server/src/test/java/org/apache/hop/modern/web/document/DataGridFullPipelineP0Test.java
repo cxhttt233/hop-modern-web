@@ -106,9 +106,10 @@ class DataGridFullPipelineP0Test {
     JsonNode declared = draft.at("/fields/field");
     assertTrue(declared.isArray());
     assertEquals(3, declared.size());
-    assertEquals("Integer", declared.get(0).path("type").asText());
-    assertTrue(declared.get(1).path("set_empty_string").isBoolean());
-    ((ObjectNode) declared.get(1)).put("set_empty_string", true);
+    assertTrue(declared.get(0).path("field").isObject(), "nested Hop groupKey is a wire container");
+    assertEquals("Integer", declared.get(0).path("field").path("type").asText());
+    assertTrue(declared.get(1).path("field").path("set_empty_string").isBoolean());
+    ((ObjectNode) declared.get(1).path("field")).put("set_empty_string", true);
     assertEquals("discard-first", draft.at("/data/line/0/item/1").asText());
 
     var write = resource.write("datagrid-full-doc",
@@ -120,10 +121,10 @@ class DataGridFullPipelineP0Test {
     assertEquals(1, reopened.nrTransforms());
     JsonNode wire = ConfigJsonSerializer.toJson(
         reopened.findTransform("grid-node").getTransform(), provider);
-    assertEquals("流量<&>", wire.at("/fields/field/0/name").asText());
-    assertEquals("Integer", wire.at("/fields/field/0/type").asText());
-    assertTrue(wire.at("/fields/field/1/set_empty_string").isBoolean());
-    assertTrue(wire.at("/fields/field/1/set_empty_string").booleanValue());
+    assertEquals("流量<&>", wire.at("/fields/field/0/field/name").asText());
+    assertEquals("Integer", wire.at("/fields/field/0/field/type").asText());
+    assertTrue(wire.at("/fields/field/1/field/set_empty_string").isBoolean());
+    assertTrue(wire.at("/fields/field/1/field/set_empty_string").booleanValue());
     assertEquals("discard-first", wire.at("/data/line/0/item/1").asText());
     assertEquals("discard-second", wire.at("/data/line/1/item/1").asText());
 
