@@ -1705,7 +1705,8 @@ class TransformP0L2RoundTripTest {
             "GROUPBY_GROUPING_KEYS_REQUIRE_UPSTREAM_FIELDS",
             "GROUPBY_AGGREGATE_SUBJECT_REQUIRES_INPUT_FIELD",
             "GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME",
-            "GROUPBY_AGGREGATE_OUTPUT_TYPES_FOLLOW_OPERATION_AND_SUBJECT"),
+            "GROUPBY_AGGREGATE_OUTPUT_TYPES_FOLLOW_OPERATION_AND_SUBJECT",
+            "GROUPBY_EMPTY_INPUT_GIVE_BACK_ROW_EMITS_ZERO_COUNT"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     var precondition = descriptor.runtimePreconditions().get(2);
     assertEquals(List.of("/fields/field"), precondition.keyListPointers());
