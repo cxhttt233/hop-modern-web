@@ -1375,7 +1375,7 @@ class TransformP0L2RoundTripTest {
         .filter(p -> p.code().equals(
             "CHECKSUM_RESULT_ROW_TYPE_DEPENDS_ON_ALGORITHM_AND_ENCODING"))
         .findFirst().orElseThrow();
-    assertEquals(List.of("/checksumtype", "/resultType", "/resultfieldName"),
+    assertEquals(List.of("/checksumtype", "/resultType", "/resultfieldName", "/fields/field"),
         contract.keyListPointers());
 
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "CheckSum");
