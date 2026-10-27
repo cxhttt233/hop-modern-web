@@ -675,7 +675,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "SORT_ROWS_NONCOLLATOR_STRING_KEYS_USE_JAVA_CODE_UNIT_ORDER",
                   List.of("/fields/field"),
-                  "For native SortRows string keys with fields.field[*].collator_enabled=false and case_sensitive=true, pinned ValueMetaBase.compare() uses Java String.compareTo, not locale-aware or natural-language ordering. For example, the character 乙 (U+4E59) sorts before 甲 (U+7532) in ascending order. Multi-key SortRows still applies configured ascending/descending flags in list order. To request locale-aware collation, the user must enable the collator and choose a supported strength; do not silently reinterpret the saved key order or compare semantics. This is a runtime compatibility diagnostic, not a save-time validator."));
+                  "For native SortRows string keys with fields.field[*].collator_enabled=false and case_sensitive=true, pinned ValueMetaBase.compare() uses Java String.compareTo, not locale-aware or natural-language ordering. For example, the character 乙 (U+4E59) sorts before 甲 (U+7532) in ascending order. Multi-key SortRows still applies configured ascending/descending flags in list order. To request locale-aware collation, the user must enable the collator and choose a supported strength; do not silently reinterpret the saved key order or compare semantics. This is a runtime compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "SORT_ROWS_NONCOLLATOR_CASE_INSENSITIVE_USES_JAVA_IGNORE_CASE_ORDER",
+                  List.of("/fields/field"),
+                  "When fields.field[*].collator_enabled=false and case_sensitive=false for a native SortRows String key, pinned ValueMetaBase.compare() uses Java String.compareToIgnoreCase, not the configured locale Collator. For ascending values z, B, a and M, the native output order is a, B, M, z; case-sensitive Java comparison would place B and M before a. The serializer must retain both flags as Boolean values at their canonical ordered LIST item paths. This is an engine behavior compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" ->
           List.of(
               new RuntimePrecondition(
