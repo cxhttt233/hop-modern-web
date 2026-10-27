@@ -180,4 +180,141 @@ class GroupByFullPipelineP0Test {
     assertEquals("丙", emitted.get(1)[2]);
     System.out.println("PROD_P0_GROUPBY_FULL_PIPELINE_COUNT_CONCAT_JSON_HPL_ROWS=PASS");
   }
+
+  /**
+   * Native pass-all-rows contract: each original row is preserved, group totals
+   * are repeated on every row, and the INTEGER line number resets per group.
+   * The config is edited through the real API and reopened from a disk HPL.
+   */
+  @Test
+  void groupByPassAllRowsRepeatsTotalsAndResetsLineNumberAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin groupPlugin = plugins.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(gridPlugin);
+    assertNotNull(groupPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> gridFields = new ArrayList<>();
+    for (String name : List.of("分组<&>", "样本")) {
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, name);
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      gridFields.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, gridFields);
+    List<Object> gridLines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("黄河<&>", "甲"),
+        List.of("黄河<&>", "乙"),
+        List.of("长江", "丙"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      gridLines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, gridLines);
+
+    ITransformMeta group = plugins.loadClass(groupPlugin, ITransformMeta.class);
+    group.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("GroupBy", "group-node", group);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("groupby-pass-all-rows-line-number");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("groupby-pass-all-rows.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("group-pass-all-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("group-pass-all-doc",
+        new PipelineConfigResource.ReadRequest("group-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("all_rows", true);
+    draft.put("add_linenr", true);
+    draft.put("linenr_fieldname", "组内序号<&>");
+    draft.put("give_back_row", false);
+    draft.putObject("group").putArray("field")
+        .addObject().put("name", "分组<&>");
+    draft.putObject("fields").putArray("field")
+        .addObject().put("aggregate", "记录数")
+        .put("subject", "").put("type", "COUNT_ANY");
+    var write = resource.write("group-pass-all-doc",
+        new PipelineConfigResource.WriteRequest("group-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("group-node").getTransform(), provider);
+    assertTrue(wire.at("/all_rows").isBoolean());
+    assertTrue(wire.at("/all_rows").booleanValue());
+    assertTrue(wire.at("/add_linenr").isBoolean());
+    assertTrue(wire.at("/add_linenr").booleanValue());
+    assertEquals("组内序号<&>", wire.at("/linenr_fieldname").asText());
+    assertEquals("分组<&>", wire.at("/group/field/0/name").asText());
+    assertEquals("COUNT_ANY", wire.at("/fields/field/0/type").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("group-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "pass-all-rows GroupBy must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(4, outputMeta.get().size());
+    assertEquals("分组<&>", outputMeta.get().getValueMeta(0).getName());
+    assertEquals("样本", outputMeta.get().getValueMeta(1).getName());
+    assertEquals("记录数", outputMeta.get().getValueMeta(2).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(2).getType());
+    assertEquals("组内序号<&>", outputMeta.get().getValueMeta(3).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(3).getType());
+    assertEquals(3, emitted.size(), "pass-all-rows must retain all source records");
+    assertEquals("黄河<&>", emitted.get(0)[0]);
+    assertEquals("甲", emitted.get(0)[1]);
+    assertEquals(2L, ((Number) emitted.get(0)[2]).longValue());
+    assertEquals(1L, ((Number) emitted.get(0)[3]).longValue());
+    assertEquals("黄河<&>", emitted.get(1)[0]);
+    assertEquals("乙", emitted.get(1)[1]);
+    assertEquals(2L, ((Number) emitted.get(1)[2]).longValue());
+    assertEquals(2L, ((Number) emitted.get(1)[3]).longValue());
+    assertEquals("长江", emitted.get(2)[0]);
+    assertEquals("丙", emitted.get(2)[1]);
+    assertEquals(1L, ((Number) emitted.get(2)[2]).longValue());
+    assertEquals(1L, ((Number) emitted.get(2)[3]).longValue());
+    System.out.println("PROD_P0_GROUPBY_PASS_ALL_ROWS_GROUP_LINENR_JSON_HPL_ROWS=PASS");
+  }
 }
