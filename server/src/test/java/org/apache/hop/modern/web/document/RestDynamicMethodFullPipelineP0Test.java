@@ -236,4 +236,169 @@ class RestDynamicMethodFullPipelineP0Test {
       server.stop(0);
     }
   }
+
+  /**
+   * Unlike the seven well-known verbs, native REST accepts RFC 9110 custom method tokens
+   * without normalizing their case. Prove the wire request method and UTF-8 request entity
+   * after T3 JSON editing and a real disk HPL reopen, not merely the method normalizer.
+   * All network traffic is restricted to the local test fixture.
+   */
+  @Test
+  void restCustomMethodsKeepExactCaseAndUtf8BodyAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    List<RequestSeen> seen = new CopyOnWriteArrayList<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/custom-methods", exchange -> {
+      try (exchange) {
+        String method = exchange.getRequestMethod();
+        String body = new String(exchange.getRequestBody().readAllBytes(),
+            StandardCharsets.UTF_8);
+        seen.add(new RequestSeen(exchange.getRequestURI().getPath(), method, body));
+        byte[] reply = ("accepted:" + method).getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+        exchange.sendResponseHeaders(200, reply.length);
+        exchange.getResponseBody().write(reply);
+      }
+    });
+    server.start();
+    try {
+      String url = "http://127.0.0.1:" + server.getAddress().getPort()
+          + "/custom-methods";
+      String firstBody = "{\\"station\\":\\"黄河<&>\\"}";
+      String secondBody = "{\\"station\\":\\"长江_雪\\"}";
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+      IPlugin restPlugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(gridPlugin);
+      assertNotNull(restPlugin);
+
+      ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+      grid.setDefault();
+      ClassLoader loader = grid.getClass().getClassLoader();
+      Class<?> fieldType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+      Class<?> lineType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+      List<Object> fields = new ArrayList<>();
+      for (String name : List.of("自定义方法", "请求体")) {
+        Object field = fieldType.getConstructor().newInstance();
+        fieldType.getMethod("setName", String.class).invoke(field, name);
+        fieldType.getMethod("setType", String.class).invoke(field, "String");
+        fields.add(field);
+      }
+      grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, fields);
+      List<Object> lines = new ArrayList<>();
+      for (List<String> values : List.of(
+          List.of("pUrGe", firstBody),
+          List.of("M-SEARCH", secondBody))) {
+        Object line = lineType.getConstructor().newInstance();
+        lineType.getMethod("setDatalines", List.class).invoke(line, values);
+        lines.add(line);
+      }
+      grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+      ITransformMeta rest = plugins.loadClass(restPlugin, ITransformMeta.class);
+      rest.setDefault();
+      TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+      TransformMeta target = new TransformMeta("Rest", "rest-node", rest);
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("rest-custom-methods-exact-case");
+      pipeline.addTransform(source);
+      pipeline.addTransform(target);
+      pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("rest-custom-methods.hpl");
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("rest-custom-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("rest-custom-doc",
+          new PipelineConfigResource.ReadRequest("rest-node"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("url", url);
+      draft.put("method", "POST");
+      draft.put("dynamicMethod", true);
+      draft.put("methodFieldName", "自定义方法");
+      draft.put("bodyField", "请求体");
+      draft.put("applicationType", "JSON");
+      draft.put("streamingEnabled", false);
+      ObjectNode result = (ObjectNode) draft.path("result");
+      result.put("name", "响应正文");
+      result.put("code", "HTTP状态");
+      result.put("response_header", "");
+      result.put("response_time", "");
+      result.put("binary", false);
+      var write = resource.write("rest-custom-doc",
+          new PipelineConfigResource.WriteRequest("rest-node", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      assertEquals(2, reopened.nrTransforms());
+      assertEquals(1, reopened.nrPipelineHops());
+      JsonNode wire = ConfigJsonSerializer.toJson(
+          reopened.findTransform("rest-node").getTransform(), provider);
+      assertEquals("POST", wire.at("/method").asText());
+      assertTrue(wire.at("/dynamicMethod").booleanValue());
+      assertEquals("自定义方法", wire.at("/methodFieldName").asText());
+      assertEquals("请求体", wire.at("/bodyField").asText());
+      assertEquals("JSON", wire.at("/applicationType").asText());
+      assertEquals("响应正文", wire.at("/result/name").asText());
+      var contract = AutomaticConfigDescriptor.describe(
+          reopened.findTransform("rest-node").getTransform().getClass())
+          .runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "REST_CUSTOM_METHOD_TOKENS_PRESERVE_CASE_AND_BODY_RULES"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/method", "/dynamicMethod", "/methodFieldName"),
+          contract.keyListPointers());
+
+      List<Object[]> rows = new CopyOnWriteArrayList<>();
+      List<IRowMeta> metas = new CopyOnWriteArrayList<>();
+      LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+      engine.setMetadataProvider(provider);
+      try {
+        engine.prepareExecution();
+        ITransform output = engine.getRunThread("rest-node", 0);
+        assertNotNull(output);
+        output.addRowListener(new RowAdapter() {
+          @Override
+          public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+            metas.add(rowMeta.clone());
+            rows.add(row.clone());
+          }
+        });
+        engine.startThreads();
+        engine.waitUntilFinished();
+        assertEquals(0, engine.getErrors());
+      } finally {
+        if (!engine.isFinishedOrStopped()) engine.stopAll();
+        engine.cleanup();
+      }
+      assertEquals(2, rows.size());
+      assertEquals(2, metas.size());
+      assertEquals(List.of("自定义方法", "请求体", "响应正文", "HTTP状态"),
+          metas.get(0).getValueMetaList().stream().map(IValueMeta::getName).toList());
+      assertEquals(IValueMeta.TYPE_STRING, metas.get(0).getValueMeta(2).getType());
+      assertEquals(IValueMeta.TYPE_INTEGER, metas.get(0).getValueMeta(3).getType());
+      for (Object[] row : rows) {
+        String method = (String) row[0];
+        assertTrue(method.equals("pUrGe") || method.equals("M-SEARCH"));
+        assertEquals("accepted:" + method, row[2]);
+        assertEquals(200L, row[3]);
+      }
+      assertEquals(2, seen.size());
+      assertTrue(seen.contains(new RequestSeen("/custom-methods", "pUrGe", firstBody)));
+      assertTrue(seen.contains(new RequestSeen("/custom-methods", "M-SEARCH", secondBody)));
+      System.out.println("PROD_P0_REST_CUSTOM_VERB_EXACT_CASE_UTF8_BODY_JSON_HPL_ROWS=PASS");
+    } finally {
+      server.stop(0);
+    }
+  }
+
 }
