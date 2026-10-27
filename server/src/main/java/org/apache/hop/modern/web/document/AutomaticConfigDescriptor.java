@@ -731,7 +731,20 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "SORT_ROWS_NONCOLLATOR_CASE_INSENSITIVE_USES_JAVA_IGNORE_CASE_ORDER",
                   List.of("/fields/field"),
-                  "When fields.field[*].collator_enabled=false and case_sensitive=false for a native SortRows String key, pinned ValueMetaBase.compare() uses Java String.compareToIgnoreCase, not the configured locale Collator. For ascending values z, B, a and M, the native output order is a, B, M, z; case-sensitive Java comparison would place B and M before a. The serializer must retain both flags as Boolean values at their canonical ordered LIST item paths. This is an engine behavior compatibility diagnostic, not a save-time validator."));
+                  "When fields.field[*].collator_enabled=false and case_sensitive=false for a native SortRows String key, pinned ValueMetaBase.compare() uses Java String.compareToIgnoreCase, not the configured locale Collator. For ascending values z, B, a and M, the native output order is a, B, M, z; case-sensitive Java comparison would place B and M before a. The serializer must retain both flags as Boolean values at their canonical ordered LIST item paths. This is an engine behavior compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "SORT_ROWS_NUMERIC_NULL_PLACEMENT_FOLLOWS_DIRECTION",
+                  List.of("/fields/field"),
+                  "For a native SortRows numeric key, pinned ValueMetaBase.compare() treats a "
+                      + "null input value as smaller than every non-null value in ascending "
+                      + "order, but greater than every non-null value when the key's "
+                      + "ascending flag is false. Thus a missing INTEGER value sorts first "
+                      + "ascending and last descending, while non-null numeric values retain "
+                      + "their numeric ordering. Preserve the ordered fields.field LIST and "
+                      + "typed ascending BOOLEAN through JSON editing and real HPL disk "
+                      + "reopen; do not substitute lexical string sorting or silently "
+                      + "discard rows with missing numeric values. This is a runtime "
+                      + "compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" ->
           List.of(
               new RuntimePrecondition(
