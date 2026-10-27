@@ -338,4 +338,146 @@ class JsonInputFullPipelineP0Test {
     System.out.println("PROD_P0_JSONINPUT_MISSING_AND_EXPLICIT_NULL_TYPED_ROWS=PASS");
   }
 
+
+  @Test
+  void jsonInputWildcardArraysExpandAlignedRowsAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    // JsonPath wildcard results are row-producing lists, not a scalar JSON string.
+    // Exercise two aligned typed lists with different per-document lengths.
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin jsonPlugin = plugins.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(gridPlugin);
+    assertNotNull(jsonPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader gridLoader = grid.getClass().getClassLoader();
+    Class<?> gridFieldType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> gridLineType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> gridFields = new ArrayList<>();
+    for (String name : List.of("payload", "来源")) {
+      Object field = gridFieldType.getConstructor().newInstance();
+      gridFieldType.getMethod("setName", String.class).invoke(field, name);
+      gridFieldType.getMethod("setType", String.class).invoke(field, "String");
+      gridFields.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, gridFields);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("{\"samples\":[{\"station\":\"黄河<&>\",\"flow\":42},{\"station\":\"渭河\",\"flow\":7}]}",
+            "批次一"),
+        List.of("{\"samples\":[{\"station\":\"汾河\",\"flow\":3}]}",
+            "批次二"))) {
+      Object line = gridLineType.getConstructor().newInstance();
+      gridLineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta json = plugins.loadClass(jsonPlugin, ITransformMeta.class);
+    json.setDefault();
+    Class<?> jsonFieldType = json.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField");
+    Object station = jsonFieldType.getConstructor(String.class).newInstance("测站<&>");
+    jsonFieldType.getMethod("setPath", String.class).invoke(station, "$.legacyStation");
+    jsonFieldType.getMethod("setType", int.class).invoke(station, IValueMeta.TYPE_STRING);
+    Object flow = jsonFieldType.getConstructor(String.class).newInstance("流量");
+    jsonFieldType.getMethod("setPath", String.class).invoke(flow, "$.legacyFlow");
+    jsonFieldType.getMethod("setType", int.class).invoke(flow, IValueMeta.TYPE_INTEGER);
+    json.getClass().getMethod("setInputFields", List.class).invoke(json, List.of(station, flow));
+
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("JsonInput", "json-node", json);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("jsoninput-wildcard-aligned-rows");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("jsoninput-wildcard-aligned.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("json-wildcard-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("json-wildcard-doc",
+        new PipelineConfigResource.ReadRequest("json-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("IsInFields", true);
+    draft.put("IsAFile", false);
+    draft.put("valueField", "payload");
+    draft.put("removeSourceField", true);
+    draft.put("ignoreMissingPath", false);
+    ArrayNode paths = (ArrayNode) draft.path("fields").path("field");
+    assertEquals(2, paths.size());
+    ((ObjectNode) paths.get(0)).put("path", "$.samples[*].station");
+    ((ObjectNode) paths.get(1)).put("path", "$.samples[*].flow");
+    var write = resource.write("json-wildcard-doc",
+        new PipelineConfigResource.WriteRequest("json-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("json-node").getTransform(), provider);
+    assertTrue(wire.at("/IsInFields").booleanValue());
+    assertTrue(wire.at("/removeSourceField").booleanValue());
+    assertTrue(wire.at("/fields/field").isArray());
+    assertEquals(2, wire.at("/fields/field").size());
+    assertEquals("测站<&>", wire.at("/fields/field/0/name").asText());
+    assertEquals("$.samples[*].station", wire.at("/fields/field/0/path").asText());
+    assertEquals("流量", wire.at("/fields/field/1/name").asText());
+    assertEquals("$.samples[*].flow", wire.at("/fields/field/1/path").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("json-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "wildcard JSON input must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(3, outputMeta.get().size(), "source JSON column removed");
+    assertEquals("来源", outputMeta.get().getValueMeta(0).getName());
+    assertEquals("测站<&>", outputMeta.get().getValueMeta(1).getName());
+    assertEquals(IValueMeta.TYPE_STRING, outputMeta.get().getValueMeta(1).getType());
+    assertEquals("流量", outputMeta.get().getValueMeta(2).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(2).getType());
+    assertEquals(3, emitted.size(), "2 wildcard matches plus 1 match");
+    assertEquals("批次一", emitted.get(0)[0]);
+    assertEquals("黄河<&>", emitted.get(0)[1]);
+    assertEquals(42L, ((Number) emitted.get(0)[2]).longValue());
+    assertEquals("批次一", emitted.get(1)[0]);
+    assertEquals("渭河", emitted.get(1)[1]);
+    assertEquals(7L, ((Number) emitted.get(1)[2]).longValue());
+    assertEquals("批次二", emitted.get(2)[0]);
+    assertEquals("汾河", emitted.get(2)[1]);
+    assertEquals(3L, ((Number) emitted.get(2)[2]).longValue());
+    System.out.println("PROD_P0_JSONINPUT_WILDCARD_ALIGNED_ARRAY_ROWS_JSON_HPL=PASS");
+  }
+
 }
