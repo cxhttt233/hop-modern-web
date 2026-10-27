@@ -175,4 +175,135 @@ class StringCutFullPipelineP0Test {
     assertEquals("长江", emitted.get(1)[2]);
     System.out.println("PROD_P0_STRINGCUT_FULL_PIPELINE_ALIAS_INPLACE_JSON_HPL_ROWS=PASS");
   }
+
+  @Test
+  void stringCutNegativeOffsetsAndOutOfRangeNullSurviveRealHplDiskReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin cutPlugin = plugins.findPluginWithId(TransformPluginType.class, "StringCut");
+    assertNotNull(gridPlugin);
+    assertNotNull(cutPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    Object field = fieldType.getConstructor().newInstance();
+    fieldType.getMethod("setName", String.class).invoke(field, "测站<&>");
+    fieldType.getMethod("setType", String.class).invoke(field, "String");
+    grid.getClass().getMethod("setDataGridFields", List.class)
+        .invoke(grid, List.of(field));
+    List<Object> lines = new ArrayList<>();
+    for (String value : List.of("黄河水网", "长江数字")) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, List.of(value));
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta cut = plugins.loadClass(cutPlugin, ITransformMeta.class);
+    cut.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("StringCut", "cut-node", cut);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("stringcut-native-negative-offsets");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("stringcut-negative-offsets.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("stringcut-negative-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("stringcut-negative-doc",
+        new PipelineConfigResource.ReadRequest("cut-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ArrayNode rules = draft.putObject("fields").putArray("field");
+    rules.addObject()
+        .put("in_stream_name", "测站<&>")
+        .put("out_stream_name", "双负偏移")
+        .put("cut_from", "-1")
+        .put("cut_to", "-3");
+    rules.addObject()
+        .put("in_stream_name", "测站<&>")
+        .put("out_stream_name", "末尾两字")
+        .put("cut_from", "0")
+        .put("cut_to", "-2");
+    rules.addObject()
+        .put("in_stream_name", "测站<&>")
+        .put("out_stream_name", "越界为空")
+        .put("cut_from", "9")
+        .put("cut_to", "12");
+    var write = resource.write("stringcut-negative-doc",
+        new PipelineConfigResource.WriteRequest("cut-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("cut-node").getTransform(), provider);
+    assertEquals(3, wire.at("/fields/field").size());
+    assertEquals("-1", wire.at("/fields/field/0/cut_from").asText());
+    assertEquals("-3", wire.at("/fields/field/0/cut_to").asText());
+    assertEquals("双负偏移", wire.at("/fields/field/0/out_stream_name").asText());
+    assertEquals("0", wire.at("/fields/field/1/cut_from").asText());
+    assertEquals("-2", wire.at("/fields/field/1/cut_to").asText());
+    assertEquals("9", wire.at("/fields/field/2/cut_from").asText());
+    assertEquals("12", wire.at("/fields/field/2/cut_to").asText());
+
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("cut-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals("STRING_CUT_NEGATIVE_OFFSETS_AND_OUT_OF_RANGE_NULL"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("cut-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors());
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(4, outputMeta.get().size());
+    assertEquals(List.of("测站<&>", "双负偏移", "末尾两字", "越界为空"),
+        outputMeta.get().getValueMetaList().stream().map(IValueMeta::getName).toList());
+    for (int i = 0; i < 4; i++) {
+      assertEquals(IValueMeta.TYPE_STRING, outputMeta.get().getValueMeta(i).getType());
+    }
+    assertEquals(2, emitted.size());
+    assertArrayEquals(new Object[] {"黄河水网", "河水", "水网", null}, emitted.get(0));
+    assertArrayEquals(new Object[] {"长江数字", "江数", "数字", null}, emitted.get(1));
+    System.out.println("PROD_P0_STRINGCUT_NEGATIVE_OFFSETS_OUT_OF_RANGE_NULL_JSON_HPL_ROWS=PASS");
+  }
+
 }
