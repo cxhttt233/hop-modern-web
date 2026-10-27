@@ -324,4 +324,149 @@ class CheckSumFullPipelineP0Test {
     }
     System.out.println("PROD_P0_CHECKSUM_CRC_ADLER_BINARY_REQUEST_INTEGER_REAL_ROWS=PASS");
   }
+
+  /**
+   * Native CheckSum STRING is a dash-separated sequence of unsigned decimal
+   * digest bytes, not Base64 or hexadecimal. HEXADECIMAL is lowercase hex.
+   * Both are STRING columns despite having different wire representations.
+   */
+  @Test
+  void checkSumHexAndDecimalByteStringRepresentationsSurviveHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin checksumPlugin = plugins.findPluginWithId(TransformPluginType.class, "CheckSum");
+    assertNotNull(gridPlugin);
+    assertNotNull(checksumPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    Object field = fieldType.getConstructor().newInstance();
+    fieldType.getMethod("setName", String.class).invoke(field, "测站<&>");
+    fieldType.getMethod("setType", String.class).invoke(field, "String");
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, List.of(field));
+    List<String> stations = List.of("黄河", "长江");
+    List<Object> lines = new ArrayList<>();
+    for (String station : stations) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, List.of(station));
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta hex = plugins.loadClass(checksumPlugin, ITransformMeta.class);
+    hex.setDefault();
+    ITransformMeta decimal = plugins.loadClass(checksumPlugin, ITransformMeta.class);
+    decimal.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta hexNode = new TransformMeta("CheckSum", "hex-node", hex);
+    TransformMeta decimalNode = new TransformMeta("CheckSum", "decimal-node", decimal);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("checksum-sha256-string-encoding-compatibility");
+    pipeline.addTransform(source);
+    pipeline.addTransform(hexNode);
+    pipeline.addTransform(decimalNode);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, hexNode));
+    pipeline.addPipelineHop(new PipelineHopMeta(hexNode, decimalNode));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("checksum-sha256-string-encodings.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("checksum-encodings-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+
+    for (String node : List.of("hex-node", "decimal-node")) {
+      var read = resource.read("checksum-encodings-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("checksumtype", "SHA-256");
+      draft.put("resultType", node.equals("hex-node") ? "hexadecimal" : "string");
+      draft.put("resultfieldName", node.equals("hex-node") ? "十六进制摘要" : "十进制字节摘要");
+      draft.put("prefix", "");
+      draft.put("separator", "");
+      draft.put("suffix", "");
+      ArrayNode selected = draft.putObject("fields").putArray("field");
+      selected.addObject().put("name", "测站<&>");
+      var write = resource.write("checksum-encodings-doc",
+          new PipelineConfigResource.WriteRequest(node, draft));
+      assertEquals(200, write.getStatus(), node + " JSON edit must succeed");
+    }
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(3, reopened.nrTransforms());
+    assertEquals(2, reopened.nrPipelineHops());
+    for (String node : List.of("hex-node", "decimal-node")) {
+      JsonNode wire = ConfigJsonSerializer.toJson(
+          reopened.findTransform(node).getTransform(), provider);
+      assertEquals("SHA-256", wire.at("/checksumtype").asText());
+      assertEquals(node.equals("hex-node") ? "hexadecimal" : "string",
+          wire.at("/resultType").asText());
+      assertEquals("测站<&>", wire.at("/fields/field/0/name").asText());
+      assertEquals(node.equals("hex-node") ? "十六进制摘要" : "十进制字节摘要",
+          wire.at("/resultfieldName").asText());
+    }
+
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("hex-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals("CHECKSUM_RESULT_ROW_TYPE_DEPENDS_ON_ALGORITHM_AND_ENCODING"))
+        .findFirst().orElseThrow();
+    assertTrue(contract.keyListPointers().contains("/checksumtype"));
+    assertTrue(contract.keyListPointers().contains("/resultType"));
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("decimal-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "both SHA-256 encodings must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(List.of("测站<&>", "十六进制摘要", "十进制字节摘要"),
+        outputMeta.get().getValueMetaList().stream().map(IValueMeta::getName).toList());
+    assertEquals(IValueMeta.TYPE_STRING, outputMeta.get().getValueMeta(1).getType());
+    assertEquals(IValueMeta.TYPE_STRING, outputMeta.get().getValueMeta(2).getType());
+    assertEquals(stations.size(), emitted.size());
+    for (int i = 0; i < stations.size(); i++) {
+      byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+          stations.get(i).getBytes(StandardCharsets.UTF_8));
+      String expectedHex = java.util.HexFormat.of().formatHex(digest);
+      List<String> unsignedBytes = new ArrayList<>();
+      for (byte b : digest) unsignedBytes.add(Integer.toString(b & 0xff));
+      String expectedDecimal = String.join("-", unsignedBytes);
+      assertEquals(stations.get(i), emitted.get(i)[0]);
+      assertEquals(expectedHex, emitted.get(i)[1]);
+      assertEquals(expectedDecimal, emitted.get(i)[2]);
+      assertNotEquals(expectedHex, expectedDecimal);
+    }
+    System.out.println("PROD_P0_CHECKSUM_SHA256_HEX_VS_DECIMAL_BYTES_JSON_HPL_ROWS=PASS");
+  }
+
 }
