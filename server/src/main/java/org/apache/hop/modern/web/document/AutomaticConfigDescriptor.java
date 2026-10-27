@@ -685,7 +685,21 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "REPLACE_STRING_REPLACEMENT_FIELD_RESOLVES_PER_INPUT_ROW",
                   List.of("/fields/field"),
-                  "When fields.field[*].replace_field_by_string is non-empty, native ReplaceString.processRow() looks up that upstream STRING-convertible field once at initialization and takes its replacement text separately from every incoming row. This overrides the configured replace_by_string literal; set_empty_string=true takes precedence over both. An absent replacement field fails native initialization even when the source field exists. Preserve the literal field reference, BOOLEAN flags, and ordered LIST across JSON editing and HPL disk reopen; this is a runtime diagnostic, not a draft-save validator."));
+                  "When fields.field[*].replace_field_by_string is non-empty, native ReplaceString.processRow() looks up that upstream STRING-convertible field once at initialization and takes its replacement text separately from every incoming row. This overrides the configured replace_by_string literal; set_empty_string=true takes precedence over both. An absent replacement field fails native initialization even when the source field exists. Preserve the literal field reference, BOOLEAN flags, and ordered LIST across JSON editing and HPL disk reopen; this is a runtime diagnostic, not a draft-save validator."),
+              new RuntimePrecondition(
+                  "REPLACE_STRING_REGEX_CAPTURE_GROUPS_USE_JAVA_MATCHER_REPLACEMENT",
+                  List.of("/fields/field"),
+                  "With fields.field[*].use_regex=true, native ReplaceString builds a Java "
+                      + "Pattern from replace_string and passes replace_by_string to "
+                      + "Matcher.replaceAll(). Thus $1 and $2 refer to capture groups "
+                      + "rather than literal dollar text; a replacement such as $2/$1 "
+                      + "reorders the captured fields. A non-empty out_stream_name appends "
+                      + "the transformed STRING while preserving the original input. "
+                      + "Native replacement preprocessing doubles backslashes but does "
+                      + "not quote dollar signs. Preserve the regex flag, replacement "
+                      + "expression and canonical ordered LIST item fields across JSON "
+                      + "editing and real HPL disk reopen; this is an execution "
+                      + "compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" ->
           List.of(
               new RuntimePrecondition(
