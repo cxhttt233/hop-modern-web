@@ -177,4 +177,125 @@ class SelectValuesFullPipelineP0Test {
     assertEquals(7L, ((Number) emitted.get(1)[1]).longValue());
     System.out.println("PROD_P0_SELECTVALUES_FULL_PIPELINE_THREE_STAGES_TYPED_ROWS=PASS");
   }
+
+  @Test
+  void selectValuesExplicitSelectionPrecedesAlphabetizedUnspecifiedRealRowsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String name : List.of("zeta", "beta", "黄河流量<&>", "alpha")) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, name);
+      fieldType.getMethod("setType", String.class).invoke(column, "String");
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("z-1", "b-1", "42", "a-1"),
+        List.of("z-2", "b-2", "7", "a-2"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SelectValues", "select-node", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-unspecified-real-rows");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-unspecified.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-unspecified-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-unspecified-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject());
+    fields.put("select_unspecified", true);
+    fields.putArray("field").addObject()
+        .put("name", "黄河流量<&>").put("rename", "选中_流量<&>");
+    fields.putArray("remove");
+    fields.putArray("meta");
+    var write = resource.write("select-unspecified-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertTrue(wire.at("/fields/select_unspecified").isBoolean());
+    assertTrue(wire.at("/fields/select_unspecified").booleanValue());
+    assertEquals(1, wire.at("/fields/field").size());
+    assertEquals("黄河流量<&>", wire.at("/fields/field/0/name").asText());
+    assertEquals("选中_流量<&>", wire.at("/fields/field/0/rename").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("select-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native SelectValues must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(emittedMeta.get());
+    assertEquals(4, emittedMeta.get().size());
+    assertEquals(List.of("选中_流量<&>", "alpha", "beta", "zeta"),
+        List.of(emittedMeta.get().getValueMeta(0).getName(),
+            emittedMeta.get().getValueMeta(1).getName(),
+            emittedMeta.get().getValueMeta(2).getName(),
+            emittedMeta.get().getValueMeta(3).getName()));
+    for (int i = 0; i < 4; i++) {
+      assertEquals(IValueMeta.TYPE_STRING, emittedMeta.get().getValueMeta(i).getType());
+    }
+    assertEquals(2, emitted.size());
+    assertEquals(List.of("42", "a-1", "b-1", "z-1"),
+        List.of(emitted.get(0)));
+    assertEquals(List.of("7", "a-2", "b-2", "z-2"),
+        List.of(emitted.get(1)));
+    System.out.println("PROD_P0_SELECTVALUES_UNSPECIFIED_ALPHABETICAL_REAL_ROWS=PASS");
+  }
 }
