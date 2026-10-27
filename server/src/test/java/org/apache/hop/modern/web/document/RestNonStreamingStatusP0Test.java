@@ -203,4 +203,137 @@ class RestNonStreamingStatusP0Test {
       server.stop(0);
     }
   }
+
+  @Test
+  void restBasicAuthenticationPreemptiveAndChallengeReachLoopbackAfterJsonHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    // Only disposable test credentials and a loopback HTTP server are involved.
+    // The test observes the first network request, not just RestMeta.isPreemptive().
+    String login = "test-user";
+    String password = "test-password";
+    String expectedAuthorization = "Basic " + java.util.Base64.getEncoder()
+        .encodeToString((login + ":" + password).getBytes(StandardCharsets.UTF_8));
+    List<String> preemptiveHeaders = new java.util.concurrent.CopyOnWriteArrayList<>();
+    List<String> challengeHeaders = new java.util.concurrent.CopyOnWriteArrayList<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/auth", exchange -> {
+      try (exchange) {
+        String authorization = exchange.getRequestHeaders().getFirst("Authorization");
+        List<String> observed = exchange.getRequestURI().getPath().endsWith("/preemptive")
+            ? preemptiveHeaders : challengeHeaders;
+        observed.add(authorization);
+        if (authorization == null) {
+          exchange.getResponseHeaders().add("WWW-Authenticate", "Basic realm=\"hop-p0\"");
+          exchange.sendResponseHeaders(401, -1);
+        } else {
+          int status = expectedAuthorization.equals(authorization) ? 200 : 403;
+          byte[] body = "authorized-雪".getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(status, body.length);
+          exchange.getResponseBody().write(body);
+        }
+      }
+    });
+    server.start();
+    try {
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(plugin, "pinned REST plugin required");
+      String base = "http://127.0.0.1:" + server.getAddress().getPort() + "/auth/";
+      for (boolean nonPreemptive : new boolean[] {false, true}) {
+        String mode = nonPreemptive ? "challenge" : "preemptive";
+        ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+        original.setDefault();
+        original.getClass().getMethod("setUrl", String.class)
+            .invoke(original, base + mode);
+        original.getClass().getMethod("setHttpLogin", String.class)
+            .invoke(original, login);
+        original.getClass().getMethod("setHttpPassword", String.class)
+            .invoke(original, password);
+
+        var provider = new MemoryMetadataProvider();
+        var store = new PipelineDocumentStore(provider, new Variables());
+        Path hpl = tempDir.resolve("rest-basic-" + mode + ".hpl");
+        PipelineMeta pipeline = new PipelineMeta();
+        pipeline.setName("rest-basic-" + mode);
+        pipeline.addTransform(new TransformMeta("Rest", "rest-auth-node", original));
+        store.save(hpl, pipeline);
+
+        PipelineMeta loaded = store.open(hpl);
+        var documents = new PipelineDocumentRegistry();
+        String documentId = "rest-basic-" + mode;
+        documents.put(new PipelineDocument(documentId, hpl, loaded));
+        var resource = new PipelineConfigResource(documents, provider);
+        var read = resource.read(documentId,
+            new PipelineConfigResource.ReadRequest("rest-auth-node"));
+        assertEquals(200, read.getStatus());
+        ObjectNode draft = ((ObjectNode)
+            ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+        draft.put("method", "GET");
+        draft.put("non_preemptive_basic_auth", nonPreemptive);
+        draft.put("retryTimes", 0);
+        draft.putObject("retryMethods").putArray("retryMethod").add("POST");
+        draft.putObject("retryStatusCodes").putArray("retryStatusCode").add("418");
+        var write = resource.write(documentId,
+            new PipelineConfigResource.WriteRequest("rest-auth-node", draft));
+        assertEquals(200, write.getStatus(), "Basic auth JSON edit must succeed");
+        store.save(hpl, loaded);
+
+        PipelineMeta reopened = store.open(hpl);
+        ITransformMeta diskMeta = reopened.findTransform("rest-auth-node").getTransform();
+        JsonNode wire = ConfigJsonSerializer.toJson(diskMeta, provider);
+        assertTrue(wire.at("/non_preemptive_basic_auth").isBoolean());
+        assertEquals(nonPreemptive,
+            wire.at("/non_preemptive_basic_auth").booleanValue());
+        assertEquals(!nonPreemptive,
+            diskMeta.getClass().getMethod("isPreemptive").invoke(diskMeta));
+        assertEquals("POST", wire.at("/retryMethods/retryMethod/0").asText());
+        assertEquals("418", wire.at("/retryStatusCodes/retryStatusCode/0").asText());
+
+        var contract = AutomaticConfigDescriptor.describe(diskMeta.getClass())
+            .runtimePreconditions().stream()
+            .filter(p -> p.code().equals("REST_BASIC_AUTH_PREEMPTIVE_FLAG_IS_INVERTED"))
+            .findFirst().orElseThrow();
+        assertEquals(List.of("/non_preemptive_basic_auth"), contract.keyListPointers());
+
+        ClassLoader loader = diskMeta.getClass().getClassLoader();
+        Class<?> restType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+        Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+        Object data = dataType.getConstructor().newInstance();
+        Object rest = restType.getConstructor(TransformMeta.class, diskMeta.getClass(),
+            dataType, int.class, PipelineMeta.class, org.apache.hop.pipeline.Pipeline.class)
+            .newInstance(reopened.findTransform("rest-auth-node"), diskMeta, data, 0,
+                reopened, Mockito.spy(new LocalPipelineEngine()));
+        restType.getMethod("setMetadataProvider",
+            org.apache.hop.metadata.api.IHopMetadataProvider.class).invoke(rest, provider);
+        assertTrue((Boolean) restType.getMethod("init").invoke(rest));
+        dataType.getField("realUrl").set(data, base + mode);
+        dataType.getField("method").set(data, "GET");
+        var invoke = restType.getDeclaredMethod("invokeRestExchange", Object[].class,
+            String.class, java.util.LinkedHashMap.class, java.util.LinkedHashMap.class,
+            java.util.LinkedHashMap.class);
+        invoke.setAccessible(true);
+        try {
+          Object response = invoke.invoke(rest, new Object[0], null,
+              new java.util.LinkedHashMap<String, String>(),
+              new java.util.LinkedHashMap<String, String>(),
+              new java.util.LinkedHashMap<String, String>());
+          var status = response.getClass().getDeclaredField("status");
+          status.setAccessible(true);
+          assertEquals(200, status.getInt(response));
+        } finally {
+          restType.getMethod("dispose").invoke(rest);
+        }
+      }
+      assertEquals(List.of(expectedAuthorization), preemptiveHeaders,
+          "preemptive Basic must authenticate on the first actual request");
+      assertEquals(2, challengeHeaders.size(),
+          "non-preemptive Basic must wait for 401 and then answer the challenge");
+      assertNull(challengeHeaders.get(0));
+      assertEquals(expectedAuthorization, challengeHeaders.get(1));
+      System.out.println("PROD_P0_REST_BASIC_AUTH_FIRST_REQUEST_CHALLENGE_JSON_HPL=PASS");
+    } finally {
+      server.stop(0);
+    }
+  }
+
 }
