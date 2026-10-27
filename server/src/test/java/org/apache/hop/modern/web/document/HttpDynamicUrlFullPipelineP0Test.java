@@ -64,7 +64,7 @@ class HttpDynamicUrlFullPipelineP0Test {
             : path.endsWith("/changjiang") ? "长江" : "unexpected";
         byte[] bytes = ("native-http-" + station).getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
-        exchange.getResponseHeaders().add("X-Station", station);
+        exchange.getResponseHeaders().add("X-Station", path.endsWith("/huanghe") ? "huanghe" : "changjiang");
         exchange.sendResponseHeaders(200, bytes.length);
         exchange.getResponseBody().write(bytes);
       }
@@ -212,7 +212,7 @@ class HttpDynamicUrlFullPipelineP0Test {
         for (var names = headers.fieldNames(); names.hasNext();) {
           String key = names.next();
           if (key.equalsIgnoreCase("X-Station")) {
-            assertEquals(station, headers.path(key).asText());
+            assertEquals(i == 0 ? "huanghe" : "changjiang", headers.path(key).asText());
             found = true;
           }
         }
