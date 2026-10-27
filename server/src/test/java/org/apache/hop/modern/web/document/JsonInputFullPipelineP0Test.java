@@ -252,7 +252,7 @@ class JsonInputFullPipelineP0Test {
     var documents = new PipelineDocumentRegistry();
     documents.put(new PipelineDocument("json-null-doc", hpl, loaded));
     var resource = new PipelineConfigResource(documents, provider);
-    var read = resource.read("json-full-doc",
+    var read = resource.read("json-null-doc",
         new PipelineConfigResource.ReadRequest("json-node"));
     assertEquals(200, read.getStatus());
     ObjectNode draft = ((ObjectNode)
@@ -268,7 +268,7 @@ class JsonInputFullPipelineP0Test {
     ((ObjectNode) paths.get(0)).put("path", "$.station");
     ((ObjectNode) paths.get(1)).put("path", "$.flow");
 
-    var write = resource.write("json-full-doc",
+    var write = resource.write("json-null-doc",
         new PipelineConfigResource.WriteRequest("json-node", draft));
     assertEquals(200, write.getStatus(), "two native JSONPath edits must be accepted");
     store.save(hpl, loaded);
