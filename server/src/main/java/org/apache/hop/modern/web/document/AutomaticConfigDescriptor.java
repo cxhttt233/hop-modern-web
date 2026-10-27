@@ -168,6 +168,20 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.datagrid.DataGridMeta" ->
           List.of(
               new RuntimePrecondition(
+                  "DATA_GRID_NONSTRING_FORCED_EMPTY_STRING_MISMATCHES_DECLARED_TYPE",
+                  List.of("/fields/field", "/data/line"),
+                  "For an INTEGER or NUMBER field whose canonical "
+                      + "/fields/field/<index>/field/set_empty_string is true, native "
+                      + "DataGrid.processRow() bypasses typed conversion and writes "
+                      + "a Java empty String, even though DataGridMeta.getFields() "
+                      + "still declares the output column INTEGER or NUMBER. The "
+                      + "configured /data/line/<index>/item value is ignored for that "
+                      + "column. This can surprise downstream consumers that assume "
+                      + "the runtime Java value always matches IRowMeta's numeric "
+                      + "type. Preserve the BOOLEAN flag, ordered fields and data "
+                      + "rows through JSON/HPL editing; this is a native runtime "
+                      + "compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
                   "DATA_GRID_UNKNOWN_FIELD_TYPES_FALLBACK_TO_STRING",
                   List.of("/fields/field"),
                   "For each non-empty fields.field[*].name, DataGridMeta.getFields() resolves the declared fields.field[*].type through ValueMetaFactory. An unknown or null type resolves to TYPE_NONE and silently falls back to STRING; entries with an empty name are omitted from output metadata. Diagnose an unrecognized declared type instead of assuming that Hop will honor it. This is not a save-time validator."),
