@@ -177,4 +177,151 @@ class CheckSumFullPipelineP0Test {
     }
     System.out.println("PROD_P0_CHECKSUM_FULL_PIPELINE_BINARY_SHA256_JSON_HPL_ROWS=PASS");
   }
+
+  /**
+   * CRC32 and ADLER32 are native INTEGER outputs even when the serialized
+   * resultType requests binary. Verify both algorithms on actual UTF-8 rows
+   * after API edits and native HPL disk reopen, not just getFields metadata.
+   */
+  @Test
+  void checkSumCrc32AndAdler32KeepIntegerOutputsDespiteBinaryResultTypeAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin checksumPlugin = plugins.findPluginWithId(TransformPluginType.class, "CheckSum");
+    assertNotNull(gridPlugin);
+    assertNotNull(checksumPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    Object field = fieldType.getConstructor().newInstance();
+    fieldType.getMethod("setName", String.class).invoke(field, "测站<&>");
+    fieldType.getMethod("setType", String.class).invoke(field, "String");
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, List.of(field));
+    List<String> stations = List.of("黄河", "长江");
+    List<Object> lines = new ArrayList<>();
+    for (String station : stations) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, List.of(station));
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta crc = plugins.loadClass(checksumPlugin, ITransformMeta.class);
+    crc.setDefault();
+    ITransformMeta adler = plugins.loadClass(checksumPlugin, ITransformMeta.class);
+    adler.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta crcNode = new TransformMeta("CheckSum", "crc-node", crc);
+    TransformMeta adlerNode = new TransformMeta("CheckSum", "adler-node", adler);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("checksum-crc32-adler32-integer-compatibility");
+    pipeline.addTransform(source);
+    pipeline.addTransform(crcNode);
+    pipeline.addTransform(adlerNode);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, crcNode));
+    pipeline.addPipelineHop(new PipelineHopMeta(crcNode, adlerNode));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("checksum-crc32-adler32.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    assertEquals(2, loaded.nrPipelineHops());
+
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("checksum-integer-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    for (String node : List.of("crc-node", "adler-node")) {
+      var read = resource.read("checksum-integer-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("checksumtype", node.equals("crc-node") ? "CRC32" : "ADLER32");
+      draft.put("resultType", "binary");
+      draft.put("resultfieldName", node.equals("crc-node") ? "CRC结果" : "Adler结果");
+      draft.put("prefix", "");
+      draft.put("separator", "");
+      draft.put("suffix", "");
+      ArrayNode selected = draft.putObject("fields").putArray("field");
+      selected.addObject().put("name", "测站<&>");
+      var write = resource.write("checksum-integer-doc",
+          new PipelineConfigResource.WriteRequest(node, draft));
+      assertEquals(200, write.getStatus(), node + " JSON config edit must succeed");
+    }
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(3, reopened.nrTransforms());
+    assertEquals(2, reopened.nrPipelineHops());
+    for (String node : List.of("crc-node", "adler-node")) {
+      JsonNode wire = ConfigJsonSerializer.toJson(
+          reopened.findTransform(node).getTransform(), provider);
+      assertEquals(node.equals("crc-node") ? "CRC32" : "ADLER32",
+          wire.at("/checksumtype").asText());
+      assertEquals("binary", wire.at("/resultType").asText());
+      assertEquals("测站<&>", wire.at("/fields/field/0/name").asText());
+      assertEquals(node.equals("crc-node") ? "CRC结果" : "Adler结果",
+          wire.at("/resultfieldName").asText());
+    }
+
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("crc-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "CHECKSUM_RESULT_ROW_TYPE_DEPENDS_ON_ALGORITHM_AND_ENCODING"))
+        .findFirst().orElseThrow();
+    assertTrue(contract.keyListPointers().contains("/checksumtype"));
+    assertTrue(contract.keyListPointers().contains("/resultType"));
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("adler-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "both native checksums must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(List.of("测站<&>", "CRC结果", "Adler结果"),
+        outputMeta.get().getValueMetaList().stream().map(IValueMeta::getName).toList());
+    assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(1).getType());
+    assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(2).getType());
+    assertEquals(stations.size(), emitted.size());
+    for (int i = 0; i < stations.size(); i++) {
+      String station = stations.get(i);
+      byte[] bytes = station.getBytes(StandardCharsets.UTF_8);
+      java.util.zip.CRC32 expectedCrc = new java.util.zip.CRC32();
+      expectedCrc.update(bytes);
+      java.util.zip.Adler32 expectedAdler = new java.util.zip.Adler32();
+      expectedAdler.update(bytes);
+      assertEquals(station, emitted.get(i)[0]);
+      assertInstanceOf(Long.class, emitted.get(i)[1]);
+      assertInstanceOf(Long.class, emitted.get(i)[2]);
+      assertEquals(expectedCrc.getValue(), emitted.get(i)[1]);
+      assertEquals(expectedAdler.getValue(), emitted.get(i)[2]);
+    }
+    System.out.println("PROD_P0_CHECKSUM_CRC_ADLER_BINARY_REQUEST_INTEGER_REAL_ROWS=PASS");
+  }
 }
