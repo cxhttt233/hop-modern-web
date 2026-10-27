@@ -317,4 +317,131 @@ class GroupByFullPipelineP0Test {
     assertEquals(1L, ((Number) emitted.get(2)[3]).longValue());
     System.out.println("PROD_P0_GROUPBY_PASS_ALL_ROWS_GROUP_LINENR_JSON_HPL_ROWS=PASS");
   }
+
+  /**
+   * Native zero-input behavior is not a generic empty-list roundtrip: give_back_row
+   * determines whether an aggregate row exists even when the upstream emits none.
+   */
+  @Test
+  void groupByGiveBackRowEmitsZeroCountWithoutSourceRowsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin groupPlugin = plugins.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(gridPlugin);
+    assertNotNull(groupPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader gridLoader = grid.getClass().getClassLoader();
+    Class<?> gridField = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Object column = gridField.getConstructor().newInstance();
+    gridField.getMethod("setName", String.class).invoke(column, "流域<&>");
+    gridField.getMethod("setType", String.class).invoke(column, "String");
+    grid.getClass().getMethod("setDataGridFields", List.class)
+        .invoke(grid, List.of(column));
+    grid.getClass().getMethod("setDataLines", List.class)
+        .invoke(grid, List.of());
+
+    ITransformMeta group = plugins.loadClass(groupPlugin, ITransformMeta.class);
+    group.setDefault();
+    ClassLoader groupLoader = group.getClass().getClassLoader();
+    Class<?> groupField = groupLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.groupby.GroupingField");
+    Object grouping = groupField.getConstructor(String.class).newInstance("流域<&>");
+    group.getClass().getMethod("setGroupingFields", List.class)
+        .invoke(group, List.of(grouping));
+    Class<?> aggregationType = groupLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.groupby.Aggregation");
+    Object count = aggregationType.getConstructor().newInstance();
+    aggregationType.getMethod("setField", String.class).invoke(count, "零行计数");
+    aggregationType.getMethod("setSubject", String.class).invoke(count, "");
+    aggregationType.getMethod("setTypeLabel", String.class).invoke(count, "COUNT_ANY");
+    group.getClass().getMethod("setAggregations", List.class)
+        .invoke(group, List.of(count));
+
+    var contract = AutomaticConfigDescriptor.describe(group.getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals("GROUPBY_EMPTY_INPUT_GIVE_BACK_ROW_EMITS_ZERO_COUNT"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/give_back_row", "/all_rows", "/group/field", "/fields/field"),
+        contract.keyListPointers());
+
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("GroupBy", "group-node", group);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("groupby-zero-input-give-back");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("groupby-zero-input-give-back.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("group-zero-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("group-zero-doc",
+        new PipelineConfigResource.ReadRequest("group-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("all_rows", false);
+    draft.put("give_back_row", true);
+    assertEquals(1, draft.path("group").path("field").size());
+    assertEquals(1, draft.path("fields").path("field").size());
+    var write = resource.write("group-zero-doc",
+        new PipelineConfigResource.WriteRequest("group-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("group-node").getTransform(), provider);
+    assertTrue(wire.at("/give_back_row").isBoolean());
+    assertTrue(wire.at("/give_back_row").booleanValue());
+    assertTrue(wire.at("/all_rows").isBoolean());
+    assertFalse(wire.at("/all_rows").booleanValue());
+    assertEquals("流域<&>", wire.at("/group/field/0/name").asText());
+    assertEquals("COUNT_ANY", wire.at("/fields/field/0/type").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("group-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "zero-input GroupBy must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get(), "give_back_row must emit one aggregate row");
+    assertEquals(2, outputMeta.get().size());
+    assertEquals("流域<&>", outputMeta.get().getValueMeta(0).getName());
+    assertEquals(IValueMeta.TYPE_STRING, outputMeta.get().getValueMeta(0).getType());
+    assertEquals("零行计数", outputMeta.get().getValueMeta(1).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(1).getType());
+    assertEquals(1, emitted.size(), "zero upstream rows must still yield one aggregate");
+    assertNull(emitted.get(0)[0], "no group key value exists without input rows");
+    assertEquals(0L, ((Number) emitted.get(0)[1]).longValue());
+    System.out.println("PROD_P0_GROUPBY_EMPTY_INPUT_GIVE_BACK_ZERO_COUNT_JSON_HPL=PASS");
+  }
 }
