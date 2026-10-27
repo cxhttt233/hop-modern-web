@@ -127,10 +127,10 @@ class StreamLookupFullPipelineP0Test {
         .put("name", "测站<&>").put("field", "索引站");
     lookupDraft.putArray("value")
         .addObject().put("name", "级别").put("rename", "等级<&>")
-        .put("default", "未知<&>").put("type", "String");
+        .put("default", "未知<&>").put("type", IValueMeta.TYPE_STRING);
     lookupDraft.withArray("value")
         .addObject().put("name", "流量").put("rename", "对应流量")
-        .put("default", "-1").put("type", "Integer");
+        .put("default", "-1").put("type", IValueMeta.TYPE_INTEGER);
     var write = resource.write("streamlookup-full-doc",
         new PipelineConfigResource.WriteRequest("lookup-node", draft));
     assertEquals(200, write.getStatus());
@@ -147,10 +147,12 @@ class StreamLookupFullPipelineP0Test {
     assertEquals(2, wire.at("/lookup/value").size());
     assertEquals("等级<&>", wire.at("/lookup/value/0/rename").asText());
     assertEquals("未知<&>", wire.at("/lookup/value/0/default").asText());
-    assertEquals("String", wire.at("/lookup/value/0/type").asText());
+    assertTrue(wire.at("/lookup/value/0/type").isInt());
+    assertEquals(IValueMeta.TYPE_STRING, wire.at("/lookup/value/0/type").intValue());
     assertEquals("对应流量", wire.at("/lookup/value/1/rename").asText());
     assertEquals("-1", wire.at("/lookup/value/1/default").asText());
-    assertEquals("Integer", wire.at("/lookup/value/1/type").asText());
+    assertTrue(wire.at("/lookup/value/1/type").isInt());
+    assertEquals(IValueMeta.TYPE_INTEGER, wire.at("/lookup/value/1/type").intValue());
 
     List<Object[]> emitted = new CopyOnWriteArrayList<>();
     AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
