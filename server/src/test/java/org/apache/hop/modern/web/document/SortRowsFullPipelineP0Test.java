@@ -45,6 +45,129 @@ class SortRowsFullPipelineP0Test {
     ModernWebServer.initializePipelinePlugins();
   }
 
+
+  @Test
+  void sortRowsCaseInsensitiveNonCollatorOrdersNativeRowsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin sortPlugin = plugins.findPluginWithId(TransformPluginType.class, "SortRows");
+    assertNotNull(gridPlugin, "pinned DataGrid plugin required");
+    assertNotNull(sortPlugin, "pinned SortRows plugin required");
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader gridLoader = grid.getClass().getClassLoader();
+    Class<?> fieldType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> gridFields = new ArrayList<>();
+    for (String name : List.of("排序键<&>", "批次")) {
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, name);
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      gridFields.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, gridFields);
+    List<Object> gridLines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("z", "r-z"), List.of("B", "r-B"),
+        List.of("a", "r-a"), List.of("M", "r-M"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      gridLines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, gridLines);
+
+    ITransformMeta sort = plugins.loadClass(sortPlugin, ITransformMeta.class);
+    sort.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SortRows", "sort-node", sort);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("sort-rows-case-insensitive-noncollator");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("sort-rows-case-insensitive.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("sort-case-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("sort-case-doc",
+        new PipelineConfigResource.ReadRequest("sort-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("directory", tempDir.toAbsolutePath().toString());
+    draft.put("sort_size", "1000");
+    draft.put("unique_rows", false);
+    draft.putObject("fields").putArray("field").addObject()
+        .put("name", "排序键<&>")
+        .put("ascending", true)
+        .put("case_sensitive", false)
+        .put("collator_enabled", false)
+        .put("collator_strength", 0)
+        .put("presorted", false);
+    var write = resource.write("sort-case-doc",
+        new PipelineConfigResource.WriteRequest("sort-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("sort-node").getTransform(), provider);
+    assertEquals("排序键<&>", wire.at("/fields/field/0/name").asText());
+    assertTrue(wire.at("/fields/field/0/case_sensitive").isBoolean());
+    assertFalse(wire.at("/fields/field/0/case_sensitive").booleanValue());
+    assertTrue(wire.at("/fields/field/0/collator_enabled").isBoolean());
+    assertFalse(wire.at("/fields/field/0/collator_enabled").booleanValue());
+    assertTrue(wire.at("/fields/field/0/ascending").booleanValue());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("sort-node", 0);
+      assertNotNull(output, "real engine must prepare SortRows");
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native SortRows pipeline must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(emittedMeta.get());
+    assertEquals(2, emittedMeta.get().size());
+    assertTrue(emittedMeta.get().getValueMeta(0).isCaseInsensitive());
+    assertTrue(emittedMeta.get().getValueMeta(0).isCollatorDisabled());
+    assertFalse(emittedMeta.get().getValueMeta(0).isSortedDescending());
+    assertEquals(4, emitted.size());
+    // Pinned ValueMetaBase.compare() uses String.compareToIgnoreCase here.
+    // Case-sensitive Java ordering would instead put B and M before a.
+    assertEquals(List.of("r-a", "r-B", "r-M", "r-z"),
+        emitted.stream().map(row -> (String) row[1]).toList());
+    assertEquals(List.of("a", "B", "M", "z"),
+        emitted.stream().map(row -> (String) row[0]).toList());
+    System.out.println("PROD_P0_SORTROWS_CASE_INSENSITIVE_NONCOLLATOR_JSON_HPL_ROWS=PASS");
+  }
+
   @Test
   void sortRowsTwoOrderedKeysExecuteNativeFullPipelineAfterHplReopen(
       @TempDir Path tempDir) throws Exception {
