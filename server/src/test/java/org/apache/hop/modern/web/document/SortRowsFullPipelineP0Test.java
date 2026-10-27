@@ -320,4 +320,140 @@ class SortRowsFullPipelineP0Test {
         emitted.stream().map(row -> (String) row[1]).toList());
     System.out.println("PROD_P0_SORTROWS_FULL_PIPELINE_TWO_ORDERED_KEYS_JSON_HPL_ROWS=PASS");
   }
+
+  /**
+   * The pinned numeric comparator reverses null placement with ascending/descending.
+   * Exercise both directions with actual missing INTEGER input, not just schema checks.
+   */
+  @Test
+  void sortRowsNumericNullPlacementFollowsDirectionAfterRealHplDiskReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin sortPlugin = plugins.findPluginWithId(TransformPluginType.class, "SortRows");
+    assertNotNull(gridPlugin);
+    assertNotNull(sortPlugin);
+
+    for (boolean ascending : new boolean[] {true, false}) {
+      ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+      grid.setDefault();
+      ClassLoader loader = grid.getClass().getClassLoader();
+      Class<?> fieldType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+      Class<?> lineType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+      List<Object> gridFields = new ArrayList<>();
+      for (String name : List.of("流量<&>", "标记")) {
+        Object field = fieldType.getConstructor().newInstance();
+        fieldType.getMethod("setName", String.class).invoke(field, name);
+        fieldType.getMethod("setType", String.class)
+            .invoke(field, name.equals("流量<&>") ? "Integer" : "String");
+        gridFields.add(field);
+      }
+      grid.getClass().getMethod("setDataGridFields", List.class)
+          .invoke(grid, gridFields);
+      List<Object> lines = new ArrayList<>();
+      for (List<String> values : List.of(
+          List.of("10", "大值"),
+          List.of("-1", "负值"),
+          java.util.Arrays.asList(null, "缺测"),
+          List.of("2", "小值"))) {
+        Object line = lineType.getConstructor().newInstance();
+        lineType.getMethod("setDatalines", List.class).invoke(line, values);
+        lines.add(line);
+      }
+      grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+      ITransformMeta sort = plugins.loadClass(sortPlugin, ITransformMeta.class);
+      sort.setDefault();
+      var compatibility = AutomaticConfigDescriptor.describe(sort.getClass())
+          .runtimePreconditions().stream()
+          .filter(rule -> rule.code().equals(
+              "SORT_ROWS_NUMERIC_NULL_PLACEMENT_FOLLOWS_DIRECTION"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/fields/field"), compatibility.keyListPointers());
+
+      TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+      TransformMeta target = new TransformMeta("SortRows", "sort-node", sort);
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("sort-numeric-null-" + ascending);
+      pipeline.addTransform(source);
+      pipeline.addTransform(target);
+      pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("sort-numeric-null-" + ascending + ".hpl");
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      String documentId = "sort-null-" + ascending;
+      documents.put(new PipelineDocument(documentId, hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read(documentId,
+          new PipelineConfigResource.ReadRequest("sort-node"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("directory", tempDir.toAbsolutePath().toString());
+      draft.put("sort_size", "1000");
+      draft.put("unique_rows", false);
+      draft.putObject("fields").putArray("field").addObject()
+          .put("name", "流量<&>")
+          .put("ascending", ascending)
+          .put("case_sensitive", true)
+          .put("collator_enabled", false)
+          .put("collator_strength", 0)
+          .put("presorted", false);
+      var write = resource.write(documentId,
+          new PipelineConfigResource.WriteRequest("sort-node", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      assertEquals(2, reopened.nrTransforms());
+      assertEquals(1, reopened.nrPipelineHops());
+      JsonNode wire = ConfigJsonSerializer.toJson(
+          reopened.findTransform("sort-node").getTransform(), provider);
+      assertEquals("流量<&>", wire.at("/fields/field/0/name").asText());
+      assertTrue(wire.at("/fields/field/0/ascending").isBoolean());
+      assertEquals(ascending, wire.at("/fields/field/0/ascending").booleanValue());
+
+      List<Object[]> rows = new CopyOnWriteArrayList<>();
+      AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+      LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+      engine.setMetadataProvider(provider);
+      try {
+        engine.prepareExecution();
+        ITransform output = engine.getRunThread("sort-node", 0);
+        assertNotNull(output);
+        output.addRowListener(new RowAdapter() {
+          @Override
+          public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+            outputMeta.set(rowMeta.clone());
+            rows.add(row.clone());
+          }
+        });
+        engine.startThreads();
+        engine.waitUntilFinished();
+        assertEquals(0, engine.getErrors(), "native SortRows must finish");
+      } finally {
+        if (!engine.isFinishedOrStopped()) engine.stopAll();
+        engine.cleanup();
+      }
+
+      assertNotNull(outputMeta.get());
+      assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(0).getType());
+      assertEquals(!ascending, outputMeta.get().getValueMeta(0).isSortedDescending());
+      assertEquals(4, rows.size());
+      assertEquals(ascending
+              ? List.of("缺测", "负值", "小值", "大值")
+              : List.of("大值", "小值", "负值", "缺测"),
+          rows.stream().map(row -> (String) row[1]).toList());
+      assertNull(rows.get(ascending ? 0 : 3)[0], "missing numeric input stays null");
+      assertEquals(ascending ? -1L : 10L, rows.get(ascending ? 1 : 0)[0]);
+    }
+    System.out.println("PROD_P0_SORTROWS_NUMERIC_NULL_ASC_DESC_JSON_HPL_ROWS=PASS");
+  }
+
 }
