@@ -1,0 +1,239 @@
+package org.apache.hop.modern.web.document;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.hop.core.HopClientEnvironment;
+import org.apache.hop.core.plugins.IPlugin;
+import org.apache.hop.core.plugins.PluginRegistry;
+import org.apache.hop.core.plugins.TransformPluginType;
+import org.apache.hop.core.row.IRowMeta;
+import org.apache.hop.core.row.IValueMeta;
+import org.apache.hop.core.variables.Variables;
+import org.apache.hop.metadata.serializer.json.ConfigJsonSerializer;
+import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
+import org.apache.hop.modern.web.ModernWebServer;
+import org.apache.hop.pipeline.PipelineHopMeta;
+import org.apache.hop.pipeline.PipelineMeta;
+import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
+import org.apache.hop.pipeline.transform.ITransform;
+import org.apache.hop.pipeline.transform.ITransformMeta;
+import org.apache.hop.pipeline.transform.RowAdapter;
+import org.apache.hop.pipeline.transform.TransformMeta;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * Production REST per-row dynamic method and URL acceptance after config JSON and HPL disk reopen.
+ * Proves that the configured static POST enables bodyField binding, while a dynamic GET sends no
+ * entity and a dynamic POST sends the input row body. HTTP stays on isolated 127.0.0.1.
+ */
+@EnabledIfSystemProperty(named = "prodP0Expected", matches = "true")
+class RestDynamicMethodFullPipelineP0Test {
+  record RequestSeen(String path, String method, String body) {}
+
+  @BeforeAll
+  static void init() throws Exception {
+    HopClientEnvironment.init();
+    ModernWebServer.initializePipelinePlugins();
+  }
+
+  @Test
+  void restDynamicGetPostUsesPerRowUrlAndPostBodyAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    List<RequestSeen> received = new CopyOnWriteArrayList<>();
+    AtomicInteger literalRequests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/station/", exchange -> {
+      try (exchange) {
+        String path = exchange.getRequestURI().getPath();
+        String method = exchange.getRequestMethod();
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        received.add(new RequestSeen(path, method, body));
+        String response = path.endsWith("/read") ? "native-rest-黄河" : "native-rest-长江";
+        byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    server.createContext("/literal-unused", exchange -> {
+      try (exchange) {
+        literalRequests.incrementAndGet();
+        byte[] bytes = "wrong-url".getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    server.start();
+    try {
+      String base = "http://127.0.0.1:" + server.getAddress().getPort();
+      String postBody = "{\"station\":\"长江<&>\",\"flow\":42}";
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+      IPlugin restPlugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(gridPlugin, "pinned DataGrid plugin required");
+      assertNotNull(restPlugin, "pinned REST plugin required");
+
+      ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+      grid.setDefault();
+      ClassLoader gridLoader = grid.getClass().getClassLoader();
+      Class<?> fieldType = gridLoader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+      Class<?> lineType = gridLoader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+      List<Object> fields = new ArrayList<>();
+      for (String name : List.of("请求地址<&>", "请求方法_雪", "请求体", "批次")) {
+        Object field = fieldType.getConstructor().newInstance();
+        fieldType.getMethod("setName", String.class).invoke(field, name);
+        fieldType.getMethod("setType", String.class).invoke(field, "String");
+        fields.add(field);
+      }
+      grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, fields);
+      List<Object> lines = new ArrayList<>();
+      for (List<String> values : List.of(
+          List.of(base + "/station/read", "GET", "GET-SHOULD-NOT-BE-SENT", "批次一"),
+          List.of(base + "/station/write", "POST", postBody, "批次二"))) {
+        Object line = lineType.getConstructor().newInstance();
+        lineType.getMethod("setDatalines", List.class).invoke(line, values);
+        lines.add(line);
+      }
+      grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+      ITransformMeta rest = plugins.loadClass(restPlugin, ITransformMeta.class);
+      rest.setDefault();
+      TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+      TransformMeta target = new TransformMeta("Rest", "rest-node", rest);
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("rest-native-dynamic-get-post");
+      pipeline.addTransform(source);
+      pipeline.addTransform(target);
+      pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("rest-dynamic-method-full-pipeline.hpl");
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      assertEquals(1, loaded.nrPipelineHops());
+
+      var registry = new PipelineDocumentRegistry();
+      registry.put(new PipelineDocument("rest-dynamic-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(registry, provider);
+      var read = resource.read("rest-dynamic-doc",
+          new PipelineConfigResource.ReadRequest("rest-node"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("method", "POST");
+      draft.put("dynamicMethod", true);
+      draft.put("methodFieldName", "请求方法_雪");
+      draft.put("urlInField", true);
+      draft.put("urlField", "请求地址<&>");
+      draft.put("url", base + "/literal-unused");
+      draft.put("bodyField", "请求体");
+      draft.put("applicationType", "JSON");
+      draft.put("streamingEnabled", false);
+      ObjectNode result = (ObjectNode) draft.path("result");
+      assertTrue(result.isObject());
+      result.put("name", "响应正文");
+      result.put("code", "HTTP状态");
+      result.put("response_header", "");
+      result.put("response_time", "");
+      result.put("binary", false);
+      var write = resource.write("rest-dynamic-doc",
+          new PipelineConfigResource.WriteRequest("rest-node", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      assertEquals(2, reopened.nrTransforms());
+      assertEquals(1, reopened.nrPipelineHops());
+      JsonNode wire = ConfigJsonSerializer.toJson(
+          reopened.findTransform("rest-node").getTransform(), provider);
+      assertEquals("POST", wire.at("/method").asText());
+      assertTrue(wire.at("/dynamicMethod").isBoolean());
+      assertTrue(wire.at("/dynamicMethod").booleanValue());
+      assertEquals("请求方法_雪", wire.at("/methodFieldName").asText());
+      assertTrue(wire.at("/urlInField").booleanValue());
+      assertEquals("请求地址<&>", wire.at("/urlField").asText());
+      assertEquals(base + "/literal-unused", wire.at("/url").asText());
+      assertEquals("请求体", wire.at("/bodyField").asText());
+      assertEquals("JSON", wire.at("/applicationType").asText());
+      assertEquals("响应正文", wire.at("/result/name").asText());
+      assertEquals("HTTP状态", wire.at("/result/code").asText());
+
+      var contract = AutomaticConfigDescriptor.describe(
+          reopened.findTransform("rest-node").getTransform().getClass())
+          .runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "REST_DYNAMIC_GET_POST_BODY_REQUIRES_STATIC_BODY_CAPABLE_METHOD"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/dynamicMethod", "/methodFieldName", "/method", "/bodyField",
+          "/urlInField", "/urlField"), contract.keyListPointers());
+
+      List<Object[]> outputRows = new CopyOnWriteArrayList<>();
+      List<IRowMeta> outputMetas = new CopyOnWriteArrayList<>();
+      LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+      engine.setMetadataProvider(provider);
+      try {
+        engine.prepareExecution();
+        ITransform output = engine.getRunThread("rest-node", 0);
+        assertNotNull(output, "native REST engine must prepare");
+        output.addRowListener(new RowAdapter() {
+          @Override
+          public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+            outputMetas.add(rowMeta.clone());
+            outputRows.add(row.clone());
+          }
+        });
+        engine.startThreads();
+        engine.waitUntilFinished();
+        assertEquals(0, engine.getErrors(), "native REST pipeline must finish");
+      } finally {
+        if (!engine.isFinishedOrStopped()) engine.stopAll();
+        engine.cleanup();
+      }
+
+      assertEquals(2, outputRows.size());
+      assertEquals(2, outputMetas.size());
+      assertEquals(List.of("请求地址<&>", "请求方法_雪", "请求体", "批次",
+              "响应正文", "HTTP状态"),
+          outputMetas.get(0).getValueMetaList().stream().map(IValueMeta::getName).toList());
+      assertEquals(IValueMeta.TYPE_STRING, outputMetas.get(0).getValueMeta(4).getType());
+      assertEquals(IValueMeta.TYPE_INTEGER, outputMetas.get(0).getValueMeta(5).getType());
+      for (Object[] row : outputRows) {
+        assertEquals(200L, row[5]);
+        if ("GET".equals(row[1])) {
+          assertEquals("批次一", row[3]);
+          assertEquals("native-rest-黄河", row[4]);
+        } else {
+          assertEquals("POST", row[1]);
+          assertEquals("批次二", row[3]);
+          assertEquals("native-rest-长江", row[4]);
+        }
+      }
+      assertEquals(2, received.size());
+      assertTrue(received.contains(new RequestSeen("/station/read", "GET", "")),
+          "dynamic GET must not transmit configured body field");
+      assertTrue(received.contains(new RequestSeen("/station/write", "POST", postBody)),
+          "dynamic POST must transmit its own UTF-8 row body");
+      assertEquals(0, literalRequests.get(),
+          "urlInField=true must bypass configured literal URL");
+      System.out.println("PROD_P0_REST_DYNAMIC_GET_POST_BODY_FULL_PIPELINE_JSON_HPL_ROWS=PASS");
+    } finally {
+      server.stop(0);
+    }
+  }
+}
