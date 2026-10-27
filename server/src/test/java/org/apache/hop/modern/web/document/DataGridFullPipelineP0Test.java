@@ -283,4 +283,117 @@ class DataGridFullPipelineP0Test {
     assertInstanceOf(String.class, rows.get(0)[1]);
     System.out.println("PROD_P0_DATAGRID_FORCED_EMPTY_NUMERIC_ROW_META_MISMATCH_JSON_HPL=PASS");
   }
+  @Test
+  void dataGridUnknownTypeWireKeepsLiteralAndRuntimeFallsBackToStringAfterDiskReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    assertNotNull(plugin, "pinned DataGrid plugin required");
+    ITransformMeta grid = plugins.loadClass(plugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+
+    List<Object> fields = new ArrayList<>();
+    for (String[] definition : new String[][] {
+        {"计数", "Integer"}, {"未知类型<&>", "String"}, {"测站", "String"}}) {
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, definition[0]);
+      fieldType.getMethod("setType", String.class).invoke(field, definition[1]);
+      fields.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, fields);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("42", "literal-甲<&>", "黄河"),
+        List.of("7", "literal-乙", "长江"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("datagrid-unknown-type-native-fallback");
+    pipeline.addTransform(new TransformMeta("DataGrid", "grid-node", grid));
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("datagrid-unknown-type.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("datagrid-unknown-type-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("datagrid-unknown-type-doc",
+        new PipelineConfigResource.ReadRequest("grid-node"));
+    assertEquals(200, read.getStatus());
+    var response = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    var contract = response.descriptor().runtimePreconditions().stream()
+        .filter(p -> p.code().equals("DATA_GRID_UNKNOWN_FIELD_TYPES_FALLBACK_TO_STRING"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+    ObjectNode draft = ((ObjectNode) response.config()).deepCopy();
+    JsonNode declared = draft.at("/fields/field");
+    assertEquals(3, declared.size());
+    assertEquals("String", declared.get(1).path("field").path("type").asText());
+    ((ObjectNode) declared.get(1).path("field"))
+        .put("type", "NOT_A_HOP_VALUE_META_TYPE");
+    assertEquals(200, resource.write("datagrid-unknown-type-doc",
+        new PipelineConfigResource.WriteRequest("grid-node", draft)).getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(1, reopened.nrTransforms());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("grid-node").getTransform(), provider);
+    assertEquals("NOT_A_HOP_VALUE_META_TYPE",
+        wire.at("/fields/field/1/field/type").asText(),
+        "JSON/HPL must preserve the literal unknown type, not silently rewrite it");
+    assertEquals("未知类型<&>", wire.at("/fields/field/1/field/name").asText());
+    assertEquals("literal-甲<&>", wire.at("/data/line/0/item/1").asText());
+    assertEquals("literal-乙", wire.at("/data/line/1/item/1").asText());
+
+    List<Object[]> rows = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("grid-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          rows.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "unknown declared type must not abort DataGrid");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(3, outputMeta.get().size());
+    assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(0).getType());
+    assertEquals("未知类型<&>", outputMeta.get().getValueMeta(1).getName());
+    assertEquals(IValueMeta.TYPE_STRING, outputMeta.get().getValueMeta(1).getType(),
+        "native ValueMetaFactory TYPE_NONE falls back to STRING");
+    assertEquals(IValueMeta.TYPE_STRING, outputMeta.get().getValueMeta(2).getType());
+    assertEquals(2, rows.size());
+    assertEquals(42L, ((Number) rows.get(0)[0]).longValue());
+    assertEquals("literal-甲<&>", rows.get(0)[1]);
+    assertEquals("黄河", rows.get(0)[2]);
+    assertEquals(7L, ((Number) rows.get(1)[0]).longValue());
+    assertEquals("literal-乙", rows.get(1)[1]);
+    assertEquals("长江", rows.get(1)[2]);
+    System.out.println("PROD_P0_DATAGRID_UNKNOWN_TYPE_WIRE_LITERAL_RUNTIME_STRING_JSON_HPL=PASS");
+  }
+
 }
