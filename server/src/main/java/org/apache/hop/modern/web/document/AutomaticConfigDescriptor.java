@@ -189,7 +189,7 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "HTTP_DYNAMIC_URL_NATIVE_CHECK_FALSE_POSITIVE",
                   List.of("/urlInField", "/urlField", "/url"),
-                  "When urlInField is true, urlField must be non-empty and resolve to an incoming row field. Native HttpMeta.check() reports ERROR with UrlfieldOk even when the URL field name is present; this is a native-check false positive, not grounds to reject an otherwise valid dynamic URL configuration. At runtime the resolved URL field must exist in upstream row metadata. When urlInField is false, url must be non-empty."),
+                  "When urlInField is true, urlField must be non-empty and resolve to an incoming row field. Native HttpMeta.check() reports ERROR with UrlfieldOk even when the URL field name is present; this is a native-check false positive, not grounds to reject an otherwise valid dynamic URL configuration. At runtime Http.firstProcessRow resolves the URL field index once, and Http.constructUrlBuilder reads the URL from each incoming row, overriding the configured literal url. Different rows can therefore call different endpoints; the URL field must exist in upstream row metadata. When urlInField is false, url must be non-empty and the configured URL is used."),
               new RuntimePrecondition(
                   "HTTP_RESULT_FIELD_NAMES_MIX_LITERAL_AND_RESOLVED_VARIABLES",
                   List.of("/result/name", "/result/code", "/result/response_time", "/result/response_header"),
