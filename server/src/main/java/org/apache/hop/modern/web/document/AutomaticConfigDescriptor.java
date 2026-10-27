@@ -270,6 +270,26 @@ public final class AutomaticConfigDescriptor {
                   List.of("/IsInFields", "/valueField"),
                   "When IsInFields is true, an incoming hop and non-empty valueField are required. Resolve the source field against upstream row metadata at runtime; native check only checks the name is non-empty. When IsInFields is false, source files must resolve through the file input configuration."),
               new RuntimePrecondition(
+                  "JSON_INPUT_MISSING_AND_EXPLICIT_NULL_PATHS_KEEP_TYPED_ROWS",
+                  List.of("/IsInFields", "/valueField", "/ignoreMissingPath",
+                      "/defaultPathLeafToNull", "/removeSourceField", "/fields/field"),
+                  "When JsonInput reads a JSON STRING from the upstream valueField, "
+                      + "defaultPathLeafToNull=true allows an absent leaf JsonPath to "
+                      + "resolve to null, and ignoreMissingPath=true permits both "
+                      + "missing-path and explicit JSON null results instead of "
+                      + "raising JsonInputException. Native FastJsonReader keeps "
+                      + "one result row per input JSON document in this scalar-path "
+                      + "case, with null in the configured STRING/INTEGER output "
+                      + "column rather than a fabricated empty string or zero. "
+                      + "With removeSourceField=false the original JSON payload "
+                      + "column and other upstream columns remain before the "
+                      + "ordered fields.field outputs. When ignoreMissingPath=false, "
+                      + "an all-null path result is a native error, even for explicit "
+                      + "JSON null. Preserve the BOOLEAN flags and typed ordered "
+                      + "JsonPath fields across config JSON editing and real HPL "
+                      + "disk reopen; this is an execution compatibility diagnostic, "
+                      + "not a draft-save validator."),
+              new RuntimePrecondition(
                   "JSON_INPUT_SOURCE_REMOVAL_AND_AUXILIARY_OUTPUT_COLUMNS",
                   List.of("/IsInFields", "/removeSourceField", "/valueField", "/fields/field", "/include", "/include_field", "/rownum", "/rownum_field"),
                   "JsonInputMeta.getFields() removes the incoming valueField column only when IsInFields and removeSourceField are true and that field exists. It then appends fields.field[*] output columns in declaration order using JsonInputField.toValueMeta(), which resolves output names and propagates declared type, length, precision and formatting. If include is true it appends a variable-resolved STRING include_field of length 250; if rownum is true it appends a variable-resolved INTEGER rownum_field. Auxiliary fields follow the JSONPath fields. This describes the native downstream row schema and does not validate or reject draft saves."));
