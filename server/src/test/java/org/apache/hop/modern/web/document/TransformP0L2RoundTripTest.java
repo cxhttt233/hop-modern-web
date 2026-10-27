@@ -1451,12 +1451,16 @@ class TransformP0L2RoundTripTest {
     assertEquals(Shape.STRING, property(descriptor, "valueField").shape());
     assertEquals(List.of("JSON_INPUT_OUTPUT_FIELDS_REQUIRED",
             "JSON_INPUT_FIELD_SOURCE_REQUIRES_INCOMING_HOP_AND_NAME",
+            "JSON_INPUT_MISSING_AND_EXPLICIT_NULL_PATHS_KEEP_TYPED_ROWS",
             "JSON_INPUT_SOURCE_REMOVAL_AND_AUXILIARY_OUTPUT_COLUMNS"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     assertEquals(List.of("/fields/field"),
         descriptor.runtimePreconditions().get(0).keyListPointers());
     assertEquals(List.of("/IsInFields", "/valueField"),
         descriptor.runtimePreconditions().get(1).keyListPointers());
+    assertEquals(List.of("/IsInFields", "/valueField", "/ignoreMissingPath",
+            "/defaultPathLeafToNull", "/removeSourceField", "/fields/field"),
+        descriptor.runtimePreconditions().get(2).keyListPointers());
 
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "JsonInput");
     assertNotNull(plugin);
