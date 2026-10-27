@@ -169,7 +169,20 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "DATA_GRID_DECLARED_FIELD_FORMATS_PROPAGATE_TO_OUTPUT_METADATA",
                   List.of("/fields/field"),
-                  "DataGridMeta.getFields() appends non-empty fields.field[*].name entries in declaration order, using their configured name literally (without variable resolution). For each output field it propagates length, precision, format as conversion mask, currency, group as grouping symbol, and decimal as decimal symbol; the origin is the DataGrid transform name. Downstream schema consumers must use these declared field attributes rather than infer formatting or precision from data rows. This is an output-metadata compatibility diagnostic, not a save-time validator."));
+                  "DataGridMeta.getFields() appends non-empty fields.field[*].name entries in declaration order, using their configured name literally (without variable resolution). For each output field it propagates length, precision, format as conversion mask, currency, group as grouping symbol, and decimal as decimal symbol; the origin is the DataGrid transform name. Downstream schema consumers must use these declared field attributes rather than infer formatting or precision from data rows. This is an output-metadata compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "DATA_GRID_EXPLICIT_EMPTY_STRING_OVERRIDES_CONFIGURED_CELL",
+                  List.of("/fields/field", "/data/line"),
+                  "For a STRING output field with fields.field[*].set_empty_string=true, "
+                      + "native DataGrid.processRow() emits an actual empty Java String "
+                      + "for that column, ignoring the corresponding non-empty "
+                      + "data.line[*].item cell literal. When false, the configured "
+                      + "cell string is converted using the declared field type "
+                      + "(for example, Integer becomes a Java Long). Preserve "
+                      + "the BOOLEAN flag and both ordered LISTs across JSON editing "
+                      + "and Hop XML disk reopen; do not interpret a forced empty "
+                      + "string as a null cell. This is a runtime compatibility "
+                      + "diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" ->
           List.of(
               new RuntimePrecondition(
