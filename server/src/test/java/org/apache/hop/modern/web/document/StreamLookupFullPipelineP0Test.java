@@ -154,6 +154,16 @@ class StreamLookupFullPipelineP0Test {
     assertTrue(wire.at("/lookup/value/1/type").isInt());
     assertEquals(IValueMeta.TYPE_INTEGER, wire.at("/lookup/value/1/type").intValue());
 
+    var descriptor = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("lookup-node").getTransform().getClass());
+    var missingMatchContract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("STREAM_LOOKUP_MISSING_MATCH_USES_TYPED_DEFAULT_VALUES"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/lookup/key", "/lookup/value"),
+        missingMatchContract.keyListPointers());
+    assertTrue(missingMatchContract.explanation().contains("numeric IValueMeta type code"));
+
+
     List<Object[]> emitted = new CopyOnWriteArrayList<>();
     AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
     LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
