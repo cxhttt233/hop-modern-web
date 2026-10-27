@@ -180,4 +180,137 @@ class ReplaceStringDynamicFieldFullPipelineP0Test {
     assertEquals("长江二号站", emitted.get(1)[2]);
     System.out.println("PROD_P0_REPLACESTRING_DYNAMIC_REPLACEMENT_FIELD_FULL_PIPELINE=PASS");
   }
+
+  /**
+   * Regex replacement groups are interpreted by Java Matcher, not treated as
+   * literal dollar-prefixed text. The canonical LIST config must survive disk
+   * reopen and produce the expected native rows, including a no-match row.
+   */
+  @Test
+  void replaceStringRegexCaptureGroupsReorderValuesAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin replacePlugin = plugins.findPluginWithId(TransformPluginType.class, "ReplaceString");
+    assertNotNull(gridPlugin);
+    assertNotNull(replacePlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    Object field = fieldType.getConstructor().newInstance();
+    fieldType.getMethod("setName", String.class).invoke(field, "源站值<&>");
+    fieldType.getMethod("setType", String.class).invoke(field, "String");
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, List.of(field));
+    List<Object> lines = new ArrayList<>();
+    for (String value : List.of("黄河:42", "长江:7", "汾河无数字")) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, List.of(value));
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta replace = plugins.loadClass(replacePlugin, ITransformMeta.class);
+    replace.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("ReplaceString", "replace-node", replace);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("replace-string-regex-capture-group-rows");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("replace-regex-capture-groups.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("replace-capture-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("replace-capture-doc",
+        new PipelineConfigResource.ReadRequest("replace-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ArrayNode rules = draft.putObject("fields").putArray("field");
+    rules.addObject()
+        .put("in_stream_name", "源站值<&>")
+        .put("out_stream_name", "捕获重排结果")
+        .put("use_regex", true)
+        .put("replace_string", "^([^:]+):([0-9]+)$")
+        .put("replace_by_string", "$2/$1")
+        .put("replace_field_by_string", "")
+        .put("set_empty_string", false)
+        .put("whole_word", false)
+        .put("case_sensitive", true)
+        .put("is_unicode", true);
+    var write = resource.write("replace-capture-doc",
+        new PipelineConfigResource.WriteRequest("replace-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("replace-node").getTransform(), provider);
+    assertEquals(1, wire.at("/fields/field").size());
+    assertEquals("源站值<&>", wire.at("/fields/field/0/in_stream_name").asText());
+    assertEquals("捕获重排结果", wire.at("/fields/field/0/out_stream_name").asText());
+    assertTrue(wire.at("/fields/field/0/use_regex").isBoolean());
+    assertTrue(wire.at("/fields/field/0/use_regex").booleanValue());
+    assertEquals("^([^:]+):([0-9]+)$", wire.at("/fields/field/0/replace_string").asText());
+    assertEquals("$2/$1", wire.at("/fields/field/0/replace_by_string").asText());
+    assertFalse(wire.at("/fields/field/0/set_empty_string").booleanValue());
+
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("replace-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "REPLACE_STRING_REGEX_CAPTURE_GROUPS_USE_JAVA_MATCHER_REPLACEMENT"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("replace-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native regex capture pipeline must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(List.of("源站值<&>", "捕获重排结果"),
+        outputMeta.get().getValueMetaList().stream().map(IValueMeta::getName).toList());
+    assertEquals(IValueMeta.TYPE_STRING, outputMeta.get().getValueMeta(1).getType());
+    assertEquals(3, emitted.size());
+    assertEquals("黄河:42", emitted.get(0)[0]);
+    assertEquals("42/黄河", emitted.get(0)[1]);
+    assertEquals("长江:7", emitted.get(1)[0]);
+    assertEquals("7/长江", emitted.get(1)[1]);
+    assertEquals("汾河无数字", emitted.get(2)[0]);
+    assertEquals("汾河无数字", emitted.get(2)[1],
+        "nonmatching input must be preserved by native Matcher.replaceAll");
+    System.out.println("PROD_P0_REPLACESTRING_REGEX_CAPTURE_GROUPS_JSON_HPL_ROWS=PASS");
+  }
 }
