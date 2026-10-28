@@ -824,7 +824,21 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "STREAM_LOOKUP_MISSING_MATCH_USES_TYPED_DEFAULT_VALUES",
                   List.of("/lookup/key", "/lookup/value"),
-                  "For each main input row, StreamLookup matches lookup.key[*] against the selected info stream. A matching key appends the actual lookup.value[*].name fields; a missing key appends the configured lookup.value[*].default for each return field, converted to its declared type at initialization (STRING, INTEGER, etc.). Hop ConfigJsonSerializer transports lookup.value[*].type as a numeric IValueMeta type code (for example 2 for STRING and 5 for INTEGER), not the human-readable XML intCodeConverter name. Defaults resolve variables once at initialization; an empty STRING default becomes null. The output field schema still follows the actual info-row types when available. Preserve ordered return values and distinguish a missing match from a missing lookup-source field; this is an execution diagnostic, not a draft-save rejection."));
+                  "For each main input row, StreamLookup matches lookup.key[*] against the selected info stream. A matching key appends the actual lookup.value[*].name fields; a missing key appends the configured lookup.value[*].default for each return field, converted to its declared type at initialization (STRING, INTEGER, etc.). Hop ConfigJsonSerializer transports lookup.value[*].type as a numeric IValueMeta type code (for example 2 for STRING and 5 for INTEGER), not the human-readable XML intCodeConverter name. Defaults resolve variables once at initialization; an empty STRING default becomes null. The output field schema still follows the actual info-row types when available. Preserve ordered return values and distinguish a missing match from a missing lookup-source field; this is an execution diagnostic, not a draft-save rejection."),
+              new RuntimePrecondition(
+                  "STREAM_LOOKUP_DUPLICATE_INFO_KEYS_LAST_VALUE_WINS",
+                  List.of("/from", "/preserve_memory", "/sorted_list",
+                      "/lookup/key", "/lookup/value"),
+                  "Native StreamLookup.addToCache() overwrites an earlier info row "
+                      + "with the same lookup key: the ordinary map, memory-preserving "
+                      + "byte-array hash index, and sorted-list cache all retain the "
+                      + "later value. A matching main row receives that last value, "
+                      + "not a one-to-many result or a duplicate-key error. Info-stream "
+                      + "row order therefore changes results when keys are duplicated. "
+                      + "Preserve the from reference, ordered lookup.key and lookup.value "
+                      + "LISTs, and cache-mode BOOLEAN flags across config JSON editing "
+                      + "and HPL disk reopen. Diagnose duplicate lookup keys as a "
+                      + "data-quality risk, not a draft-save validator."));
       case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta" ->
           List.of(
               new RuntimePrecondition(
