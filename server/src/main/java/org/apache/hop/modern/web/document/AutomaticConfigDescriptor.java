@@ -713,7 +713,19 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "SELECT_VALUES_METADATA_CHANGES_TYPE_AND_FORMAT_AFTER_SELECTION",
                   List.of("/fields/meta"),
-                  "SelectValuesMeta.getFields() applies fields.meta[*] after selection, renaming, and removal. Each fields.meta[*].name matches the post-selection field name. A non-NONE fields.meta[*].type change clones the value metadata to the requested Hop type and resets binary-string storage to NORMAL. Configured rename, length, precision, conversion_mask, encoding, decimal_symbol, and grouping_symbol then propagate to the same output field; unselected columns are not converted. Diagnose downstream type and format from the ordered metadata stage, not from the original upstream type. This is an output-schema compatibility diagnostic, not a save-time validator."));
+                  "SelectValuesMeta.getFields() applies fields.meta[*] after selection, renaming, and removal. Each fields.meta[*].name matches the post-selection field name. A non-NONE fields.meta[*].type change clones the value metadata to the requested Hop type and resets binary-string storage to NORMAL. Configured rename, length, precision, conversion_mask, encoding, decimal_symbol, and grouping_symbol then propagate to the same output field; unselected columns are not converted. Diagnose downstream type and format from the ordered metadata stage, not from the original upstream type. This is an output-schema compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "SELECT_VALUES_LOCALE_DECIMAL_GROUPING_CONVERTS_REAL_NUMERIC_ROWS",
+                  List.of("/fields/meta"),
+                  "When a post-selection STRING field is converted to Number by fields.meta[*], "
+                      + "the native SelectValues metadataValues() stage applies its conversion_mask, "
+                      + "decimal_symbol and grouping_symbol to the source value metadata before "
+                      + "performing typed conversion. For example, grouping symbol '.' and decimal "
+                      + "symbol ',' allow localized input 1.234,50 to become NUMBER 1234.5 when "
+                      + "the numeric mask is configured accordingly. Preserve these STRING "
+                      + "properties, their LIST index and the target type across JSON editing "
+                      + "and HPL disk reopen. This is a runtime compatibility diagnostic, "
+                      + "not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" ->
           List.of(
               new RuntimePrecondition(
