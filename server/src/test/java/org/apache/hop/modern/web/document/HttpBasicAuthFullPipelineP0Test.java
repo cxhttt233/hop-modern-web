@@ -426,6 +426,13 @@ class HttpBasicAuthFullPipelineP0Test {
       var read = resource.read("http-cross-origin-challenge-doc",
           new PipelineConfigResource.ReadRequest("http-node"));
       assertEquals(200, read.getStatus());
+      var contract = ((PipelineConfigResource.ConfigResponse) read.getEntity())
+          .descriptor().runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "HTTP_BASIC_AUTH_CROSS_ORIGIN_401_CHALLENGE_REUSES_WILDCARD_CREDENTIALS"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/url", "/httpLogin", "/httpPassword",
+          "/result/name", "/result/code"), contract.keyListPointers());
       ObjectNode draft = ((ObjectNode)
           ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
       JsonNode passwordWire = draft.path("httpPassword").deepCopy();
