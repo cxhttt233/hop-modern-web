@@ -401,4 +401,161 @@ class RestDynamicMethodFullPipelineP0Test {
     }
   }
 
+
+  /**
+   * The persisted flag is inverted: false sends Basic on the first request;
+   * true waits for a 401 challenge. Verify loopback HTTP requests after a
+   * config API edit and a real HPL disk reopen, not only the metadata getter.
+   */
+  @Test
+  void restBasicAuthPreemptiveAndChallengeModesSendDifferentFirstRequestsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    String expectedAuthorization = "Basic " + java.util.Base64.getEncoder().encodeToString(
+        "fixture-user:fixture-password".getBytes(StandardCharsets.UTF_8));
+    List<String> observed = new CopyOnWriteArrayList<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/basic/", exchange -> {
+      try (exchange) {
+        String mode = exchange.getRequestURI().getPath().endsWith("/challenge")
+            ? "challenge" : "preemptive";
+        boolean authorized = expectedAuthorization.equals(
+            exchange.getRequestHeaders().getFirst("Authorization"));
+        observed.add(mode + (authorized ? ":authorized" : ":anonymous"));
+        if (!authorized) {
+          exchange.getResponseHeaders().set("WWW-Authenticate", "Basic realm=\"isolated\"");
+          exchange.sendResponseHeaders(401, -1);
+        } else {
+          byte[] body = ("authenticated-" + mode).getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+        }
+      }
+    });
+    server.start();
+    try {
+      String base = "http://127.0.0.1:" + server.getAddress().getPort();
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+      IPlugin restPlugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(gridPlugin);
+      assertNotNull(restPlugin);
+
+      for (boolean nonPreemptive : List.of(false, true)) {
+        String mode = nonPreemptive ? "challenge" : "preemptive";
+        ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+        grid.setDefault();
+        ClassLoader loader = grid.getClass().getClassLoader();
+        Class<?> fieldType = loader.loadClass(
+            "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+        Class<?> lineType = loader.loadClass(
+            "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+        Object field = fieldType.getConstructor().newInstance();
+        fieldType.getMethod("setName", String.class).invoke(field, "批次<&>");
+        fieldType.getMethod("setType", String.class).invoke(field, "String");
+        grid.getClass().getMethod("setDataGridFields", List.class)
+            .invoke(grid, List.of(field));
+        Object line = lineType.getConstructor().newInstance();
+        lineType.getMethod("setDatalines", List.class).invoke(line, List.of(mode));
+        grid.getClass().getMethod("setDataLines", List.class)
+            .invoke(grid, List.of(line));
+
+        ITransformMeta rest = plugins.loadClass(restPlugin, ITransformMeta.class);
+        rest.setDefault();
+        rest.getClass().getMethod("setHttpLogin", String.class)
+            .invoke(rest, "fixture-user");
+        rest.getClass().getMethod("setHttpPassword", String.class)
+            .invoke(rest, "fixture-password");
+        TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+        TransformMeta target = new TransformMeta("Rest", "rest-node", rest);
+        PipelineMeta pipeline = new PipelineMeta();
+        pipeline.setName("rest-basic-" + mode);
+        pipeline.addTransform(source);
+        pipeline.addTransform(target);
+        pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+        var provider = new MemoryMetadataProvider();
+        var store = new PipelineDocumentStore(provider, new Variables());
+        Path hpl = tempDir.resolve("rest-basic-" + mode + ".hpl");
+        store.save(hpl, pipeline);
+        PipelineMeta loaded = store.open(hpl);
+        var registry = new PipelineDocumentRegistry();
+        String documentId = "rest-basic-" + mode + "-doc";
+        registry.put(new PipelineDocument(documentId, hpl, loaded));
+        var resource = new PipelineConfigResource(registry, provider);
+        var read = resource.read(documentId,
+            new PipelineConfigResource.ReadRequest("rest-node"));
+        assertEquals(200, read.getStatus());
+        ObjectNode draft = ((ObjectNode)
+            ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+        draft.put("url", base + "/basic/" + mode);
+        draft.put("method", "GET");
+        draft.put("non_preemptive_basic_auth", nonPreemptive);
+        ObjectNode result = (ObjectNode) draft.path("result");
+        result.put("name", "响应正文");
+        result.put("code", "HTTP状态");
+        result.put("response_header", "");
+        result.put("response_time", "");
+        result.put("binary", false);
+        var write = resource.write(documentId,
+            new PipelineConfigResource.WriteRequest("rest-node", draft));
+        assertEquals(200, write.getStatus());
+        store.save(hpl, loaded);
+
+        PipelineMeta reopened = store.open(hpl);
+        assertEquals(1, reopened.nrPipelineHops());
+        ITransformMeta diskMeta = reopened.findTransform("rest-node").getTransform();
+        JsonNode wire = ConfigJsonSerializer.toJson(diskMeta, provider);
+        assertTrue(wire.at("/non_preemptive_basic_auth").isBoolean());
+        assertEquals(nonPreemptive, wire.at("/non_preemptive_basic_auth").booleanValue());
+        assertEquals(!nonPreemptive, (Boolean)
+            diskMeta.getClass().getMethod("isPreemptive").invoke(diskMeta));
+        assertEquals(base + "/basic/" + mode, wire.at("/url").asText());
+        var contract = AutomaticConfigDescriptor.describe(diskMeta.getClass())
+            .runtimePreconditions().stream()
+            .filter(p -> p.code().equals("REST_BASIC_AUTH_PREEMPTIVE_FLAG_IS_INVERTED"))
+            .findFirst().orElseThrow();
+        assertEquals(List.of("/non_preemptive_basic_auth"), contract.keyListPointers());
+
+        List<Object[]> rows = new CopyOnWriteArrayList<>();
+        List<IRowMeta> metas = new CopyOnWriteArrayList<>();
+        LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+        engine.setMetadataProvider(provider);
+        try {
+          engine.prepareExecution();
+          ITransform output = engine.getRunThread("rest-node", 0);
+          assertNotNull(output);
+          output.addRowListener(new RowAdapter() {
+            @Override
+            public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+              metas.add(rowMeta.clone());
+              rows.add(row.clone());
+            }
+          });
+          engine.startThreads();
+          engine.waitUntilFinished();
+          assertEquals(0, engine.getErrors());
+        } finally {
+          if (!engine.isFinishedOrStopped()) engine.stopAll();
+          engine.cleanup();
+        }
+        assertEquals(1, rows.size(), "one source row must produce one authenticated result");
+        assertEquals(List.of("批次<&>", "响应正文", "HTTP状态"),
+            metas.get(0).getValueMetaList().stream().map(IValueMeta::getName).toList());
+        assertEquals(IValueMeta.TYPE_STRING, metas.get(0).getValueMeta(1).getType());
+        assertEquals(IValueMeta.TYPE_INTEGER, metas.get(0).getValueMeta(2).getType());
+        assertEquals(mode, rows.get(0)[0]);
+        assertEquals("authenticated-" + mode, rows.get(0)[1]);
+        assertEquals(200L, rows.get(0)[2]);
+      }
+      assertEquals(List.of(
+          "preemptive:authorized",
+          "challenge:anonymous",
+          "challenge:authorized"), observed,
+          "the non-preemptive mode must wait for 401 before transmitting credentials");
+      System.out.println("PROD_P0_REST_BASIC_AUTH_FIRST_REQUEST_CHALLENGE_JSON_HPL_ROWS=PASS");
+    } finally {
+      server.stop(0);
+    }
+  }
 }
