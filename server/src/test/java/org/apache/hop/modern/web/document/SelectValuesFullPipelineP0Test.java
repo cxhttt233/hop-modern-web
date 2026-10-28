@@ -506,6 +506,12 @@ class SelectValuesFullPipelineP0Test {
     assertEquals("BigNumber", wire.at("/fields/meta/0/type").asText());
     assertTrue(wire.at("/fields/meta/0/length").isIntegralNumber());
     assertEquals(-1, wire.at("/fields/meta/0/precision").intValue());
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("select-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals("SELECT_VALUES_BIGNUMBER_EXACT_DECIMAL_CONVERSION"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/meta"), contract.keyListPointers());
 
     List<Object[]> emitted = new CopyOnWriteArrayList<>();
     AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
