@@ -733,7 +733,20 @@ public final class AutomaticConfigDescriptor {
                       + "the numeric mask is configured accordingly. Preserve these STRING "
                       + "properties, their LIST index and the target type across JSON editing "
                       + "and HPL disk reopen. This is a runtime compatibility diagnostic, "
-                      + "not a save-time validator."));
+                      + "not a save-time validator."),
+              new RuntimePrecondition(
+                  "SELECT_VALUES_BIGNUMBER_EXACT_DECIMAL_CONVERSION",
+                  List.of("/fields/meta"),
+                  "For a post-selection STRING field whose fields.meta[*].type is BigNumber, "
+                      + "native SelectValues.metadataValues() converts the source value to "
+                      + "the BigNumber target metadata rather than first narrowing it to "
+                      + "a double-precision Number. With length and precision both -1 and "
+                      + "no rounding mask, long decimal values and very small fractional "
+                      + "values must remain exact BigDecimal values in emitted rows. "
+                      + "Preserve the ordered fields.meta LIST, type, length and precision "
+                      + "through JSON editing and real HPL disk reopen; never coerce "
+                      + "the BigNumber wire type to Number for a generic editor. "
+                      + "This is an engine compatibility diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" ->
           List.of(
               new RuntimePrecondition(
