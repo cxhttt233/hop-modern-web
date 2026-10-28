@@ -786,6 +786,19 @@ public final class AutomaticConfigDescriptor {
                   List.of("/fields/field"),
                   "When fields.field[*].collator_enabled=false and case_sensitive=false for a native SortRows String key, pinned ValueMetaBase.compare() uses Java String.compareToIgnoreCase, not the configured locale Collator. For ascending values z, B, a and M, the native output order is a, B, M, z; case-sensitive Java comparison would place B and M before a. The serializer must retain both flags as Boolean values at their canonical ordered LIST item paths. This is an engine behavior compatibility diagnostic, not a save-time validator."),
               new RuntimePrecondition(
+                  "SORT_ROWS_UNIQUE_KEYS_DROP_NONKEY_PAYLOAD_ACROSS_SPILLS",
+                  List.of("/unique_rows", "/fields/field", "/sort_size"),
+                  "When unique_rows=true, native SortRows removes rows whose configured "
+                      + "sort-key tuple compares equal, even if other payload columns differ. "
+                      + "The comparison uses fields.field in declared order, including each "
+                      + "key's ascending, case_sensitive and collator settings; it is not a "
+                      + "whole-row DISTINCT. SortRows deduplicates within temporary sorted "
+                      + "runs and again while merging them, so a small sort_size does not "
+                      + "preserve duplicate keys across disk spills. This can discard "
+                      + "non-key payload data. Keep unique_rows as a Boolean and the ordered "
+                      + "fields.field list intact through JSON and HPL persistence; this "
+                      + "is a native execution diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
                   "SORT_ROWS_NUMERIC_NULL_PLACEMENT_FOLLOWS_DIRECTION",
                   List.of("/fields/field"),
                   "For a native SortRows numeric key, pinned ValueMetaBase.compare() treats a "
