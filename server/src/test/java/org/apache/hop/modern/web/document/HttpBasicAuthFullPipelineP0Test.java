@@ -272,6 +272,13 @@ class HttpBasicAuthFullPipelineP0Test {
       var read = resource.read("http-cross-origin-doc",
           new PipelineConfigResource.ReadRequest("http-node"));
       assertEquals(200, read.getStatus());
+      var redirectAuthContract = ((PipelineConfigResource.ConfigResponse) read.getEntity())
+          .descriptor().runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "HTTP_BASIC_AUTH_CROSS_ORIGIN_REDIRECT_DOES_NOT_PREEMPTIVELY_FORWARD"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/url", "/httpLogin", "/httpPassword",
+          "/result/name", "/result/code"), redirectAuthContract.keyListPointers());
       ObjectNode draft = ((ObjectNode)
           ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
       JsonNode passwordWire = draft.path("httpPassword").deepCopy();
