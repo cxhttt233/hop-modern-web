@@ -359,7 +359,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "GROUPBY_EMPTY_INPUT_GIVE_BACK_ROW_EMITS_ZERO_COUNT",
                   List.of("/give_back_row", "/all_rows", "/group/field", "/fields/field"),
-                  "With no incoming rows, native GroupBy.processRow() emits no row when give_back_row=false. When give_back_row=true and all_rows=false, it derives input metadata from the upstream transform and emits one aggregate row: configured grouping keys are null and COUNT_ANY is INTEGER zero. With all_rows=true, no buffered source rows exist to emit, even if give_back_row=true. Preserve the BOOLEAN flags and ordered grouped LISTs through JSON config editing and HPL disk reopen; this is a runtime diagnostic, not a draft-save validator."));
+                  "With no incoming rows, native GroupBy.processRow() emits no row when give_back_row=false. When give_back_row=true and all_rows=false, it derives input metadata from the upstream transform and emits one aggregate row: configured grouping keys are null and COUNT_ANY is INTEGER zero. With all_rows=true, no buffered source rows exist to emit, even if give_back_row=true. Preserve the BOOLEAN flags and ordered grouped LISTs through JSON config editing and HPL disk reopen; this is a runtime diagnostic, not a draft-save validator."),
+              new RuntimePrecondition(
+                  "GROUPBY_FIRST_LAST_NULL_INCLUSION_CHANGES_VALUES",
+                  List.of("/fields/field", "/group/field"),
+                  "GroupBy FIRST and LAST skip null subject values, whereas FIRST_INCL_NULL and LAST_INCL_NULL preserve positional nulls. The first-including-null aggregate marks its first non-ignored row as seen even when that subject is null, so a later non-null value does not replace it. The last-including-null aggregate can overwrite a prior value with null. All four output columns inherit the subject type, and ordered fields.field[*].type labels must survive JSON editing and HPL disk reopen. Diagnose downstream null handling from the selected aggregation type; do not reject draft saves."));
       case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" ->
           List.of(
               new RuntimePrecondition(
