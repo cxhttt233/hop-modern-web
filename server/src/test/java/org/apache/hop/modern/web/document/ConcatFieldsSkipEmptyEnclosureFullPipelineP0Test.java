@@ -172,4 +172,128 @@ class ConcatFieldsSkipEmptyEnclosureFullPipelineP0Test {
     assertEquals("\"长江\",\"数字孪生\"", emitted.get(1)[0]);
     System.out.println("PROD_P0_CONCATFIELDS_SKIP_EMPTY_FORCE_ENCLOSURE_JSON_HPL_ROWS=PASS");
   }
+
+  /**
+   * Native ConcatFieldHelper wraps each selected field but does not double embedded enclosure
+   * characters. This is a real CSV-like output hazard, not a draft-save validation error.
+   */
+  @Test
+  void concatFieldsEmbeddedEnclosureRemainsLiteralAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin concatPlugin = plugins.findPluginWithId(TransformPluginType.class, "ConcatFields");
+    assertNotNull(gridPlugin);
+    assertNotNull(concatPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader gridLoader = grid.getClass().getClassLoader();
+    Class<?> fieldType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> gridFields = new ArrayList<>();
+    for (String name : List.of("源<&>甲", "源_乙")) {
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, name);
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      gridFields.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, gridFields);
+    List<Object> gridLines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("黄\"河", "水网"), List.of("湖\"库", "监测"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      gridLines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, gridLines);
+
+    ITransformMeta concat = plugins.loadClass(concatPlugin, ITransformMeta.class);
+    concat.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("ConcatFields", "concat-node", concat);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("concat-literal-enclosure-pipeline");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("concat-literal-enclosure-pipeline.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("concat-literal-enclosure-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("concat-literal-enclosure-doc",
+        new PipelineConfigResource.ReadRequest("concat-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("separator", ",");
+    draft.put("enclosure", "\"");
+    draft.put("skip_value_empty", false);
+    draft.put("force_enclosure", true);
+    ObjectNode extra = (ObjectNode) draft.path("ConcatFields");
+    assertTrue(extra.isObject());
+    extra.put("targetFieldName", "拼接_结果");
+    extra.put("targetFieldLength", 128);
+    extra.put("removeSelectedFields", true);
+    ArrayNode selected = draft.putObject("fields").putArray("field");
+    for (String name : List.of("源<&>甲", "源_乙")) {
+      selected.addObject().put("name", name).put("type", "String")
+          .put("length", -1).put("precision", -1);
+    }
+    var write = resource.write("concat-literal-enclosure-doc",
+        new PipelineConfigResource.WriteRequest("concat-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("concat-node").getTransform(), provider);
+    assertEquals("源<&>甲", wire.at("/fields/field/0/name").asText());
+    assertEquals("源_乙", wire.at("/fields/field/1/name").asText());
+    assertEquals("拼接_结果", wire.at("/ConcatFields/targetFieldName").asText());
+    assertEquals("\"", wire.at("/enclosure").asText());
+    assertTrue(wire.at("/force_enclosure").isBoolean());
+    assertTrue(wire.at("/force_enclosure").booleanValue());
+    assertTrue(wire.at("/ConcatFields/removeSelectedFields").booleanValue());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("concat-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native pipeline must finish without errors");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+    assertNotNull(emittedMeta.get());
+    assertEquals(1, emittedMeta.get().size());
+    assertEquals("拼接_结果", emittedMeta.get().getValueMeta(0).getName());
+    assertEquals(2, emitted.size());
+    // Native ConcatFieldHelper does not escape embedded quote characters.
+    assertEquals("\"黄\"河\",\"水网\"", emitted.get(0)[0]);
+    assertEquals("\"湖\"库\",\"监测\"", emitted.get(1)[0]);
+    System.out.println("PROD_P0_CONCATFIELDS_EMBEDDED_ENCLOSURE_LITERAL_JSON_HPL_ROWS=PASS");
+  }
+
 }
