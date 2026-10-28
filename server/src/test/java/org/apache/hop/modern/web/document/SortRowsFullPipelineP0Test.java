@@ -391,7 +391,7 @@ class SortRowsFullPipelineP0Test {
     var documents = new PipelineDocumentRegistry();
     documents.put(new PipelineDocument("sort-unique-doc", hpl, loaded));
     var resource = new PipelineConfigResource(documents, provider);
-    var read = resource.read("sort-full-doc",
+    var read = resource.read("sort-unique-doc",
         new PipelineConfigResource.ReadRequest("sort-node"));
     assertEquals(200, read.getStatus());
     ObjectNode draft = ((ObjectNode)
@@ -415,7 +415,7 @@ class SortRowsFullPipelineP0Test {
         .put("collator_strength", 0)
         .put("presorted", false);
 
-    var write = resource.write("sort-full-doc",
+    var write = resource.write("sort-unique-doc",
         new PipelineConfigResource.WriteRequest("sort-node", draft));
     assertEquals(200, write.getStatus());
     store.save(hpl, loaded);
