@@ -307,7 +307,24 @@ public final class AutomaticConfigDescriptor {
                       + "a different origin. Treat redirects and credentials as sensitive "
                       + "and constrain trusted endpoints. Preserve the URL and sensitive "
                       + "password across JSON editing and HPL disk reopen; this is a "
-                      + "runtime security diagnostic, not a save-time validator."));
+                      + "runtime security diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "HTTP_BASIC_AUTH_CROSS_ORIGIN_401_CHALLENGE_REUSES_WILDCARD_CREDENTIALS",
+                  List.of("/url", "/httpLogin", "/httpPassword",
+                      "/result/name", "/result/code"),
+                  "The pinned Http client preemptively sends configured Basic credentials "
+                      + "to the original URL. After an HTTP 302 redirect to a different "
+                      + "port on 127.0.0.1, the first request to that second origin omits "
+                      + "Authorization. However, when the redirected origin replies "
+                      + "401 with WWW-Authenticate: Basic, HttpClientManager's wildcard "
+                      + "AuthScope makes the original configured credentials available: "
+                      + "HttpClient 5 retries with Authorization: Basic and receives "
+                      + "HTTP 200. A different HTTP origin therefore does not protect "
+                      + "credentials against a Basic challenge in this observed case. "
+                      + "Only configure trusted endpoints and redirects; never expose "
+                      + "sensitive httpPassword in diagnostics. Preserve the canonical "
+                      + "wire values through JSON editing and HPL disk reopen. This is "
+                      + "a native runtime security warning, not a draft-save validator."));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           List.of(
               new RuntimePrecondition(
