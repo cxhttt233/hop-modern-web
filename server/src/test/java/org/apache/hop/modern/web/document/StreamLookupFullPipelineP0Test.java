@@ -649,4 +649,131 @@ class StreamLookupFullPipelineP0Test {
     System.out.println("PROD_P0_STREAMLOOKUP_COMPOSITE_STATION_YEAR_JSON_HPL_ROWS=PASS");
   }
 
+
+  /**
+   * Native StreamLookup converts a STRING key from the main stream to the
+   * INTEGER key type of the lookup stream before comparing cached keys.
+   * A leading-zero input must match without changing the main row's type.
+   */
+  @Test
+  void streamLookupConvertsStringMainKeyToIntegerInfoKeyAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin lookupPlugin = plugins.findPluginWithId(TransformPluginType.class, "StreamLookup");
+    assertNotNull(lookupPlugin, "pinned StreamLookup plugin required");
+
+    ITransformMeta mainGrid = grid(
+        plugins, List.of("年份文本<&>", "批次"),
+        List.of("String", "String"),
+        List.of(List.of("2025", "常规"), List.of("002026", "前导零"),
+            List.of("2024", "未命中")));
+    ITransformMeta infoGrid = grid(
+        plugins, List.of("统计年<&>", "流量"),
+        List.of("Integer", "Integer"),
+        List.of(List.of("2025", "11"), List.of("2026", "42")));
+    ITransformMeta lookup = plugins.loadClass(lookupPlugin, ITransformMeta.class);
+    lookup.setDefault();
+
+    TransformMeta main = new TransformMeta("DataGrid", "main-grid", mainGrid);
+    TransformMeta info = new TransformMeta("DataGrid", "info-grid", infoGrid);
+    TransformMeta target = new TransformMeta("StreamLookup", "lookup-node", lookup);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("streamlookup-string-integer-key-coercion");
+    pipeline.addTransform(main);
+    pipeline.addTransform(info);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(main, target));
+    pipeline.addPipelineHop(new PipelineHopMeta(info, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("streamlookup-string-integer-key-coercion.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    assertEquals(2, loaded.nrPipelineHops());
+
+    var documents = new PipelineDocumentRegistry();
+    String documentId = "streamlookup-string-integer-key-coercion";
+    documents.put(new PipelineDocument(documentId, hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read(documentId,
+        new PipelineConfigResource.ReadRequest("lookup-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("from", "info-grid");
+    draft.put("preserve_memory", false);
+    ObjectNode lookupDraft = draft.putObject("lookup");
+    lookupDraft.putArray("key").addObject()
+        .put("name", "年份文本<&>").put("field", "统计年<&>");
+    lookupDraft.putArray("value").addObject()
+        .put("name", "流量").put("rename", "匹配流量")
+        .put("default", "-1").put("type", IValueMeta.TYPE_INTEGER);
+    var write = resource.write(documentId,
+        new PipelineConfigResource.WriteRequest("lookup-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(3, reopened.nrTransforms());
+    assertEquals(2, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("lookup-node").getTransform(), provider);
+    assertEquals("info-grid", wire.at("/from").asText());
+    assertEquals("年份文本<&>", wire.at("/lookup/key/0/name").asText());
+    assertEquals("统计年<&>", wire.at("/lookup/key/0/field").asText());
+    assertTrue(wire.at("/lookup/value/0/type").isInt());
+    assertEquals(IValueMeta.TYPE_INTEGER, wire.at("/lookup/value/0/type").intValue());
+
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("lookup-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals("STREAM_LOOKUP_INPUT_KEYS_CONVERT_TO_INFO_STREAM_TYPES"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/from", "/lookup/key"), contract.keyListPointers());
+    assertTrue(contract.explanation().contains("convertDataCompatible()"));
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("lookup-node", 0);
+      assertNotNull(output, "native StreamLookup engine must prepare");
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "cross-type lookup must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    IRowMeta meta = outputMeta.get();
+    assertNotNull(meta, "cross-type lookup must emit rows");
+    assertEquals(3, meta.size());
+    assertEquals("年份文本<&>", meta.getValueMeta(0).getName());
+    assertEquals(IValueMeta.TYPE_STRING, meta.getValueMeta(0).getType());
+    assertEquals("匹配流量", meta.getValueMeta(2).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, meta.getValueMeta(2).getType());
+    assertEquals(3, emitted.size());
+    Object[] regular = emitted.stream()
+        .filter(row -> "2025".equals(row[0])).findFirst().orElseThrow();
+    Object[] leadingZero = emitted.stream()
+        .filter(row -> "002026".equals(row[0])).findFirst().orElseThrow();
+    Object[] missing = emitted.stream()
+        .filter(row -> "2024".equals(row[0])).findFirst().orElseThrow();
+    assertEquals(11L, ((Number) regular[2]).longValue());
+    assertEquals(42L, ((Number) leadingZero[2]).longValue());
+    assertEquals(-1L, ((Number) missing[2]).longValue());
+    System.out.println("PROD_P0_STREAMLOOKUP_STRING_TO_INTEGER_KEY_JSON_HPL_ROWS=PASS");
+  }
+
 }
