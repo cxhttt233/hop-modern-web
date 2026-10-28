@@ -340,4 +340,151 @@ class HttpBasicAuthFullPipelineP0Test {
     }
   }
 
+
+  @Test
+  void httpCrossOriginRedirect401ChallengeUsesConfiguredWildcardBasicCredentialsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    String expectedAuth = "Basic " + Base64.getEncoder().encodeToString(
+        "fixture-user:fixture-password".getBytes(StandardCharsets.UTF_8));
+    List<String> originAuth = new CopyOnWriteArrayList<>();
+    List<String> redirectedAuth = new CopyOnWriteArrayList<>();
+
+    HttpServer destination = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    destination.createContext("/final", exchange -> {
+      try (exchange) {
+        String authorization = exchange.getRequestHeaders().getFirst("Authorization");
+        redirectedAuth.add(authorization == null ? "absent"
+            : expectedAuth.equals(authorization) ? "authorized" : "unexpected");
+        if (!expectedAuth.equals(authorization)) {
+          exchange.getResponseHeaders().set("WWW-Authenticate",
+              "Basic realm=\"cross-origin-fixture\"");
+          exchange.sendResponseHeaders(401, -1);
+        } else {
+          byte[] body = "challenged-黄河".getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+        }
+      }
+    });
+    destination.start();
+    HttpServer origin = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    origin.createContext("/redirect", exchange -> {
+      try (exchange) {
+        originAuth.add(expectedAuth.equals(exchange.getRequestHeaders().getFirst("Authorization"))
+            ? "authorized" : "missing-or-invalid");
+        exchange.getResponseHeaders().set("Location",
+            "http://127.0.0.1:" + destination.getAddress().getPort() + "/final");
+        exchange.sendResponseHeaders(302, -1);
+      }
+    });
+    origin.start();
+    try {
+      String startUrl = "http://127.0.0.1:" + origin.getAddress().getPort() + "/redirect";
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+      IPlugin httpPlugin = plugins.findPluginWithId(TransformPluginType.class, "Http");
+      assertNotNull(gridPlugin);
+      assertNotNull(httpPlugin);
+
+      ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+      grid.setDefault();
+      ClassLoader loader = grid.getClass().getClassLoader();
+      Class<?> fieldType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+      Class<?> lineType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, "批次");
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, List.of(field));
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, List.of("黄河"));
+      grid.getClass().getMethod("setDataLines", List.class).invoke(grid, List.of(line));
+
+      ITransformMeta http = plugins.loadClass(httpPlugin, ITransformMeta.class);
+      http.setDefault();
+      http.getClass().getMethod("setHttpLogin", String.class).invoke(http, "fixture-user");
+      http.getClass().getMethod("setHttpPassword", String.class)
+          .invoke(http, "fixture-password");
+      TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+      TransformMeta target = new TransformMeta("Http", "http-node", http);
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("http-basic-cross-origin-challenge");
+      pipeline.addTransform(source);
+      pipeline.addTransform(target);
+      pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("http-basic-cross-origin-challenge.hpl");
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      var registry = new PipelineDocumentRegistry();
+      registry.put(new PipelineDocument("http-cross-origin-challenge-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(registry, provider);
+      var read = resource.read("http-cross-origin-challenge-doc",
+          new PipelineConfigResource.ReadRequest("http-node"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      JsonNode passwordWire = draft.path("httpPassword").deepCopy();
+      draft.put("url", startUrl);
+      draft.put("encoding", "UTF-8");
+      ObjectNode result = (ObjectNode) draft.path("result");
+      result.put("name", "响应正文");
+      result.put("code", "HTTP状态");
+      result.put("response_header", "");
+      result.put("response_time", "");
+      var write = resource.write("http-cross-origin-challenge-doc",
+          new PipelineConfigResource.WriteRequest("http-node", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      JsonNode wire = ConfigJsonSerializer.toJson(
+          reopened.findTransform("http-node").getTransform(), provider);
+      assertEquals(startUrl, wire.at("/url").asText());
+      assertEquals("fixture-user", wire.at("/httpLogin").asText());
+      assertEquals(passwordWire, wire.at("/httpPassword"));
+      List<Object[]> rows = new CopyOnWriteArrayList<>();
+      List<IRowMeta> metas = new CopyOnWriteArrayList<>();
+      LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+      engine.setMetadataProvider(provider);
+      try {
+        engine.prepareExecution();
+        ITransform output = engine.getRunThread("http-node", 0);
+        assertNotNull(output);
+        output.addRowListener(new RowAdapter() {
+          @Override
+          public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+            metas.add(rowMeta.clone());
+            rows.add(row.clone());
+          }
+        });
+        engine.startThreads();
+        engine.waitUntilFinished();
+        assertEquals(0, engine.getErrors());
+      } finally {
+        if (!engine.isFinishedOrStopped()) engine.stopAll();
+        engine.cleanup();
+      }
+      assertEquals(List.of("authorized"), originAuth,
+          "the initial origin receives the configured Basic credentials");
+      assertEquals(List.of("absent", "authorized"), redirectedAuth,
+          "wildcard-scoped credentials are reused after the redirected origin's 401 challenge");
+      assertEquals(1, rows.size());
+      assertEquals(List.of("批次", "响应正文", "HTTP状态"),
+          metas.get(0).getValueMetaList().stream().map(IValueMeta::getName).toList());
+      assertEquals(IValueMeta.TYPE_STRING, metas.get(0).getValueMeta(1).getType());
+      assertEquals(IValueMeta.TYPE_INTEGER, metas.get(0).getValueMeta(2).getType());
+      assertEquals("challenged-黄河", rows.get(0)[1]);
+      assertEquals(200L, rows.get(0)[2]);
+      System.out.println("PROD_P0_HTTP_BASIC_CROSS_ORIGIN_401_CHALLENGE_AUTH_SCOPE_JSON_HPL_ROWS=PASS");
+    } finally {
+      origin.stop(0);
+      destination.stop(0);
+    }
+  }
+
 }
