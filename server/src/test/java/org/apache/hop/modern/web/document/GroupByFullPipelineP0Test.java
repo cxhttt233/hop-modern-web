@@ -841,4 +841,123 @@ class GroupByFullPipelineP0Test {
     System.out.println("PROD_P0_GROUPBY_BIGNUMBER_SUM_AVERAGE_NULL_JSON_HPL_ROWS=PASS");
   }
 
+
+  @Test
+  void groupByNonContiguousKeysProduceSeparateNativeGroupsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin groupPlugin = plugins.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(gridPlugin);
+    assertNotNull(groupPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String name : List.of("流域<&>", "站点")) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, name);
+      fieldType.getMethod("setType", String.class).invoke(column, "String");
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("黄河<&>", "甲"), List.of("长江", "乙"),
+        List.of("黄河<&>", "丙"), List.of("黄河<&>", "丁"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta group = plugins.loadClass(groupPlugin, ITransformMeta.class);
+    group.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("GroupBy", "group-node", group);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("groupby-contiguous-runs-not-global");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("groupby-contiguous-runs-not-global.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("group-runs-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("group-runs-doc",
+        new PipelineConfigResource.ReadRequest("group-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("all_rows", false);
+    draft.put("give_back_row", false);
+    draft.putObject("group").putArray("field")
+        .addObject().put("name", "流域<&>");
+    draft.putObject("fields").putArray("field")
+        .addObject().put("aggregate", "连续段记录数")
+        .put("subject", "").put("type", "COUNT_ANY");
+
+    var write = resource.write("group-runs-doc",
+        new PipelineConfigResource.WriteRequest("group-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("group-node").getTransform(), provider);
+    assertEquals("流域<&>", wire.at("/group/field/0/name").asText());
+    assertEquals("连续段记录数", wire.at("/fields/field/0/aggregate").asText());
+    assertEquals("COUNT_ANY", wire.at("/fields/field/0/type").asText());
+    assertEquals("", wire.at("/fields/field/0/subject").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("group-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native GroupBy contiguous-run pipeline must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(2, outputMeta.get().size());
+    assertEquals("流域<&>", outputMeta.get().getValueMeta(0).getName());
+    assertEquals("连续段记录数", outputMeta.get().getValueMeta(1).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(1).getType());
+    assertEquals(3, emitted.size(),
+        "GroupBy must not merge non-adjacent equal keys into one global group");
+    assertEquals("黄河<&>", emitted.get(0)[0]);
+    assertEquals(Long.valueOf(1), emitted.get(0)[1]);
+    assertEquals("长江", emitted.get(1)[0]);
+    assertEquals(Long.valueOf(1), emitted.get(1)[1]);
+    assertEquals("黄河<&>", emitted.get(2)[0]);
+    assertEquals(Long.valueOf(2), emitted.get(2)[1]);
+    System.out.println("PROD_P0_GROUPBY_NONCONTIGUOUS_KEYS_JSON_HPL_ROWS=PASS");
+  }
+
 }
