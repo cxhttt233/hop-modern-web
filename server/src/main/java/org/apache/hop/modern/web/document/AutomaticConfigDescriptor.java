@@ -290,7 +290,24 @@ public final class AutomaticConfigDescriptor {
                       + "Preserve httpLogin and sensitive httpPassword across config "
                       + "JSON editing and real HPL disk reopen without logging secrets. "
                       + "This is a native request-security compatibility diagnostic, "
-                      + "not a draft-save validator."));
+                      + "not a draft-save validator."),
+              new RuntimePrecondition(
+                  "HTTP_BASIC_AUTH_CROSS_ORIGIN_REDIRECT_DOES_NOT_PREEMPTIVELY_FORWARD",
+                  List.of("/url", "/httpLogin", "/httpPassword",
+                      "/result/name", "/result/code"),
+                  "The pinned Http.callHttpService() uses an origin-keyed BasicAuthCache "
+                      + "for the initial GET. For an HTTP 302 redirect to another port "
+                      + "on 127.0.0.1 without an authentication challenge, HttpClient 5 "
+                      + "follows the redirect but does not preemptively forward the "
+                      + "Authorization: Basic header to that second origin. The configured "
+                      + "result.name and result.code describe the final HTTP 200 response. "
+                      + "HttpClientManager.setCredentials() also configures a wildcard "
+                      + "AuthScope: this unchallenged-redirect observation is NOT a guarantee "
+                      + "that credentials cannot be supplied after a 401 challenge at "
+                      + "a different origin. Treat redirects and credentials as sensitive "
+                      + "and constrain trusted endpoints. Preserve the URL and sensitive "
+                      + "password across JSON editing and HPL disk reopen; this is a "
+                      + "runtime security diagnostic, not a save-time validator."));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           List.of(
               new RuntimePrecondition(
