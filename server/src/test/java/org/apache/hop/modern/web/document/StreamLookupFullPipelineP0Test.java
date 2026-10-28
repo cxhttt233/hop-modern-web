@@ -502,4 +502,151 @@ class StreamLookupFullPipelineP0Test {
     System.out.println("PROD_P0_STREAMLOOKUP_CASE_SENSITIVE_KEYS_ALL_CACHE_MODES_JSON_HPL_ROWS=PASS");
   }
 
+
+  /**
+   * Two ordered lookup keys must disambiguate repeated station names across
+   * reporting years. This exercises native multi-key lookup execution, not
+   * only the nested LIST serializer's persistence of two key entries.
+   */
+  @Test
+  void streamLookupCompositeStationYearKeysMatchOnlyBothComponentsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin lookupPlugin = plugins.findPluginWithId(TransformPluginType.class, "StreamLookup");
+    assertNotNull(lookupPlugin, "pinned StreamLookup plugin required");
+
+    ITransformMeta mainGrid = grid(
+        plugins, List.of("测站<&>", "年份", "批次"),
+        List.of("String", "String", "String"),
+        List.of(List.of("黄河", "2025", "old"),
+            List.of("黄河", "2026", "new"),
+            List.of("长江", "2026", "other"),
+            List.of("黄河", "2024", "missing")));
+    ITransformMeta infoGrid = grid(
+        plugins, List.of("索引站", "统计年", "等级", "流量"),
+        List.of("String", "String", "String", "Integer"),
+        List.of(List.of("黄河", "2025", "历史", "11"),
+            List.of("黄河", "2026", "最新", "42"),
+            List.of("长江", "2026", "一般", "7")));
+    ITransformMeta lookup = plugins.loadClass(lookupPlugin, ITransformMeta.class);
+    lookup.setDefault();
+
+    TransformMeta main = new TransformMeta("DataGrid", "main-grid", mainGrid);
+    TransformMeta info = new TransformMeta("DataGrid", "info-grid", infoGrid);
+    TransformMeta target = new TransformMeta("StreamLookup", "lookup-node", lookup);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("streamlookup-composite-station-year");
+    pipeline.addTransform(main);
+    pipeline.addTransform(info);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(main, target));
+    pipeline.addPipelineHop(new PipelineHopMeta(info, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("streamlookup-composite-station-year.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    assertEquals(2, loaded.nrPipelineHops());
+
+    var documents = new PipelineDocumentRegistry();
+    String documentId = "streamlookup-composite-station-year";
+    documents.put(new PipelineDocument(documentId, hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read(documentId,
+        new PipelineConfigResource.ReadRequest("lookup-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("from", "info-grid");
+    draft.put("preserve_memory", true);
+    draft.put("sorted_list", false);
+    ObjectNode lookupDraft = draft.putObject("lookup");
+    lookupDraft.putArray("key").addObject()
+        .put("name", "测站<&>").put("field", "索引站");
+    lookupDraft.withArray("key").addObject()
+        .put("name", "年份").put("field", "统计年");
+    lookupDraft.putArray("value").addObject()
+        .put("name", "等级").put("rename", "匹配等级")
+        .put("default", "无记录").put("type", IValueMeta.TYPE_STRING);
+    lookupDraft.withArray("value").addObject()
+        .put("name", "流量").put("rename", "匹配流量")
+        .put("default", "-1").put("type", IValueMeta.TYPE_INTEGER);
+    var write = resource.write(documentId,
+        new PipelineConfigResource.WriteRequest("lookup-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(3, reopened.nrTransforms());
+    assertEquals(2, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("lookup-node").getTransform(), provider);
+    assertEquals("info-grid", wire.at("/from").asText());
+    assertEquals(2, wire.at("/lookup/key").size());
+    assertEquals("测站<&>", wire.at("/lookup/key/0/name").asText());
+    assertEquals("索引站", wire.at("/lookup/key/0/field").asText());
+    assertEquals("年份", wire.at("/lookup/key/1/name").asText());
+    assertEquals("统计年", wire.at("/lookup/key/1/field").asText());
+    assertEquals(2, wire.at("/lookup/value").size());
+    assertEquals("匹配等级", wire.at("/lookup/value/0/rename").asText());
+    assertEquals("匹配流量", wire.at("/lookup/value/1/rename").asText());
+    assertTrue(wire.at("/lookup/value/1/type").isInt());
+    assertEquals(IValueMeta.TYPE_INTEGER, wire.at("/lookup/value/1/type").intValue());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("lookup-node", 0);
+      assertNotNull(output, "native StreamLookup engine must prepare");
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "composite-key lookup must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    IRowMeta meta = outputMeta.get();
+    assertNotNull(meta, "composite-key StreamLookup must emit rows");
+    assertEquals(5, meta.size());
+    assertEquals("匹配等级", meta.getValueMeta(3).getName());
+    assertEquals(IValueMeta.TYPE_STRING, meta.getValueMeta(3).getType());
+    assertEquals("匹配流量", meta.getValueMeta(4).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, meta.getValueMeta(4).getType());
+    assertEquals(4, emitted.size());
+
+    Object[] old = emitted.stream()
+        .filter(row -> "黄河".equals(row[0]) && "2025".equals(row[1]))
+        .findFirst().orElseThrow();
+    Object[] current = emitted.stream()
+        .filter(row -> "黄河".equals(row[0]) && "2026".equals(row[1]))
+        .findFirst().orElseThrow();
+    Object[] other = emitted.stream()
+        .filter(row -> "长江".equals(row[0]) && "2026".equals(row[1]))
+        .findFirst().orElseThrow();
+    Object[] missing = emitted.stream()
+        .filter(row -> "黄河".equals(row[0]) && "2024".equals(row[1]))
+        .findFirst().orElseThrow();
+    assertEquals("历史", old[3]);
+    assertEquals(11L, ((Number) old[4]).longValue());
+    assertEquals("最新", current[3]);
+    assertEquals(42L, ((Number) current[4]).longValue());
+    assertEquals("一般", other[3]);
+    assertEquals(7L, ((Number) other[4]).longValue());
+    assertEquals("无记录", missing[3]);
+    assertEquals(-1L, ((Number) missing[4]).longValue());
+    System.out.println("PROD_P0_STREAMLOOKUP_COMPOSITE_STATION_YEAR_JSON_HPL_ROWS=PASS");
+  }
+
 }
