@@ -183,7 +183,8 @@ class TransformP0L2RoundTripTest {
             "CONCAT_FIELDS_SELECTED_SOURCE_FIELDS_REQUIRE_UPSTREAM_FIELDS",
             "CONCAT_FIELDS_REMOVE_SELECTED_FIELDS_CHANGES_OUTPUT_SCHEMA",
             "CONCAT_FIELDS_LITERAL_TARGET_NAME_AUTO_SUFFIXES_COLLISIONS",
-            "CONCAT_FIELDS_SKIP_EMPTY_BEFORE_FORCED_ENCLOSURE"),
+            "CONCAT_FIELDS_SKIP_EMPTY_BEFORE_FORCED_ENCLOSURE",
+            "CONCAT_FIELDS_ENCLOSURE_VARIABLE_STAYS_LITERAL_IN_ROW_OUTPUT"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     assertEquals(List.of("/ConcatFields/targetFieldName", "/ConcatFields/targetFieldLength"),
         descriptor.runtimePreconditions().get(0).keyListPointers());
@@ -192,6 +193,8 @@ class TransformP0L2RoundTripTest {
     assertEquals(List.of("/fields/field", "/skip_value_empty", "/force_enclosure",
             "/enclosure", "/separator"),
         descriptor.runtimePreconditions().get(4).keyListPointers());
+    assertEquals(List.of("/enclosure", "/separator", "/force_enclosure"),
+        descriptor.runtimePreconditions().get(5).keyListPointers());
 
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ConcatFields");
     assertNotNull(plugin);
