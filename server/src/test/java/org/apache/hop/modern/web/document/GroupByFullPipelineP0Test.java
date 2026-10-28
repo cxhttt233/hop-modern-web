@@ -444,4 +444,139 @@ class GroupByFullPipelineP0Test {
     assertEquals(0L, ((Number) emitted.get(0)[1]).longValue());
     System.out.println("PROD_P0_GROUPBY_EMPTY_INPUT_GIVE_BACK_ZERO_COUNT_JSON_HPL=PASS");
   }
+
+  /**
+   * FIRST/LAST ignore null subjects; FIRST_INCL_NULL/LAST_INCL_NULL preserve
+   * their positional nulls. Test actual typed rows, not only metadata or
+   * the GroupBy type-label serializer.
+   */
+  @Test
+  void groupByFirstLastNullInclusionSurvivesConfigAndRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin groupPlugin = plugins.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(gridPlugin);
+    assertNotNull(groupPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader gridLoader = grid.getClass().getClassLoader();
+    Class<?> fieldType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String[] definition : new String[][] {
+        {"流域<&>", "String"}, {"流量", "Integer"}}) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, definition[0]);
+      fieldType.getMethod("setType", String.class).invoke(column, definition[1]);
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("黄河<&>", ""), List.of("黄河<&>", "7"),
+        List.of("黄河<&>", ""), List.of("长江", "2"),
+        List.of("长江", ""))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta group = plugins.loadClass(groupPlugin, ITransformMeta.class);
+    group.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("GroupBy", "group-node", group);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("groupby-first-last-null-inclusion");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("groupby-first-last-null.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("group-null-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("group-null-doc",
+        new PipelineConfigResource.ReadRequest("group-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("all_rows", false);
+    draft.put("give_back_row", false);
+    draft.putObject("group").putArray("field")
+        .addObject().put("name", "流域<&>");
+    var aggregates = draft.putObject("fields").putArray("field");
+    for (String[] definition : new String[][] {
+        {"首个非空", "FIRST"}, {"首项含空", "FIRST_INCL_NULL"},
+        {"末个非空", "LAST"}, {"末项含空", "LAST_INCL_NULL"}}) {
+      aggregates.addObject().put("aggregate", definition[0])
+          .put("subject", "流量").put("type", definition[1]);
+    }
+    var write = resource.write("group-null-doc",
+        new PipelineConfigResource.WriteRequest("group-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("group-node").getTransform(), provider);
+    assertEquals("流域<&>", wire.at("/group/field/0/name").asText());
+    assertEquals(4, wire.at("/fields/field").size());
+    assertEquals("FIRST", wire.at("/fields/field/0/type").asText());
+    assertEquals("FIRST_INCL_NULL", wire.at("/fields/field/1/type").asText());
+    assertEquals("LAST", wire.at("/fields/field/2/type").asText());
+    assertEquals("LAST_INCL_NULL", wire.at("/fields/field/3/type").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("group-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native GroupBy null handling must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(5, outputMeta.get().size());
+    for (int i = 1; i < 5; i++) {
+      assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(i).getType());
+    }
+    assertEquals(2, emitted.size());
+    assertEquals("黄河<&>", emitted.get(0)[0]);
+    assertEquals(7L, ((Number) emitted.get(0)[1]).longValue());
+    assertNull(emitted.get(0)[2], "FIRST_INCL_NULL must preserve the first null");
+    assertEquals(7L, ((Number) emitted.get(0)[3]).longValue());
+    assertNull(emitted.get(0)[4], "LAST_INCL_NULL must preserve the final null");
+    assertEquals("长江", emitted.get(1)[0]);
+    assertEquals(2L, ((Number) emitted.get(1)[1]).longValue());
+    assertEquals(2L, ((Number) emitted.get(1)[2]).longValue());
+    assertEquals(2L, ((Number) emitted.get(1)[3]).longValue());
+    assertNull(emitted.get(1)[4]);
+    System.out.println("PROD_P0_GROUPBY_FIRST_LAST_NULL_INCLUSION_JSON_HPL_ROWS=PASS");
+  }
+
 }
