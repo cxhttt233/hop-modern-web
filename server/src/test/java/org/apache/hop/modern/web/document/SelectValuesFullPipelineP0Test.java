@@ -553,4 +553,137 @@ class SelectValuesFullPipelineP0Test {
     System.out.println("PROD_P0_SELECTVALUES_EXACT_BIGNUMBER_JSON_HPL_ROWS=PASS");
   }
 
+  /**
+   * A day-first timestamp in a STRING column is not an ISO date and cannot be
+   * interpreted by simply changing the declared output type. Verify that
+   * SelectValues applies its ordered fields.meta conversion_mask to real rows
+   * after the T3 config API edit and an actual HPL disk reopen.
+   */
+  @Test
+  void selectValuesDayFirstDateTimeMaskParsesRealRowsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String name : List.of("观测时间<&>", "测站")) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, name);
+      fieldType.getMethod("setType", String.class).invoke(column, "String");
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("29/02/2024 13:45:20", "黄河"),
+        List.of("28/10/2026 07:08:09", "长江"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SelectValues", "select-node", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-day-first-date-time-mask");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-day-first-date.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-date-mask-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-date-mask-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject());
+    fields.putArray("meta").addObject()
+        .put("name", "观测时间<&>")
+        .put("rename", "观测时刻")
+        .put("type", "Date")
+        .put("length", -1)
+        .put("precision", -1)
+        .put("conversion_mask", "dd/MM/yyyy HH:mm:ss");
+    var write = resource.write("select-date-mask-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertEquals(1, wire.at("/fields/meta").size());
+    assertEquals("观测时间<&>", wire.at("/fields/meta/0/name").asText());
+    assertEquals("观测时刻", wire.at("/fields/meta/0/rename").asText());
+    assertEquals("Date", wire.at("/fields/meta/0/type").asText());
+    assertEquals("dd/MM/yyyy HH:mm:ss",
+        wire.at("/fields/meta/0/conversion_mask").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("select-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native date-mask conversion must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(emittedMeta.get());
+    assertEquals(2, emittedMeta.get().size());
+    assertEquals("观测时刻", emittedMeta.get().getValueMeta(0).getName());
+    assertEquals(IValueMeta.TYPE_DATE, emittedMeta.get().getValueMeta(0).getType());
+    assertEquals("测站", emittedMeta.get().getValueMeta(1).getName());
+    assertEquals(2, emitted.size());
+    var outputFormat = new java.text.SimpleDateFormat(
+        "yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT);
+    for (Object[] row : emitted) {
+      assertInstanceOf(java.util.Date.class, row[0]);
+      String formatted = outputFormat.format((java.util.Date) row[0]);
+      if ("黄河".equals(row[1])) {
+        assertEquals("2024-02-29 13:45:20", formatted);
+      } else {
+        assertEquals("长江", row[1]);
+        assertEquals("2026-10-28 07:08:09", formatted);
+      }
+    }
+    System.out.println("PROD_P0_SELECTVALUES_DAY_FIRST_DATE_MASK_JSON_HPL_ROWS=PASS");
+  }
+
 }
