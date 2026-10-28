@@ -1710,12 +1710,20 @@ class TransformP0L2RoundTripTest {
             "GROUPBY_LINE_NUMBER_REQUIRES_PASS_ALL_ROWS_AND_FIELD_NAME",
             "GROUPBY_AGGREGATE_OUTPUT_TYPES_FOLLOW_OPERATION_AND_SUBJECT",
             "GROUPBY_EMPTY_INPUT_GIVE_BACK_ROW_EMITS_ZERO_COUNT",
+            "GROUPBY_DISTINCT_ALL_ANY_NULL_COUNTS_DIFFER",
             "GROUPBY_FIRST_LAST_NULL_INCLUSION_CHANGES_VALUES"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     var precondition = descriptor.runtimePreconditions().get(2);
     assertEquals(List.of("/fields/field"), precondition.keyListPointers());
     assertTrue(precondition.explanation().contains("COUNT_ANY"));
     assertTrue(precondition.explanation().contains("upstream row metadata"));
+    var distinctCounts = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("GROUPBY_DISTINCT_ALL_ANY_NULL_COUNTS_DIFFER"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field", "/group/field"), distinctCounts.keyListPointers());
+    assertTrue(distinctCounts.explanation().contains("COUNT_DISTINCT"));
+    assertTrue(distinctCounts.explanation().contains("COUNT_ALL"));
+    assertTrue(distinctCounts.explanation().contains("COUNT_ANY"));
     System.out.println("PROD_P0_GROUPBY_AGGREGATE_SUBJECT_PRECONDITION=PASS");
   }
 
