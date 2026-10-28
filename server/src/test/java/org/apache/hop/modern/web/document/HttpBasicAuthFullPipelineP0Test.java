@@ -124,6 +124,12 @@ class HttpBasicAuthFullPipelineP0Test {
           .filter(p -> p.key().equals("httpPassword")).findFirst().orElseThrow();
       assertTrue(passwordProperty.sensitive(), "native password metadata must be sensitive");
       assertEquals(AutomaticConfigDescriptor.Shape.STRING, passwordProperty.shape());
+      var contract = response.descriptor().runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "HTTP_BASIC_LOGIN_PREEMPTIVELY_SENDS_CREDENTIALS_TO_ORIGIN"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/httpLogin", "/httpPassword", "/url"),
+          contract.keyListPointers());
       ObjectNode draft = ((ObjectNode) response.config()).deepCopy();
       JsonNode originalPasswordWire = draft.path("httpPassword").deepCopy();
       assertTrue(originalPasswordWire.isTextual());
