@@ -306,4 +306,134 @@ class StringCutFullPipelineP0Test {
     System.out.println("PROD_P0_STRINGCUT_NEGATIVE_OFFSETS_OUT_OF_RANGE_NULL_JSON_HPL_ROWS=PASS");
   }
 
+
+  /**
+   * StringCut's offsets index Java UTF-16 code units, not Unicode code points.
+   * A supplementary symbol occupies two units; test boundaries that preserve
+   * the whole symbol while distinguishing the native behavior from code-point
+   * slicing. This also proves that T3's ordered LIST survives HPL disk reopen.
+   */
+  @Test
+  void stringCutSupplementaryUnicodeUsesUtf16CodeUnitOffsetsAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin cutPlugin = plugins.findPluginWithId(TransformPluginType.class, "StringCut");
+    assertNotNull(gridPlugin);
+    assertNotNull(cutPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    Object field = fieldType.getConstructor().newInstance();
+    fieldType.getMethod("setName", String.class).invoke(field, "测站<&>");
+    fieldType.getMethod("setType", String.class).invoke(field, "String");
+    grid.getClass().getMethod("setDataGridFields", List.class)
+        .invoke(grid, List.of(field));
+    List<Object> lines = new ArrayList<>();
+    for (String value : List.of("水😀网", "河🚀湖")) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, List.of(value));
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta cut = plugins.loadClass(cutPlugin, ITransformMeta.class);
+    cut.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("StringCut", "cut-node", cut);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("stringcut-utf16-code-unit-boundaries");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("stringcut-utf16.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("stringcut-utf16-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("stringcut-utf16-doc",
+        new PipelineConfigResource.ReadRequest("cut-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ArrayNode rules = draft.putObject("fields").putArray("field");
+    rules.addObject()
+        .put("in_stream_name", "测站<&>")
+        .put("out_stream_name", "补充字符")
+        .put("cut_from", "1")
+        .put("cut_to", "3");
+    rules.addObject()
+        .put("in_stream_name", "测站<&>")
+        .put("out_stream_name", "三代码单元前缀")
+        .put("cut_from", "0")
+        .put("cut_to", "3");
+    var write = resource.write("stringcut-utf16-doc",
+        new PipelineConfigResource.WriteRequest("cut-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("cut-node").getTransform(), provider);
+    assertEquals(2, wire.at("/fields/field").size());
+    assertEquals("测站<&>", wire.at("/fields/field/0/in_stream_name").asText());
+    assertEquals("1", wire.at("/fields/field/0/cut_from").asText());
+    assertEquals("3", wire.at("/fields/field/0/cut_to").asText());
+    assertEquals("补充字符", wire.at("/fields/field/0/out_stream_name").asText());
+    assertEquals("0", wire.at("/fields/field/1/cut_from").asText());
+    assertEquals("3", wire.at("/fields/field/1/cut_to").asText());
+    assertEquals("三代码单元前缀", wire.at("/fields/field/1/out_stream_name").asText());
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("cut-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals("STRING_CUT_NEGATIVE_OFFSETS_AND_OUT_OF_RANGE_NULL"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field"), contract.keyListPointers());
+    assertTrue(contract.explanation().contains("UTF-16"));
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("cut-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors());
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(List.of("测站<&>", "补充字符", "三代码单元前缀"),
+        outputMeta.get().getValueMetaList().stream().map(IValueMeta::getName).toList());
+    for (int i = 0; i < 3; i++) {
+      assertEquals(IValueMeta.TYPE_STRING, outputMeta.get().getValueMeta(i).getType());
+    }
+    assertEquals(2, emitted.size());
+    assertArrayEquals(new Object[] {"水😀网", "😀", "水😀"}, emitted.get(0));
+    assertArrayEquals(new Object[] {"河🚀湖", "🚀", "河🚀"}, emitted.get(1));
+    System.out.println("PROD_P0_STRINGCUT_SUPPLEMENTARY_UTF16_OFFSETS_JSON_HPL_ROWS=PASS");
+  }
 }
