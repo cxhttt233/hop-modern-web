@@ -863,7 +863,25 @@ public final class AutomaticConfigDescriptor {
                       + "remains STRING in the output; an unconvertible key can fail execution "
                       + "rather than silently using the missing-match default. Preserve the "
                       + "canonical lookup.key LIST and graph source reference, and diagnose "
-                      + "cross-stream key types without coercing draft JSON values or rejecting saves."));
+                      + "cross-stream key types without coercing draft JSON values or rejecting saves."),
+               new RuntimePrecondition(
+                   "STREAM_LOOKUP_INTEGER_PAIR_FAST_PATH_REQUIRES_SINGLE_INTEGER_KEY_AND_VALUE",
+                   List.of("/from", "/preserve_memory", "/sorted_list", "/integer_pair",
+                       "/lookup/key", "/lookup/value"),
+                   "When preserve_memory=true and sorted_list=false, integer_pair=true selects "
+                       + "the native LongHashIndex cache. On the first info-stream row, "
+                       + "StreamLookup.addToCache() requires exactly one lookup.key, exactly "
+                       + "one lookup.value, and INTEGER metadata types for both info-side "
+                       + "fields; otherwise it throws HopValueException at runtime. "
+                       + "With a valid pair, lookup keys map to one INTEGER return value, "
+                       + "duplicate info keys overwrite earlier values, and misses use "
+                       + "the typed configured default. The main-stream key may be converted "
+                       + "to the info-stream INTEGER type before matching. With "
+                       + "preserve_memory=false or sorted_list=true, integer_pair does not "
+                       + "select this cache path. Preserve the BOOLEAN flags and indexed "
+                       + "lookup.key and lookup.value LISTs through JSON/HPL; diagnose "
+                       + "the source-row type and cardinality prerequisite before execution, "
+                       + "not as a draft-save validator."));
       case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta" ->
           List.of(
               new RuntimePrecondition(
