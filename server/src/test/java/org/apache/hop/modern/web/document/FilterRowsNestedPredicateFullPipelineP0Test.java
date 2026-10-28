@@ -131,6 +131,26 @@ class FilterRowsNestedPredicateFullPipelineP0Test {
     var write = resource.write("filter-nested-doc",
         new PipelineConfigResource.WriteRequest("filter-node", draft));
     assertEquals(200, write.getStatus());
+
+    // SelectValues requires an explicit selection; keep all six source columns
+    // in their original order so this test isolates native FilterRows evaluation.
+    var selectRead = resource.read("filter-nested-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, selectRead.getStatus());
+    ObjectNode selectDraft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) selectRead.getEntity()).config()).deepCopy();
+    ObjectNode selectFields = (ObjectNode) selectDraft.path("fields");
+    assertTrue(selectFields.isObject());
+    selectFields.put("select_unspecified", false);
+    var selected = selectFields.putArray("field");
+    for (String name : names) {
+      selected.addObject().put("name", name).put("rename", name);
+    }
+    selectFields.putArray("remove");
+    selectFields.putArray("meta");
+    var selectWrite = resource.write("filter-nested-doc",
+        new PipelineConfigResource.WriteRequest("select-node", selectDraft));
+    assertEquals(200, selectWrite.getStatus());
     store.save(hpl, loaded);
 
     PipelineMeta reopened = store.open(hpl);
