@@ -851,7 +851,19 @@ public final class AutomaticConfigDescriptor {
                       + "therefore emits configured typed defaults instead of a match. "
                       + "Preserve the exact input and info key values and the ordered "
                       + "lookup.key and lookup.value lists; diagnose case mismatches "
-                      + "without silently normalizing identifiers or rejecting drafts."));
+                      + "without silently normalizing identifiers or rejecting drafts."),
+              new RuntimePrecondition(
+                  "STREAM_LOOKUP_INPUT_KEYS_CONVERT_TO_INFO_STREAM_TYPES",
+                  List.of("/from", "/lookup/key"),
+                  "When the main-stream key metadata type differs from the selected lookup/info-stream "
+                      + "key type, native StreamLookup.lookupValues() converts the main input key "
+                      + "with the lookup key's IValueMeta.convertDataCompatible() before cache "
+                      + "matching. For example, a STRING main key 002026 can match an INTEGER "
+                      + "lookup key 2026 after numeric conversion. The original main row field "
+                      + "remains STRING in the output; an unconvertible key can fail execution "
+                      + "rather than silently using the missing-match default. Preserve the "
+                      + "canonical lookup.key LIST and graph source reference, and diagnose "
+                      + "cross-stream key types without coercing draft JSON values or rejecting saves."));
       case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta" ->
           List.of(
               new RuntimePrecondition(
