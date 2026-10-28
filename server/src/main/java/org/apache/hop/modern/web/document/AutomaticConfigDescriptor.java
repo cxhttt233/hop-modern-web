@@ -838,7 +838,20 @@ public final class AutomaticConfigDescriptor {
                       + "Preserve the from reference, ordered lookup.key and lookup.value "
                       + "LISTs, and cache-mode BOOLEAN flags across config JSON editing "
                       + "and HPL disk reopen. Diagnose duplicate lookup keys as a "
-                      + "data-quality risk, not a draft-save validator."));
+                      + "data-quality risk, not a draft-save validator."),
+              new RuntimePrecondition(
+                  "STREAM_LOOKUP_STRING_KEYS_CASE_SENSITIVE_ACROSS_CACHE_MODES",
+                  List.of("/from", "/lookup/key", "/lookup/value",
+                      "/preserve_memory", "/sorted_list"),
+                  "Native StreamLookup compares STRING lookup keys using their actual "
+                      + "row-metadata string values. Case variants such as Station_A, "
+                      + "station_a and STATION_A are distinct lookup keys with the "
+                      + "default string metadata, in the ordinary map, memory-preserving "
+                      + "hash-index and sorted-list cache modes. A case-only mismatch "
+                      + "therefore emits configured typed defaults instead of a match. "
+                      + "Preserve the exact input and info key values and the ordered "
+                      + "lookup.key and lookup.value lists; diagnose case mismatches "
+                      + "without silently normalizing identifiers or rejecting drafts."));
       case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta" ->
           List.of(
               new RuntimePrecondition(
