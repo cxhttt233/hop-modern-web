@@ -739,6 +739,22 @@ public final class AutomaticConfigDescriptor {
                       + "and HPL disk reopen. This is a runtime compatibility diagnostic, "
                       + "not a save-time validator."),
               new RuntimePrecondition(
+                  "SELECT_VALUES_STRING_BOOLEAN_UNKNOWN_TOKENS_MAP_FALSE",
+                  List.of("/fields/meta"),
+                  "When a post-selection STRING field is converted to Boolean through "
+                      + "fields.meta[*].type, pinned Hop ValueMetaBase recognizes Y, TRUE, YES "
+                      + "and 1 (case-insensitive for words) as true; any other non-empty "
+                      + "token, including N, FALSE, 0 and an unrecognized value, becomes "
+                      + "false rather than producing a conversion error. An empty source "
+                      + "string converts to null. Native SelectValues.metadataValues() "
+                      + "uses this conversion when source and target metadata types differ. "
+                      + "Preserve the ordered fields.meta LIST, the source field name, "
+                      + "output rename and Boolean target type through JSON editing and "
+                      + "real HPL disk reopen. An editor should flag unexpected tokens "
+                      + "as a data-quality concern rather than silently promising strict "
+                      + "Boolean validation; this is a runtime compatibility diagnostic, "
+                      + "not a save-time validator."),
+              new RuntimePrecondition(
                   "SELECT_VALUES_BIGNUMBER_EXACT_DECIMAL_CONVERSION",
                   List.of("/fields/meta"),
                   "For a post-selection STRING field whose fields.meta[*].type is BigNumber, "
