@@ -710,4 +710,135 @@ class GroupByFullPipelineP0Test {
     assertEquals(2L, ((Number) emitted.get(1)[3]).longValue());
     System.out.println("PROD_P0_GROUPBY_DISTINCT_ALL_ANY_NULL_JSON_HPL_ROWS=PASS");
   }
+
+  /** Real BigNumber SUM/AVERAGE rows: null input must not dilute the mean or lose decimal type. */
+  @Test
+  void groupByBigNumberSumAverageIgnoreNullsAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin groupPlugin = plugins.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(gridPlugin);
+    assertNotNull(groupPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String[] definition : new String[][] {
+        {"流域<&>", "String"}, {"流量", "BigNumber"}}) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, definition[0]);
+      fieldType.getMethod("setType", String.class).invoke(column, definition[1]);
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("黄河<&>", "1.25"), List.of("黄河<&>", ""),
+        List.of("黄河<&>", "2.75"), List.of("长江", "10.125"),
+        List.of("长江", "-0.125"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta group = plugins.loadClass(groupPlugin, ITransformMeta.class);
+    group.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("GroupBy", "group-node", group);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("groupby-bignumber-sum-average-null");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("groupby-bignumber-sum-average-null.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("group-decimal-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("group-decimal-doc",
+        new PipelineConfigResource.ReadRequest("group-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("all_rows", false);
+    draft.put("give_back_row", false);
+    draft.putObject("group").putArray("field")
+        .addObject().put("name", "流域<&>");
+    var aggregates = draft.putObject("fields").putArray("field");
+    aggregates.addObject().put("aggregate", "总流量")
+        .put("subject", "流量").put("type", "SUM");
+    aggregates.addObject().put("aggregate", "平均流量")
+        .put("subject", "流量").put("type", "AVERAGE");
+
+    var write = resource.write("group-decimal-doc",
+        new PipelineConfigResource.WriteRequest("group-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("group-node").getTransform(), provider);
+    assertEquals("流域<&>", wire.at("/group/field/0/name").asText());
+    assertEquals(2, wire.at("/fields/field").size());
+    assertEquals("SUM", wire.at("/fields/field/0/type").asText());
+    assertEquals("AVERAGE", wire.at("/fields/field/1/type").asText());
+    assertEquals("流量", wire.at("/fields/field/0/subject").asText());
+    assertEquals("流量", wire.at("/fields/field/1/subject").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("group-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native BigNumber GroupBy must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(3, outputMeta.get().size());
+    assertEquals("流域<&>", outputMeta.get().getValueMeta(0).getName());
+    assertEquals("总流量", outputMeta.get().getValueMeta(1).getName());
+    assertEquals("平均流量", outputMeta.get().getValueMeta(2).getName());
+    assertEquals(IValueMeta.TYPE_BIGNUMBER, outputMeta.get().getValueMeta(1).getType());
+    assertEquals(IValueMeta.TYPE_BIGNUMBER, outputMeta.get().getValueMeta(2).getType());
+    assertEquals(2, emitted.size());
+    assertEquals("黄河<&>", emitted.get(0)[0]);
+    assertEquals(0, new java.math.BigDecimal("4.00")
+        .compareTo((java.math.BigDecimal) emitted.get(0)[1]));
+    assertEquals(0, new java.math.BigDecimal("2.00")
+        .compareTo((java.math.BigDecimal) emitted.get(0)[2]));
+    assertEquals("长江", emitted.get(1)[0]);
+    assertEquals(0, new java.math.BigDecimal("10.000")
+        .compareTo((java.math.BigDecimal) emitted.get(1)[1]));
+    assertEquals(0, new java.math.BigDecimal("5.000")
+        .compareTo((java.math.BigDecimal) emitted.get(1)[2]));
+    System.out.println("PROD_P0_GROUPBY_BIGNUMBER_SUM_AVERAGE_NULL_JSON_HPL_ROWS=PASS");
+  }
+
 }
