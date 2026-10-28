@@ -419,4 +419,132 @@ class SelectValuesFullPipelineP0Test {
     assertEquals("长江", emitted.get(1)[1]);
     System.out.println("PROD_P0_SELECTVALUES_LOCALE_DECIMAL_GROUPING_JSON_HPL_ROWS=PASS");
   }
+
+  /**
+   * A Number (double) cannot represent a long decimal measurement exactly.
+   * Verify that native SelectValues BigNumber conversion keeps the full decimal
+   * through T3 JSON editing, real HPL disk reopen, and actual row execution.
+   */
+  @Test
+  void selectValuesBigNumberRetainsExactHighPrecisionAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String name : List.of("精确水位<&>", "测站")) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, name);
+      fieldType.getMethod("setType", String.class).invoke(column, "String");
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    String positive = "12345678901234567890.12345678901234567890";
+    String negative = "-0.000000000000000000000123";
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of(positive, "黄河"), List.of(negative, "长江"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SelectValues", "select-node", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-exact-big-number");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-exact-big-number.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-big-number-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-big-number-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject());
+    fields.putArray("meta").addObject()
+        .put("name", "精确水位<&>")
+        .put("rename", "高精度水位")
+        .put("type", "BigNumber")
+        .put("length", -1)
+        .put("precision", -1);
+    var write = resource.write("select-big-number-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertEquals(1, wire.at("/fields/meta").size());
+    assertEquals("精确水位<&>", wire.at("/fields/meta/0/name").asText());
+    assertEquals("高精度水位", wire.at("/fields/meta/0/rename").asText());
+    assertEquals("BigNumber", wire.at("/fields/meta/0/type").asText());
+    assertTrue(wire.at("/fields/meta/0/length").isIntegralNumber());
+    assertEquals(-1, wire.at("/fields/meta/0/precision").intValue());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("select-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native BigNumber conversion must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(emittedMeta.get());
+    assertEquals(2, emittedMeta.get().size());
+    assertEquals("高精度水位", emittedMeta.get().getValueMeta(0).getName());
+    assertEquals(IValueMeta.TYPE_BIGNUMBER, emittedMeta.get().getValueMeta(0).getType());
+    assertEquals("测站", emittedMeta.get().getValueMeta(1).getName());
+    assertEquals(2, emitted.size());
+    assertInstanceOf(java.math.BigDecimal.class, emitted.get(0)[0]);
+    assertEquals(0, new java.math.BigDecimal(positive)
+        .compareTo((java.math.BigDecimal) emitted.get(0)[0]));
+    assertEquals("黄河", emitted.get(0)[1]);
+    assertInstanceOf(java.math.BigDecimal.class, emitted.get(1)[0]);
+    assertEquals(0, new java.math.BigDecimal(negative)
+        .compareTo((java.math.BigDecimal) emitted.get(1)[0]));
+    assertEquals("长江", emitted.get(1)[1]);
+    System.out.println("PROD_P0_SELECTVALUES_EXACT_BIGNUMBER_JSON_HPL_ROWS=PASS");
+  }
+
 }
