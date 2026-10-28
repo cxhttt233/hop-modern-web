@@ -276,7 +276,21 @@ public final class AutomaticConfigDescriptor {
                       + "result.code. HttpData.lastHttpResponseBodyBytes counts decompressed "
                       + "entity bytes, not the compressed wire Content-Length. Preserve the "
                       + "editable URL, encoding and result field names through JSON/HPL; "
-                      + "this is a runtime diagnostic, not a save-time validator."));
+                      + "this is a runtime diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "HTTP_BASIC_LOGIN_PREEMPTIVELY_SENDS_CREDENTIALS_TO_ORIGIN",
+                  List.of("/httpLogin", "/httpPassword", "/url"),
+                  "When httpLogin resolves to a nonblank value, pinned Http.init() "
+                      + "resolves the login and sensitive httpPassword once, and "
+                      + "Http.callHttpService() installs an origin-keyed BasicAuthCache "
+                      + "using BasicScheme.initPreemptive(). The very first GET therefore "
+                      + "sends an Authorization: Basic header without waiting for a 401 "
+                      + "challenge. A blank login does not initialize that auth cache; "
+                      + "a server-side 401 remains a fatal Http transform error. "
+                      + "Preserve httpLogin and sensitive httpPassword across config "
+                      + "JSON editing and real HPL disk reopen without logging secrets. "
+                      + "This is a native request-security compatibility diagnostic, "
+                      + "not a draft-save validator."));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           List.of(
               new RuntimePrecondition(
