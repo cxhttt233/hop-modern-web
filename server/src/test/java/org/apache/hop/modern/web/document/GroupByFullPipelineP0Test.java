@@ -579,4 +579,135 @@ class GroupByFullPipelineP0Test {
     System.out.println("PROD_P0_GROUPBY_FIRST_LAST_NULL_INCLUSION_JSON_HPL_ROWS=PASS");
   }
 
+
+  /** Native COUNT_DISTINCT, COUNT_ALL and COUNT_ANY differ on duplicates and null subjects. */
+  @Test
+  void groupByDistinctAndNullCountsSurviveConfigAndRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin groupPlugin = plugins.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(gridPlugin);
+    assertNotNull(groupPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader gridLoader = grid.getClass().getClassLoader();
+    Class<?> fieldType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String[] definition : new String[][] {
+        {"流域<&>", "String"}, {"样本", "Integer"}}) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, definition[0]);
+      fieldType.getMethod("setType", String.class).invoke(column, definition[1]);
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("黄河<&>", "7"), List.of("黄河<&>", "7"),
+        List.of("黄河<&>", "9"), List.of("黄河<&>", ""),
+        List.of("长江", ""), List.of("长江", ""))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta group = plugins.loadClass(groupPlugin, ITransformMeta.class);
+    group.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("GroupBy", "group-node", group);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("groupby-distinct-null-counts");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("groupby-distinct-null-counts.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("group-count-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("group-count-doc",
+        new PipelineConfigResource.ReadRequest("group-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("all_rows", false);
+    draft.put("give_back_row", false);
+    draft.putObject("group").putArray("field")
+        .addObject().put("name", "流域<&>");
+    var aggregates = draft.putObject("fields").putArray("field");
+    for (String[] definition : new String[][] {
+        {"去重数", "COUNT_DISTINCT"}, {"非空数", "COUNT_ALL"},
+        {"总行数", "COUNT_ANY"}}) {
+      aggregates.addObject().put("aggregate", definition[0])
+          .put("subject", "COUNT_ANY".equals(definition[1]) ? "" : "样本")
+          .put("type", definition[1]);
+    }
+    var write = resource.write("group-count-doc",
+        new PipelineConfigResource.WriteRequest("group-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("group-node").getTransform(), provider);
+    assertEquals("流域<&>", wire.at("/group/field/0/name").asText());
+    assertEquals(3, wire.at("/fields/field").size());
+    assertEquals("COUNT_DISTINCT", wire.at("/fields/field/0/type").asText());
+    assertEquals("COUNT_ALL", wire.at("/fields/field/1/type").asText());
+    assertEquals("COUNT_ANY", wire.at("/fields/field/2/type").asText());
+    assertEquals("样本", wire.at("/fields/field/0/subject").asText());
+    assertEquals("", wire.at("/fields/field/2/subject").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("group-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native GroupBy counts must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(4, outputMeta.get().size());
+    assertEquals("流域<&>", outputMeta.get().getValueMeta(0).getName());
+    for (int i = 1; i < 4; i++) {
+      assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(i).getType());
+    }
+    assertEquals(2, emitted.size(), "six rows must form two contiguous groups");
+    assertEquals("黄河<&>", emitted.get(0)[0]);
+    assertEquals(2L, ((Number) emitted.get(0)[1]).longValue());
+    assertEquals(3L, ((Number) emitted.get(0)[2]).longValue());
+    assertEquals(4L, ((Number) emitted.get(0)[3]).longValue());
+    assertEquals("长江", emitted.get(1)[0]);
+    assertNull(emitted.get(1)[1], "COUNT_DISTINCT stays null when all subjects are null");
+    assertEquals(0L, ((Number) emitted.get(1)[2]).longValue());
+    assertEquals(2L, ((Number) emitted.get(1)[3]).longValue());
+    System.out.println("PROD_P0_GROUPBY_DISTINCT_ALL_ANY_NULL_JSON_HPL_ROWS=PASS");
+  }
 }
