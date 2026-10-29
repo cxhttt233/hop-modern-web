@@ -149,6 +149,13 @@ public final class AutomaticConfigDescriptor {
            "org.apache.hop.pipeline.transforms.rest.fields.ParameterField",
            "org.apache.hop.pipeline.transforms.rest.fields.MatrixParameterField" ->
           key.equals("field");
+      // StringCut and ConcatFields both select existing input-row fields, even though
+      // their nested Hop annotations use the default (untyped) metadata property.
+      // Their output aliases, cut boundaries, and formatting values remain free text.
+      case "org.apache.hop.pipeline.transforms.stringcut.StringCutField" ->
+          key.equals("in_stream_name");
+      case "org.apache.hop.pipeline.transforms.concatfields.ConcatField" ->
+          key.equals("name");
       // ReplaceString reads the source and optional replacement-from-field from incoming rows.
       // The output alias and literal replacement text must remain free-text fields.
       case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta$RSField" ->
