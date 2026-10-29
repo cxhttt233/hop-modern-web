@@ -37,6 +37,49 @@ class TransformP0L2RoundTripTest {
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
   @Test
+  void checkSumAndSetVariableIncomingColumnsExposeNativeUpstreamPickers()
+      throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    for (String[] expected : List.of(
+        new String[] {"CheckSum", "org.apache.hop.pipeline.transforms.checksum.Field",
+            "name", "name"},
+        new String[] {"SetVariable", "org.apache.hop.pipeline.transforms.setvariable.VariableItem",
+            "fieldName", "field_name"})) {
+      IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, expected[0]);
+      assertNotNull(plugin, "missing native " + expected[0]);
+      ITransformMeta nativeMeta = plugins.loadClass(plugin, ITransformMeta.class);
+      Class<?> itemType = nativeMeta.getClass().getClassLoader().loadClass(expected[1]);
+      var annotation = metadataField(itemType, expected[2])
+          .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+      assertNotNull(annotation);
+      assertEquals(expected[3], annotation.key());
+      assertNotEquals(org.apache.hop.metadata.api.HopMetadataPropertyType.STREAM_FIELD,
+          annotation.hopMetadataPropertyType(), expected[0]);
+
+      Descriptor descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+      Property list = property(descriptor, "field");
+      assertEquals(Shape.LIST, list.shape(), expected[0]);
+      assertEquals("fields", list.groupKey(), expected[0]);
+      Property source = property(descriptor, "field", expected[3]);
+      assertEquals(Shape.STRING, source.shape(), expected[0]);
+      assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, source.widgetHint(), expected[0]);
+      var json = mapper.valueToTree(source);
+      assertEquals("UPSTREAM_FIELD_PICKER", json.path("widgetHint").asText());
+      assertTrue(json.path("pickerContext").isNull());
+      assertTrue(json.path("metadataClassName").isNull());
+    }
+    Descriptor checksum = descriptorFor(plugins, "CheckSum");
+    assertEquals(WidgetHint.NONE, property(checksum, "resultfieldName").widgetHint());
+    Descriptor setVariable = descriptorFor(plugins, "SetVariable");
+    for (String outputOrLiteral : List.of("variable_name", "variable_type", "default_value")) {
+      assertEquals(WidgetHint.NONE,
+          property(setVariable, "field", outputOrLiteral).widgetHint(), outputOrLiteral);
+    }
+    System.out.println("PROD_P0_CHECKSUM_SETVARIABLE_NATIVE_SOURCE_PICKERS=PASS");
+  }
+
+  @Test
   void stringCutAndConcatFieldsNativeInputSelectionsExposeTypedNestedPickers()
       throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
