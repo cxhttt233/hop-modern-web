@@ -83,6 +83,47 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void nativeStreamFieldAnnotationsDriveNestedUpstreamPickersWithoutMislabelingDatabaseColumns()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    Descriptor insert = descriptorFor(registry, "InsertUpdate");
+    Property keySource = property(insert, "lookup", "key", "name");
+    Property keyDatabaseColumn = property(insert, "lookup", "key", "field");
+    Property betweenSecondSource = property(insert, "lookup", "key", "name2");
+    Property updateSource = property(insert, "lookup", "value", "rename");
+    Property updateDatabaseColumn = property(insert, "lookup", "value", "name");
+
+    // Hop annotates these two source names as STREAM_FIELD; database columns
+    // are RDBMS_COLUMN, and BETWEEN's second input has no semantic annotation.
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, keySource.widgetHint());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, updateSource.widgetHint());
+    assertEquals(WidgetHint.NONE, keyDatabaseColumn.widgetHint());
+    assertEquals(WidgetHint.NONE, updateDatabaseColumn.widgetHint());
+    assertEquals(WidgetHint.NONE, betweenSecondSource.widgetHint());
+
+    Descriptor output = descriptorFor(registry, "TableOutput");
+    Property streamColumn = property(output, "field", "stream_name");
+    Property databaseColumn = property(output, "field", "column_name");
+    Property partitionSource = property(output, "partitioning_field");
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, streamColumn.widgetHint());
+    assertEquals(WidgetHint.NONE, databaseColumn.widgetHint());
+    // TableOutput's partitioning field is an incoming DATE column even though
+    // the native annotation omits STREAM_FIELD.
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, partitionSource.widgetHint());
+    assertEquals(WidgetHint.NONE, property(output, "return_field").widgetHint());
+    assertEquals(WidgetHint.DATABASE_TABLE_PICKER, property(output, "table").widgetHint());
+
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    for (Property source : List.of(keySource, updateSource, streamColumn, partitionSource)) {
+      var json = mapper.valueToTree(source);
+      assertEquals("UPSTREAM_FIELD_PICKER", json.path("widgetHint").asText());
+      assertFalse(json.path("pickerContext").isObject());
+      assertTrue(json.path("metadataClassName").isNull());
+    }
+    System.out.println("PROD_P0_STREAM_FIELD_NATIVE_ANNOTATION_PICKERS=PASS");
+  }
+
+  @Test
   void insertUpdateNestedDatabasePickerContextSurvivesRealHplDiskReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
