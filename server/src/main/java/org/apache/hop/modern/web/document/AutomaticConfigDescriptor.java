@@ -115,6 +115,12 @@ public final class AutomaticConfigDescriptor {
       }
       case FILE_PATH, FILE_REFERENCE -> WidgetHint.VFS_PICKER;
       default -> {
+        // These pinned Hop plugins consume incoming row columns but omit STREAM_FIELD
+        // annotations. Match both the declaring class and the wire key so that
+        // response/output names and HTTP parameter names are not misclassified.
+        if (nativeUnannotatedIncomingField(owner, key)) {
+          yield WidgetHint.UPSTREAM_FIELD_PICKER;
+        }
         // Native TableOutput uses partitioning_field to resolve an incoming DATE row column.
         // The Hop annotation lacks STREAM_FIELD, so handle this one known plugin field.
         if (owner.getName().equals("org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")
@@ -131,6 +137,23 @@ public final class AutomaticConfigDescriptor {
                 "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta")
             && key.equals("sql_from_file") ? WidgetHint.VFS_PICKER : WidgetHint.NONE;
       }
+    };
+  }
+
+  /** Native incoming-row references missing a STREAM_FIELD annotation in pinned Hop Core. */
+  private static boolean nativeUnannotatedIncomingField(Class<?> owner, String key) {
+    return switch (owner.getName()) {
+      case "org.apache.hop.pipeline.transforms.rest.RestMeta" ->
+          Set.of("urlField", "bodyField", "methodFieldName").contains(key);
+      case "org.apache.hop.pipeline.transforms.rest.fields.HeaderField",
+           "org.apache.hop.pipeline.transforms.rest.fields.ParameterField",
+           "org.apache.hop.pipeline.transforms.rest.fields.MatrixParameterField" ->
+          key.equals("field");
+      case "org.apache.hop.pipeline.transforms.http.HttpMeta" -> key.equals("urlField");
+      case "org.apache.hop.pipeline.transforms.http.HttpMeta$QueryParameter",
+           "org.apache.hop.pipeline.transforms.http.HttpMeta$HeaderParameter" ->
+          key.equals("name");
+      default -> false;
     };
   }
 
