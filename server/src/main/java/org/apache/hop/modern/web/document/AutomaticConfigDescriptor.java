@@ -149,6 +149,10 @@ public final class AutomaticConfigDescriptor {
            "org.apache.hop.pipeline.transforms.rest.fields.ParameterField",
            "org.apache.hop.pipeline.transforms.rest.fields.MatrixParameterField" ->
           key.equals("field");
+      // InsertUpdate uses name2 as the second incoming row field for BETWEEN,
+      // but pinned Hop Core omits STREAM_FIELD on InsertUpdateKeyField.keyStream2.
+      case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField" ->
+          key.equals("name2");
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" -> key.equals("urlField");
       case "org.apache.hop.pipeline.transforms.http.HttpMeta$QueryParameter",
            "org.apache.hop.pipeline.transforms.http.HttpMeta$HeaderParameter" ->
