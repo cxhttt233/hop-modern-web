@@ -134,6 +134,12 @@ public final class AutomaticConfigDescriptor {
             && key.equals("partitioning_field")) {
           yield WidgetHint.UPSTREAM_FIELD_PICKER;
         }
+        // SortRowsMeta.check() resolves directory and validates it with java.io.File.
+        // Sort spill files require a real local directory, not a HopVfs remote location.
+        if (owner.getName().equals("org.apache.hop.pipeline.transforms.sort.SortRowsMeta")
+            && key.equals("directory")) {
+          yield WidgetHint.LOCAL_DIRECTORY_PICKER;
+        }
         // Rest.java loads this trust store with FileInputStream, not HopVfs.
         // A VFS picker could offer remote URLs that native Rest cannot open.
         if (owner.getName().equals("org.apache.hop.pipeline.transforms.rest.RestMeta")
@@ -1178,7 +1184,7 @@ public final class AutomaticConfigDescriptor {
   public enum Shape { STRING, NUMBER, BOOLEAN, ENUM, OBJECT, LIST }
   public enum TextEditorHint { NONE, SQL, SCRIPT, TEMPLATE }
   public enum WidgetHint {
-    NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER,
+    NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER, LOCAL_DIRECTORY_PICKER,
     DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, UPSTREAM_FIELD_PICKER
   }
   public enum Presentation { FIELD, TABLE }
