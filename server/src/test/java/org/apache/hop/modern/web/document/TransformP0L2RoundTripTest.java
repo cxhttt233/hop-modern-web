@@ -360,7 +360,8 @@ class TransformP0L2RoundTripTest {
 
     var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
     changed.put("IsInFields", false);
-    var entries = changed.putObject("files").putArray("file");
+    var entries = ((com.fasterxml.jackson.databind.node.ObjectNode) changed.path("file"))
+        .putObject("files").putArray("file");
     entries.addObject()
         .put("name", first.toAbsolutePath().toString())
         .put("filemask", "")
@@ -386,16 +387,16 @@ class TransformP0L2RoundTripTest {
         diskMeta, provider);
     assertTrue(disk.path("IsInFields").isBoolean());
     assertFalse(disk.path("IsInFields").booleanValue());
-    assertTrue(disk.at("/files/file").isArray());
-    assertEquals(2, disk.at("/files/file").size());
-    assertEquals(first.toAbsolutePath().toString(), disk.at("/files/file/0/name").asText());
-    assertEquals(second.toAbsolutePath().toString(), disk.at("/files/file/1/name").asText());
-    assertTrue(disk.at("/files/file/0/file_required").isBoolean());
-    assertTrue(disk.at("/files/file/0/file_required").booleanValue());
-    assertTrue(disk.at("/files/file/1/file_required").isBoolean());
-    assertFalse(disk.at("/files/file/1/file_required").booleanValue());
-    assertTrue(disk.at("/files/file/0/include_subfolders").isBoolean());
-    assertFalse(disk.at("/files/file/0/include_subfolders").booleanValue());
+    assertTrue(disk.at("/file/files/file").isArray());
+    assertEquals(2, disk.at("/file/files/file").size());
+    assertEquals(first.toAbsolutePath().toString(), disk.at("/file/files/file/0/name").asText());
+    assertEquals(second.toAbsolutePath().toString(), disk.at("/file/files/file/1/name").asText());
+    assertTrue(disk.at("/file/files/file/0/file_required").isBoolean());
+    assertTrue(disk.at("/file/files/file/0/file_required").booleanValue());
+    assertTrue(disk.at("/file/files/file/1/file_required").isBoolean());
+    assertFalse(disk.at("/file/files/file/1/file_required").booleanValue());
+    assertTrue(disk.at("/file/files/file/0/include_subfolders").isBoolean());
+    assertFalse(disk.at("/file/files/file/0/include_subfolders").booleanValue());
     assertEquals("$.level", disk.at("/fields/field/0/path").asText());
 
     // Validate that native Hop can actually resolve and read both edited paths
