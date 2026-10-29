@@ -100,6 +100,50 @@ class AutomaticConfigDescriptorTest {
   }
 
   @Test
+  void publishesCanonicalIndexedWireListsForNativeJsonInputAndSelectValues() {
+    Descriptor jsonInput = AutomaticConfigDescriptor.describe(
+        org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta.class);
+    assertEquals(2, jsonInput.wireLists().size());
+    var sourceFiles = jsonInput.wireLists().get(0);
+    assertEquals("file.file", sourceFiles.descriptorPath());
+    assertEquals("/file/files/file", sourceFiles.listPointer());
+    assertEquals("/file/files/file/0", sourceFiles.itemPointer(0));
+    assertEquals("/file/files/file/1", sourceFiles.itemPointer(1));
+    assertEquals("/fields/field", jsonInput.wireLists().get(1).listPointer());
+    assertEquals("/fields/field/0", jsonInput.wireLists().get(1).itemPointer(0));
+    org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+        () -> sourceFiles.itemPointer(-1));
+
+    Property fileList = property(property(jsonInput.properties(), "file").children(), "file");
+    assertEquals(Shape.LIST, fileList.shape());
+    assertEquals("files", fileList.groupKey());
+    assertEquals("org.apache.hop.core.fileinput.InputFile", fileList.elementJavaType());
+    assertEquals(Shape.STRING, property(fileList.elementProperties(), "name").shape());
+    assertEquals(Shape.BOOLEAN,
+        property(fileList.elementProperties(), "file_required").shape());
+    assertEquals(WidgetHint.VFS_PICKER,
+        property(fileList.elementProperties(), "name").widgetHint());
+
+    Descriptor selectValues = AutomaticConfigDescriptor.describe(SelectValuesMeta.class);
+    assertEquals(List.of("fields.field", "fields.remove", "fields.meta"),
+        selectValues.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/fields/field", "/fields/remove", "/fields/meta"),
+        selectValues.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertEquals("/fields/meta/2", selectValues.wireLists().get(2).itemPointer(2));
+    assertEquals(Shape.LIST,
+        property(property(selectValues.properties(), "fields").children(), "meta").shape());
+
+    var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(jsonInput);
+    assertEquals("/file/files/file", json.at("/wireLists/0/listPointer").asText());
+    assertEquals("/file/files/file/{index}",
+        json.at("/wireLists/0/itemPointerTemplate").asText());
+    assertTrue(AutomaticConfigDescriptor.describe(SortRowsMeta.class).wireLists().isEmpty(),
+        "Do not advertise unverified canonical wire paths for unrelated plugins");
+  }
+
+  @Test
   void discoversTableInputTextBooleansAndTableShape() {
     Descriptor descriptor = AutomaticConfigDescriptor.describe(TableInputMeta.class);
 
