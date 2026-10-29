@@ -61,6 +61,11 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" -> List.of(
           new WireListContract("file.file", "/file/files/file", "/file/files/file/{index}"),
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"));
+      case "org.apache.hop.pipeline.transforms.rest.RestMeta" -> List.of(
+          new WireListContract("header", "/headers/header", "/headers/header/{index}"),
+          new WireListContract("parameter", "/parameters/parameter", "/parameters/parameter/{index}"),
+          new WireListContract("matrixParameter", "/matrixParameters/matrixParameter",
+              "/matrixParameters/matrixParameter/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
           new WireListContract("fields.remove", "/fields/remove", "/fields/remove/{index}"),
