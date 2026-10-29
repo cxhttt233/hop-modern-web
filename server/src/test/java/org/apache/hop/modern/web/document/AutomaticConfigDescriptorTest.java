@@ -93,6 +93,10 @@ class AutomaticConfigDescriptorTest {
     assertEquals(WidgetHint.NONE, property(fixture.properties(), "connection").widgetHint());
     assertEquals(WidgetHint.NONE, property(fixture.properties(), "numericConnection").widgetHint());
     assertNull(property(fixture.properties(), "numericConnection").metadataClassName());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(fixture.properties(), "incomingField").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(fixture.properties(), "targetColumn").widgetHint());
   }
 
   @Test
@@ -122,6 +126,10 @@ class AutomaticConfigDescriptorTest {
     @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.FILE_REFERENCE)
     private String reference;
     @HopMetadataProperty private String connection;
+    @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.STREAM_FIELD)
+    private String incomingField;
+    @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_COLUMN)
+    private String targetColumn;
     @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_CONNECTION)
     private int numericConnection;
   }
