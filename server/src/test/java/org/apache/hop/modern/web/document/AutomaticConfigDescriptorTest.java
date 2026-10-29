@@ -2,6 +2,7 @@ package org.apache.hop.modern.web.document;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -10,9 +11,11 @@ import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Property;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Presentation;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Shape;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.TextEditorHint;
+import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.WidgetHint;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IEnumHasCodeAndDescription;
+import org.apache.hop.pipeline.transforms.rest.RestMeta;
 import org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta;
 import org.apache.hop.pipeline.transforms.sort.SortRowsMeta;
 import org.apache.hop.pipeline.transforms.tableinput.TableInputMeta;
@@ -61,6 +64,45 @@ class AutomaticConfigDescriptorTest {
     assertEquals("fields", fields.groupKey());
     assertEquals(Presentation.TABLE, fields.layout().presentation());
     assertFalse(fields.elementProperties().isEmpty());
+  }
+
+  @Test
+  void exposesProviderAwareMetadataAndVfsEditorHintsWithoutGuessingUnannotatedFields() {
+    Descriptor table = AutomaticConfigDescriptor.describe(TableInputMeta.class);
+    Property connection = property(table.properties(), "connection");
+    assertEquals(Shape.STRING, connection.shape());
+    assertEquals(WidgetHint.METADATA_PICKER, connection.widgetHint());
+    assertEquals("org.apache.hop.core.database.DatabaseMeta", connection.metadataClassName());
+
+    Property sqlFile = property(table.properties(), "sql_from_file");
+    assertEquals(WidgetHint.VFS_PICKER, sqlFile.widgetHint());
+    assertNull(sqlFile.metadataClassName());
+    assertEquals(WidgetHint.NONE, property(table.properties(), "sql").widgetHint());
+    assertEquals(TextEditorHint.SQL, property(table.properties(), "sql").textEditorHint());
+
+    Descriptor rest = AutomaticConfigDescriptor.describe(RestMeta.class);
+    Property restConnection = property(rest.properties(), "connection_name");
+    assertEquals(WidgetHint.METADATA_PICKER, restConnection.widgetHint());
+    assertEquals("org.apache.hop.metadata.rest.RestConnection", restConnection.metadataClassName());
+    assertEquals(WidgetHint.NONE, property(rest.properties(), "url").widgetHint());
+    assertEquals(WidgetHint.NONE, property(rest.properties(), "httpPassword").widgetHint());
+
+    Descriptor fixture = AutomaticConfigDescriptor.describe(WidgetHintFixture.class);
+    assertEquals(WidgetHint.VFS_PICKER, property(fixture.properties(), "path").widgetHint());
+    assertEquals(WidgetHint.VFS_PICKER, property(fixture.properties(), "reference").widgetHint());
+    assertEquals(WidgetHint.NONE, property(fixture.properties(), "connection").widgetHint());
+    assertEquals(WidgetHint.NONE, property(fixture.properties(), "numericConnection").widgetHint());
+    assertNull(property(fixture.properties(), "numericConnection").metadataClassName());
+  }
+
+  private static final class WidgetHintFixture {
+    @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.FILE_PATH)
+    private String path;
+    @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.FILE_REFERENCE)
+    private String reference;
+    @HopMetadataProperty private String connection;
+    @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_CONNECTION)
+    private int numericConnection;
   }
 
   @Test
