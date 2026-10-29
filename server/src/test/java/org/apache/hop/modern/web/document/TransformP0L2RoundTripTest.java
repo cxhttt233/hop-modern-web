@@ -1003,6 +1003,41 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void sortRowsNativeKeyNameExposesIncomingFieldPickerWithoutMisclassifyingSortOptions()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "SortRows");
+    assertNotNull(plugin, "missing native SortRows plugin");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    Class<?> fieldType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.sort.SortRowsField");
+    var nativeAnnotation = metadataField(fieldType, "fieldName")
+        .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+    assertNotNull(nativeAnnotation);
+    assertEquals("name", nativeAnnotation.key());
+    assertNotEquals(org.apache.hop.metadata.api.HopMetadataPropertyType.STREAM_FIELD,
+        nativeAnnotation.hopMetadataPropertyType(),
+        "Pinned Hop Core omits STREAM_FIELD on SortRowsField.fieldName");
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    Property sortKeys = property(descriptor, "field");
+    assertEquals(Shape.LIST, sortKeys.shape());
+    assertEquals("fields", sortKeys.groupKey());
+    Property incoming = property(descriptor, "field", "name");
+    assertEquals(Shape.STRING, incoming.shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, incoming.widgetHint());
+    for (String option : List.of("ascending", "case_sensitive", "collator_enabled",
+        "collator_strength", "presorted")) {
+      assertEquals(WidgetHint.NONE, property(descriptor, "field", option).widgetHint(),
+          "Sort option must not become an upstream field selector: " + option);
+    }
+    assertEquals("UPSTREAM_FIELD_PICKER",
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .valueToTree(incoming).path("widgetHint").asText());
+    System.out.println("PROD_P0_SORTROWS_NATIVE_SORT_KEY_PICKER=PASS");
+  }
+
+  @Test
   void sortRowsNativeCheckRequiresKnownKeysAndExistingTemporaryDirectory() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     Descriptor descriptor = descriptorFor(registry, "SortRows");
