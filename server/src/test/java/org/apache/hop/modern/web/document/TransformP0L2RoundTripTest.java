@@ -124,6 +124,64 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void restAndHttpNativeIncomingRowReferencesGetPickersWithoutChangingOutputNames()
+      throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor rest = descriptorFor(plugins, "Rest");
+    List<Property> restInputs = List.of(
+        property(rest, "urlField"), property(rest, "bodyField"),
+        property(rest, "methodFieldName"), property(rest, "header", "field"),
+        property(rest, "parameter", "field"),
+        property(rest, "matrixParameter", "field"));
+    for (Property input : restInputs) {
+      assertEquals(Shape.STRING, input.shape(), input.key());
+      assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, input.widgetHint(), input.key());
+      assertNull(input.pickerContext(), input.key());
+    }
+    for (Property literalOrOutput : List.of(
+        property(rest, "url"), property(rest, "method"),
+        property(rest, "header", "name"), property(rest, "parameter", "name"),
+        property(rest, "matrixParameter", "name"),
+        property(rest, "result", "name"))) {
+      assertEquals(WidgetHint.NONE, literalOrOutput.widgetHint(),
+          "REST request literal/output name must not be an upstream field: "
+              + literalOrOutput.key());
+    }
+    assertEquals(WidgetHint.METADATA_PICKER,
+        property(rest, "connection_name").widgetHint());
+    assertEquals(WidgetHint.LOCAL_FILE_PICKER,
+        property(rest, "trustStoreFile").widgetHint());
+
+    Descriptor http = descriptorFor(plugins, "Http");
+    List<Property> httpInputs = List.of(
+        property(http, "urlField"), property(http, "lookup", "arg", "name"),
+        property(http, "lookup", "header", "name"));
+    for (Property input : httpInputs) {
+      assertEquals(Shape.STRING, input.shape(), input.key());
+      assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, input.widgetHint(), input.key());
+      assertNull(input.pickerContext(), input.key());
+    }
+    for (Property literalOrOutput : List.of(
+        property(http, "url"), property(http, "lookup", "arg", "parameter"),
+        property(http, "lookup", "header", "parameter"),
+        property(http, "result", "name"), property(http, "result", "code"))) {
+      assertEquals(WidgetHint.NONE, literalOrOutput.widgetHint(),
+          "HTTP request literal/output name must not be an upstream field: "
+              + literalOrOutput.key());
+    }
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    for (Property input : restInputs) {
+      assertEquals("UPSTREAM_FIELD_PICKER",
+          mapper.valueToTree(input).path("widgetHint").asText());
+    }
+    for (Property input : httpInputs) {
+      assertEquals("UPSTREAM_FIELD_PICKER",
+          mapper.valueToTree(input).path("widgetHint").asText());
+    }
+    System.out.println("PROD_P0_REST_HTTP_NATIVE_INPUT_FIELD_PICKERS=PASS");
+  }
+
+  @Test
   void insertUpdateNestedDatabasePickerContextSurvivesRealHplDiskReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
