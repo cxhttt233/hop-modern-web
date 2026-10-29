@@ -37,6 +37,63 @@ class TransformP0L2RoundTripTest {
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
   @Test
+  void stringCutAndConcatFieldsNativeInputSelectionsExposeTypedNestedPickers()
+      throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor cut = descriptorFor(plugins, "StringCut");
+    Property cutList = property(cut, "field");
+    assertEquals(Shape.LIST, cutList.shape());
+    assertEquals("fields", cutList.groupKey());
+    Property cutInput = property(cut, "field", "in_stream_name");
+    assertEquals(Shape.STRING, cutInput.shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, cutInput.widgetHint());
+    for (String outputOrLiteral : List.of("out_stream_name", "cut_from", "cut_to")) {
+      assertEquals(WidgetHint.NONE,
+          property(cut, "field", outputOrLiteral).widgetHint(), outputOrLiteral);
+    }
+
+    Descriptor concat = descriptorFor(plugins, "ConcatFields");
+    Property concatList = property(concat, "field");
+    assertEquals(Shape.LIST, concatList.shape());
+    assertEquals("fields", concatList.groupKey());
+    Property concatInput = property(concat, "field", "name");
+    assertEquals(Shape.STRING, concatInput.shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, concatInput.widgetHint());
+    for (String formatting : List.of("type", "format", "nullif", "trim_type")) {
+      assertEquals(WidgetHint.NONE,
+          property(concat, "field", formatting).widgetHint(), formatting);
+    }
+    assertEquals(WidgetHint.NONE, property(concat, "separator").widgetHint());
+
+    // Verify that the native plugins really omit STREAM_FIELD: the T3 override
+    // is an explicit compatibility rule, not a guess about similarly named keys.
+    for (String[] nativeField : List.of(
+        new String[] {"StringCut", "org.apache.hop.pipeline.transforms.stringcut.StringCutField",
+            "fieldInStream"},
+        new String[] {"ConcatFields", "org.apache.hop.pipeline.transforms.concatfields.ConcatField",
+            "name"})) {
+      IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, nativeField[0]);
+      assertNotNull(plugin);
+      ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+      Class<?> itemType = meta.getClass().getClassLoader().loadClass(nativeField[1]);
+      var annotation = metadataField(itemType, nativeField[2])
+          .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+      assertNotNull(annotation);
+      assertNotEquals(org.apache.hop.metadata.api.HopMetadataPropertyType.STREAM_FIELD,
+          annotation.hopMetadataPropertyType());
+    }
+
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    for (Property source : List.of(cutInput, concatInput)) {
+      var json = mapper.valueToTree(source);
+      assertEquals("UPSTREAM_FIELD_PICKER", json.path("widgetHint").asText());
+      assertTrue(json.path("pickerContext").isNull());
+      assertTrue(json.path("metadataClassName").isNull());
+    }
+    System.out.println("PROD_P0_TEXT_TRANSFORM_NATIVE_INPUT_FIELD_PICKERS=PASS");
+  }
+
+  @Test
   void jsonInputSourceFieldPickerMatchesNativeInputModeWithoutMislabelingOutputFields()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
