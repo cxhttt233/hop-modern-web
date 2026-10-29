@@ -42,7 +42,8 @@ public final class AutomaticConfigDescriptor {
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
             textEditorHint(key, shape, metadata),
-            new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD)));
+            new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
+            widgetHint(type, key, shape, metadata), metadataClassName(shape, metadata)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), runtimePreconditions(type));
@@ -82,6 +83,29 @@ public final class AutomaticConfigDescriptor {
     } catch (ReflectiveOperationException ignored) {
       return value.name();
     }
+  }
+
+  /** Browser editor hints are derived from Hop annotations, not from field-name guesses. */
+  private static WidgetHint widgetHint(
+      Class<?> owner, String key, Shape shape, HopMetadataProperty metadata) {
+    if (shape != Shape.STRING) return WidgetHint.NONE;
+    return switch (metadata.hopMetadataPropertyType()) {
+      case RDBMS_CONNECTION, REST_CONNECTION -> WidgetHint.METADATA_PICKER;
+      case FILE_PATH, FILE_REFERENCE -> WidgetHint.VFS_PICKER;
+      default -> owner.getName().equals(
+              "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta")
+          && key.equals("sql_from_file") ? WidgetHint.VFS_PICKER : WidgetHint.NONE;
+    };
+  }
+
+  /** Fully qualified provider metadata class; null for non-reference fields. */
+  private static String metadataClassName(Shape shape, HopMetadataProperty metadata) {
+    if (shape != Shape.STRING) return null;
+    return switch (metadata.hopMetadataPropertyType()) {
+      case RDBMS_CONNECTION -> "org.apache.hop.core.database.DatabaseMeta";
+      case REST_CONNECTION -> "org.apache.hop.metadata.rest.RestConnection";
+      default -> null;
+    };
   }
 
   private static TextEditorHint textEditorHint(
@@ -1008,6 +1032,7 @@ public final class AutomaticConfigDescriptor {
 
   public enum Shape { STRING, NUMBER, BOOLEAN, ENUM, OBJECT, LIST }
   public enum TextEditorHint { NONE, SQL, SCRIPT, TEMPLATE }
+  public enum WidgetHint { NONE, METADATA_PICKER, VFS_PICKER }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
       String className, List<Property> properties, List<RuntimePrecondition> runtimePreconditions) {}
@@ -1018,5 +1043,5 @@ public final class AutomaticConfigDescriptor {
       boolean sensitive, boolean storeWithName, boolean storeWithCode, boolean defaultBoolean,
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
       List<Property> elementProperties, List<Option> options, TextEditorHint textEditorHint,
-      LayoutHint layout) {}
+      LayoutHint layout, WidgetHint widgetHint, String metadataClassName) {}
 }
