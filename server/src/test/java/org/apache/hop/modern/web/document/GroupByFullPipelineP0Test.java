@@ -960,4 +960,53 @@ class GroupByFullPipelineP0Test {
     System.out.println("PROD_P0_GROUPBY_NONCONTIGUOUS_KEYS_JSON_HPL_ROWS=PASS");
   }
 
+
+  @Test
+  void groupByNativeDescriptorDistinguishesIncomingFieldsFromOutputAliases() throws Exception {
+    IPlugin plugin = PluginRegistry.getInstance()
+        .findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(plugin, "pinned native GroupBy plugin required");
+    ITransformMeta nativeMeta = PluginRegistry.getInstance()
+        .loadClass(plugin, ITransformMeta.class);
+    var descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+
+    var ignored = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field_ignore")).findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.Shape.STRING, ignored.shape());
+    assertEquals(AutomaticConfigDescriptor.WidgetHint.UPSTREAM_FIELD_PICKER,
+        ignored.widgetHint());
+
+    var grouping = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("group"))
+        .findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.Shape.LIST, grouping.shape());
+    var groupName = grouping.elementProperties().stream()
+        .filter(p -> p.key().equals("name")).findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.WidgetHint.UPSTREAM_FIELD_PICKER,
+        groupName.widgetHint());
+
+    var aggregations = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("fields"))
+        .findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.Shape.LIST, aggregations.shape());
+    var subject = aggregations.elementProperties().stream()
+        .filter(p -> p.key().equals("subject")).findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.WidgetHint.UPSTREAM_FIELD_PICKER,
+        subject.widgetHint());
+    for (String outputOrParameter : List.of("aggregate", "valuefield")) {
+      var field = aggregations.elementProperties().stream()
+          .filter(p -> p.key().equals(outputOrParameter)).findFirst().orElseThrow();
+      assertEquals(AutomaticConfigDescriptor.WidgetHint.NONE, field.widgetHint(),
+          outputOrParameter + " must not be offered as an incoming row field");
+    }
+    var lineNumberName = descriptor.properties().stream()
+        .filter(p -> p.key().equals("linenr_fieldname")).findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.WidgetHint.NONE, lineNumberName.widgetHint());
+
+    var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(subject);
+    assertEquals("UPSTREAM_FIELD_PICKER", json.path("widgetHint").asText());
+    assertEquals("subject", json.path("key").asText());
+    System.out.println("PROD_P0_GROUPBY_NATIVE_INPUT_FIELD_PICKERS=PASS");
+  }
+
 }
