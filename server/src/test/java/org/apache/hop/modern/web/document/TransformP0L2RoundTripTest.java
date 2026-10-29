@@ -21,6 +21,72 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 class TransformP0L2RoundTripTest {
   static final List<String> IDS=List.of("CheckSum","ConcatFields","DataGrid","ExecSql","FilterRows","GroupBy","Http","InsertUpdate","JsonInput","MergeJoin","ReplaceString","Rest","ScriptValueMod","SelectValues","SetVariable","StreamLookup","StringCut","TableInput","TableOutput","UniqueRowsByHashSet");
   @BeforeAll static void init() throws Exception { HopClientEnvironment.init(); ModernWebServer.initializePipelinePlugins(); }
+
+  @Test
+  void execSqlNativeArgumentsAndVfsFileExposeDistinctProducerPickerSemantics()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ExecSql");
+    assertNotNull(plugin, "production ExecSql plugin missing");
+    ITransformMeta nativeMeta = registry.loadClass(plugin, ITransformMeta.class);
+    nativeMeta.setDefault();
+
+    // Native ExecSql.processRow() resolves every argument name against input-row
+    // metadata when execute_each_row is enabled, even without JDBC binding.
+    Class<?> itemType = nativeMeta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.sql.ExecSqlArgumentItem");
+    var annotation = metadataField(itemType, "name")
+        .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+    assertNotNull(annotation);
+    assertTrue(annotation.key().isBlank());
+    assertNotEquals(org.apache.hop.metadata.api.HopMetadataPropertyType.STREAM_FIELD,
+        annotation.hopMetadataPropertyType());
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+    Property arguments = property(descriptor, "argument");
+    assertEquals(Shape.LIST, arguments.shape());
+    assertEquals("arguments", arguments.groupKey());
+    assertEquals(itemType.getName(), arguments.elementJavaType());
+    Property inputName = property(descriptor, "argument", "name");
+    assertEquals(Shape.STRING, inputName.shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, inputName.widgetHint());
+
+    // ExecSqlMeta.getEffectiveSql() reads sql_from_file through HopVfs.
+    // It is not an upstream field, nor is the inline SQL an incoming field.
+    assertEquals(WidgetHint.VFS_PICKER,
+        property(descriptor, "sql_from_file").widgetHint());
+    assertEquals(WidgetHint.NONE, property(descriptor, "sql").widgetHint());
+    assertEquals(TextEditorHint.SQL, property(descriptor, "sql").textEditorHint());
+    assertEquals(WidgetHint.METADATA_PICKER,
+        property(descriptor, "connection").widgetHint());
+    for (String outputName : List.of(
+        "update_field", "insert_field", "delete_field", "read_field")) {
+      assertEquals(WidgetHint.NONE, property(descriptor, outputName).widgetHint(),
+          "ExecSql result counters are output names, not incoming fields");
+    }
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    assertEquals("UPSTREAM_FIELD_PICKER",
+        mapper.valueToTree(inputName).path("widgetHint").asText());
+    assertEquals("VFS_PICKER",
+        mapper.valueToTree(property(descriptor, "sql_from_file"))
+            .path("widgetHint").asText());
+
+    java.nio.file.Path sqlFile = java.nio.file.Files.createTempFile(
+        "hop-modern-web-execsql-vfs-", ".sql");
+    try {
+      String sql = "select '水位<&>' as label\n";
+      java.nio.file.Files.writeString(sqlFile, sql, StandardCharsets.UTF_8);
+      nativeMeta.getClass().getMethod("setSqlFromFile", String.class)
+          .invoke(nativeMeta, sqlFile.toUri().toString());
+      Object loadedSql = nativeMeta.getClass()
+          .getMethod("getEffectiveSql", org.apache.hop.core.variables.IVariables.class)
+          .invoke(nativeMeta, new org.apache.hop.core.variables.Variables());
+      assertEquals(sql, loadedSql, "native HopVfs must load UTF-8 SQL file contents");
+    } finally {
+      java.nio.file.Files.deleteIfExists(sqlFile);
+    }
+    System.out.println("PROD_P0_EXECSQL_NATIVE_ARGUMENT_AND_VFS_PICKERS=PASS");
+  }
   @Test void roundTrips() throws Exception {
     PluginRegistry r=PluginRegistry.getInstance(); int pass=0;
     for(String id:IDS){
