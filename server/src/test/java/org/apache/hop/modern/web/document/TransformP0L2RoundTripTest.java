@@ -1572,6 +1572,54 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void streamLookupMainInputKeyHasPickerButInfoRowFieldsDoNot() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "StreamLookup");
+    assertNotNull(plugin, "production StreamLookup plugin missing");
+    ITransformMeta nativeMeta = registry.loadClass(plugin, ITransformMeta.class);
+    nativeMeta.setDefault();
+
+    ClassLoader loader = nativeMeta.getClass().getClassLoader();
+    Class<?> matchKey = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$MatchKey");
+    var mainAnnotation = metadataField(matchKey, "keyStream")
+        .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+    var infoAnnotation = metadataField(matchKey, "keyLookup")
+        .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+    assertNotNull(mainAnnotation);
+    assertNotNull(infoAnnotation);
+    assertEquals("name", mainAnnotation.key());
+    assertEquals("field", infoAnnotation.key());
+    assertNotEquals(org.apache.hop.metadata.api.HopMetadataPropertyType.STREAM_FIELD,
+        mainAnnotation.hopMetadataPropertyType());
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+    assertEquals(Shape.OBJECT, property(descriptor, "lookup").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "key").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "value").shape());
+    Property main = property(descriptor, "lookup", "key", "name");
+    Property info = property(descriptor, "lookup", "key", "field");
+    Property returned = property(descriptor, "lookup", "value", "name");
+    Property alias = property(descriptor, "lookup", "value", "rename");
+    assertEquals(Shape.STRING, main.shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, main.widgetHint());
+    // Info-row fields are not drawn from the main input stream. A main-stream
+    // picker here would offer incorrect columns for the selected lookup source.
+    for (Property other : List.of(info, returned, alias)) {
+      assertEquals(Shape.STRING, other.shape());
+      assertEquals(WidgetHint.NONE, other.widgetHint(), other.key());
+    }
+
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    assertEquals("UPSTREAM_FIELD_PICKER",
+        mapper.valueToTree(main).path("widgetHint").asText());
+    assertEquals("NONE", mapper.valueToTree(info).path("widgetHint").asText());
+    assertEquals("NONE", mapper.valueToTree(returned).path("widgetHint").asText());
+    assertTrue(mapper.valueToTree(main).path("pickerContext").isNull());
+    System.out.println("PROD_P0_STREAMLOOKUP_MAIN_VS_INFO_FIELD_PICKER=PASS");
+  }
+
+  @Test
   void streamLookupNativeChecksResolveTwoRowSchemasAndRequireLookupSourceAndTwoHops()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
