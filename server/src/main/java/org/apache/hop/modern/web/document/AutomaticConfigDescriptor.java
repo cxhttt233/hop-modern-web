@@ -94,15 +94,21 @@ public final class AutomaticConfigDescriptor {
       case RDBMS_CONNECTION, REST_CONNECTION -> WidgetHint.METADATA_PICKER;
       // RDBMS_TABLE is also used for TableOutput's dynamic incoming field name.
       // Do not generalize a table picker from the annotation alone.
-      case RDBMS_SCHEMA -> owner.getName().equals(
-          "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")
-          && key.equals("schema") ? WidgetHint.DATABASE_SCHEMA_PICKER : WidgetHint.NONE;
+      case RDBMS_SCHEMA -> key.equals("schema")
+          && (owner.getName().equals(
+                  "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")
+              || owner.getName().equals(
+                  "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateLookupField"))
+          ? WidgetHint.DATABASE_SCHEMA_PICKER : WidgetHint.NONE;
       case RDBMS_TABLE -> {
         if (owner.getName().equals(
             "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")) {
           if (key.equals("table")) yield WidgetHint.DATABASE_TABLE_PICKER;
           if (key.equals("tablename_field")) yield WidgetHint.UPSTREAM_FIELD_PICKER;
         }
+        if (owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateLookupField")
+            && key.equals("table")) yield WidgetHint.DATABASE_TABLE_PICKER;
         yield WidgetHint.NONE;
       }
       case FILE_PATH, FILE_REFERENCE -> WidgetHint.VFS_PICKER;
@@ -122,11 +128,20 @@ public final class AutomaticConfigDescriptor {
 
   /** Producer-owned canonical pointers for a database picker, never inferred by React. */
   private static PickerContext pickerContext(Class<?> owner, WidgetHint hint) {
-    if (!owner.getName().equals(
-        "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")) return null;
-    return switch (hint) {
-      case DATABASE_SCHEMA_PICKER -> new PickerContext("/connection", null);
-      case DATABASE_TABLE_PICKER -> new PickerContext("/connection", "/schema");
+    return switch (owner.getName()) {
+      case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
+          switch (hint) {
+            case DATABASE_SCHEMA_PICKER -> new PickerContext("/connection", null);
+            case DATABASE_TABLE_PICKER -> new PickerContext("/connection", "/schema");
+            default -> null;
+          };
+      case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateLookupField" ->
+          switch (hint) {
+            // InsertUpdate keeps its connection on the root Meta but schema/table in lookup.
+            case DATABASE_SCHEMA_PICKER -> new PickerContext("/connection", null);
+            case DATABASE_TABLE_PICKER -> new PickerContext("/connection", "/lookup/schema");
+            default -> null;
+          };
       default -> null;
     };
   }
