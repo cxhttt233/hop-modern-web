@@ -93,13 +93,14 @@ class TransformP0L2RoundTripTest {
     Property updateSource = property(insert, "lookup", "value", "rename");
     Property updateDatabaseColumn = property(insert, "lookup", "value", "name");
 
-    // Hop annotates these two source names as STREAM_FIELD; database columns
-    // are RDBMS_COLUMN, and BETWEEN's second input has no semantic annotation.
+    // Hop annotates the primary source and update source as STREAM_FIELD;
+    // BETWEEN's second input is also an incoming field but lacks that annotation.
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, keySource.widgetHint());
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, updateSource.widgetHint());
     assertEquals(WidgetHint.NONE, keyDatabaseColumn.widgetHint());
     assertEquals(WidgetHint.NONE, updateDatabaseColumn.widgetHint());
-    assertEquals(WidgetHint.NONE, betweenSecondSource.widgetHint());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, betweenSecondSource.widgetHint());
+    assertEquals(WidgetHint.NONE, property(insert, "lookup", "key", "condition").widgetHint());
 
     Descriptor output = descriptorFor(registry, "TableOutput");
     Property streamColumn = property(output, "field", "stream_name");
@@ -114,7 +115,8 @@ class TransformP0L2RoundTripTest {
     assertEquals(WidgetHint.DATABASE_TABLE_PICKER, property(output, "table").widgetHint());
 
     var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-    for (Property source : List.of(keySource, updateSource, streamColumn, partitionSource)) {
+    for (Property source : List.of(keySource, betweenSecondSource, updateSource,
+        streamColumn, partitionSource)) {
       var json = mapper.valueToTree(source);
       assertEquals("UPSTREAM_FIELD_PICKER", json.path("widgetHint").asText());
       assertFalse(json.path("pickerContext").isObject());
