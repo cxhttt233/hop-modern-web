@@ -83,6 +83,83 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void insertUpdateNestedDatabasePickerContextSurvivesRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "InsertUpdate");
+    assertNotNull(plugin, "production InsertUpdate plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(Shape.OBJECT, property(descriptor, "lookup").shape());
+    assertEquals(WidgetHint.METADATA_PICKER,
+        property(descriptor, "connection").widgetHint());
+    Property schema = property(descriptor, "lookup", "schema");
+    Property table = property(descriptor, "lookup", "table");
+    assertEquals(Shape.STRING, schema.shape());
+    assertEquals(Shape.STRING, table.shape());
+    assertEquals(WidgetHint.DATABASE_SCHEMA_PICKER, schema.widgetHint());
+    assertEquals(WidgetHint.DATABASE_TABLE_PICKER, table.widgetHint());
+    assertEquals(new AutomaticConfigDescriptor.PickerContext("/connection", null),
+        schema.pickerContext());
+    assertEquals(new AutomaticConfigDescriptor.PickerContext(
+        "/connection", "/lookup/schema"), table.pickerContext());
+    assertNull(schema.metadataClassName());
+    assertNull(table.metadataClassName());
+
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    var tableSchema = mapper.valueToTree(table);
+    assertEquals("/connection",
+        tableSchema.at("/pickerContext/connectionPointer").asText());
+    assertEquals("/lookup/schema",
+        tableSchema.at("/pickerContext/schemaPointer").asText());
+
+    var provider = new MemoryMetadataProvider();
+    PipelineDocumentStore store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    java.nio.file.Path hpl = tempDir.resolve("insert-update-picker-context.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("insert-update-picker-context");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "InsertUpdate", "insert-update-node", meta));
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("insert-update-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("insert-update-doc",
+        new PipelineConfigResource.ReadRequest("insert-update-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertTrue(initial.config().path("lookup").isObject());
+    assertEquals("/lookup/schema",
+        property(initial.descriptor(), "lookup", "table").pickerContext().schemaPointer());
+
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        initial.config()).deepCopy();
+    changed.put("connection", "db_alias_2026");
+    var lookup = (com.fasterxml.jackson.databind.node.ObjectNode) changed.path("lookup");
+    lookup.put("schema", "黄河<&>schema");
+    lookup.put("table", "监测_2026");
+    var write = resource.write("insert-update-doc",
+        new PipelineConfigResource.WriteRequest("insert-update-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    var reopened = store.open(hpl);
+    var diskTransform = reopened.findTransform("insert-update-node");
+    assertNotNull(diskTransform);
+    var disk = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskTransform.getTransform(), provider);
+    assertEquals("db_alias_2026", disk.at("/connection").asText());
+    assertEquals("黄河<&>schema", disk.at("/lookup/schema").asText());
+    assertEquals("监测_2026", disk.at("/lookup/table").asText());
+    System.out.println("PROD_P0_INSERTUPDATE_NESTED_PICKER_CONTEXT_HPL=PASS");
+  }
+
+  @Test
   void dataGridDeclaredFieldFormatsAndPrecisionPropagateToNativeOutputMetadata()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
