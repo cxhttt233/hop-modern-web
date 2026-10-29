@@ -312,6 +312,114 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_JSONINPUT_NATIVE_VFS_FILENAME_PICKER=PASS");
   }
 
+
+  @Test
+  void jsonInputOrderedVfsSourceFilesSurviveConfigEditAndRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(plugin, "production JsonInput plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    // A real output path keeps the file-mode configuration executable, not merely
+    // serializable. The source file paths are separate from output JsonPath fields.
+    Class<?> fieldType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField");
+    Object output = fieldType.getConstructor(String.class).newInstance("水位");
+    fieldType.getMethod("setPath", String.class).invoke(output, "$.level");
+    fieldType.getMethod("setType", int.class).invoke(output,
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
+    meta.getClass().getMethod("setInputFields", List.class).invoke(meta, List.of(output));
+
+    java.nio.file.Path first = tempDir.resolve("测站&甲 01.json");
+    java.nio.file.Path second = tempDir.resolve("测站&乙 02.json");
+    java.nio.file.Files.writeString(first, "{\"level\":12}\n", StandardCharsets.UTF_8);
+    java.nio.file.Files.writeString(second, "{\"level\":34}\n", StandardCharsets.UTF_8);
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("jsoninput-vfs-file-list.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("jsoninput-vfs-file-list");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "JsonInput", "json-file-node", meta));
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("json-file-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("json-file-doc",
+        new PipelineConfigResource.ReadRequest("json-file-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    Property filename = property(initial.descriptor(), "file", "file", "name");
+    assertEquals(WidgetHint.VFS_PICKER, filename.widgetHint());
+    assertEquals("files", property(initial.descriptor(), "file", "file").groupKey());
+
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("IsInFields", false);
+    var entries = changed.putObject("files").putArray("file");
+    entries.addObject()
+        .put("name", first.toAbsolutePath().toString())
+        .put("filemask", "")
+        .put("exclude_filemask", "")
+        .put("file_required", true)
+        .put("include_subfolders", false);
+    entries.addObject()
+        .put("name", second.toAbsolutePath().toString())
+        .put("filemask", "")
+        .put("exclude_filemask", "")
+        .put("file_required", false)
+        .put("include_subfolders", false);
+    var write = resource.write("json-file-doc",
+        new PipelineConfigResource.WriteRequest("json-file-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    var reopened = store.open(hpl);
+    var reopenedNode = reopened.findTransform("json-file-node");
+    assertNotNull(reopenedNode);
+    var diskMeta = reopenedNode.getTransform();
+    var disk = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertTrue(disk.path("IsInFields").isBoolean());
+    assertFalse(disk.path("IsInFields").booleanValue());
+    assertTrue(disk.at("/files/file").isArray());
+    assertEquals(2, disk.at("/files/file").size());
+    assertEquals(first.toAbsolutePath().toString(), disk.at("/files/file/0/name").asText());
+    assertEquals(second.toAbsolutePath().toString(), disk.at("/files/file/1/name").asText());
+    assertTrue(disk.at("/files/file/0/file_required").isBoolean());
+    assertTrue(disk.at("/files/file/0/file_required").booleanValue());
+    assertTrue(disk.at("/files/file/1/file_required").isBoolean());
+    assertFalse(disk.at("/files/file/1/file_required").booleanValue());
+    assertTrue(disk.at("/files/file/0/include_subfolders").isBoolean());
+    assertFalse(disk.at("/files/file/0/include_subfolders").booleanValue());
+    assertEquals("$.level", disk.at("/fields/field/0/path").asText());
+
+    // Validate that native Hop can actually resolve and read both edited paths
+    // after XML serialization and disk reopen, including Unicode and XML '&'.
+    var nativeFiles = (org.apache.hop.core.fileinput.FileInputList)
+        diskMeta.getClass().getMethod("getFiles",
+            org.apache.hop.core.variables.IVariables.class).invoke(diskMeta, variables);
+    assertEquals(2, nativeFiles.getFiles().size());
+    java.util.Set<Integer> levels = new java.util.HashSet<>();
+    for (var file : nativeFiles.getFiles()) {
+      try {
+        assertTrue(file.exists());
+        try (var stream = file.getContent().getInputStream()) {
+          levels.add(new com.fasterxml.jackson.databind.ObjectMapper()
+              .readTree(stream).path("level").asInt());
+        }
+      } finally {
+        file.close();
+      }
+    }
+    assertEquals(java.util.Set.of(12, 34), levels);
+    System.out.println("PROD_P0_JSONINPUT_VFS_FILE_LIST_DISK_REOPEN=PASS");
+  }
+
   @Test
   void jsonInputSourceFieldPickerMatchesNativeInputModeWithoutMislabelingOutputFields()
       throws Exception {
