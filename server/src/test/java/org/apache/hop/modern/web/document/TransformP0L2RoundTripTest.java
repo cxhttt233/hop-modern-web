@@ -286,7 +286,7 @@ class TransformP0L2RoundTripTest {
     assertFalse(serialized.path("pickerContext").isObject());
 
     java.nio.file.Path jsonFile = tempDir.resolve("测站-水位 甲.json");
-    String contents = "{\"水位\":12}\\n";
+    String contents = "{\"水位\":12}\n";
     java.nio.file.Files.writeString(jsonFile, contents, StandardCharsets.UTF_8);
     var inputFile = new org.apache.hop.core.fileinput.InputFile();
     inputFile.setFileName(jsonFile.toUri().toString());
@@ -302,6 +302,10 @@ class TransformP0L2RoundTripTest {
     try {
       assertTrue(resolved.exists());
       assertEquals(java.nio.file.Files.size(jsonFile), resolved.getContent().getSize());
+      try (var stream = resolved.getContent().getInputStream()) {
+        assertEquals(12, new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(stream).path("水位").asInt());
+      }
     } finally {
       resolved.close();
     }
