@@ -3546,6 +3546,14 @@ class TransformP0L2RoundTripTest {
     assertEquals(Shape.STRING, property(descriptor, "lookup", "value", "name").shape());
     assertEquals(Shape.STRING, property(descriptor, "lookup", "key", "field").shape());
     assertEquals(Shape.STRING, property(descriptor, "lookup", "value", "rename").shape());
+    assertEquals(List.of("lookup.key", "lookup.value"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/lookup/key", "/lookup/value"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertEquals("/lookup/key/1", descriptor.wireLists().get(0).itemPointer(1));
+    assertEquals("/lookup/value/0", descriptor.wireLists().get(1).itemPointer(0));
 
     org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider provider =
         new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider();
@@ -3604,6 +3612,14 @@ class TransformP0L2RoundTripTest {
     assertFalse(disk.path("preserve_memory").booleanValue());
     assertEquals(2, disk.at("/lookup/key").size());
     assertEquals(2, disk.at("/lookup/value").size());
+    assertEquals("主键<&>雪", disk.at(descriptor.wireLists().get(0).itemPointer(0)
+        + "/name").asText());
+    assertEquals("查找A", disk.at(descriptor.wireLists().get(0).itemPointer(0)
+        + "/field").asText());
+    assertEquals("返回<&>雪", disk.at(descriptor.wireLists().get(1).itemPointer(0)
+        + "/name").asText());
+    assertEquals("结果<&>雪", disk.at(descriptor.wireLists().get(1).itemPointer(0)
+        + "/rename").asText());
     assertEquals("主键<&>雪", disk.at("/lookup/key/0/name").asText());
     assertEquals("查找A", disk.at("/lookup/key/0/field").asText());
     assertEquals("secondary", disk.at("/lookup/key/1/name").asText());
