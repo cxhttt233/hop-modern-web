@@ -77,6 +77,29 @@ class AutomaticConfigDescriptorTest {
   }
 
   @Test
+  void sortRowsNativeSpillDirectoryExposesLocalDirectoryPickerInsteadOfHopVfs()
+      throws Exception {
+    // Pinned SortRowsMeta.check() resolves this value and validates it using
+    // java.io.File.isDirectory(), rather than HopVfs. A remote VFS URL is invalid.
+    var field = SortRowsMeta.class.getDeclaredField("directory");
+    var annotation = field.getAnnotation(HopMetadataProperty.class);
+    assertEquals("directory", annotation.key());
+    assertFalse(annotation.hopMetadataPropertyType() == HopMetadataPropertyType.FILE_PATH
+        || annotation.hopMetadataPropertyType() == HopMetadataPropertyType.FILE_REFERENCE);
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(SortRowsMeta.class);
+    Property directory = property(descriptor.properties(), "directory");
+    assertEquals(Shape.STRING, directory.shape());
+    assertEquals(WidgetHint.LOCAL_DIRECTORY_PICKER, directory.widgetHint());
+    assertNull(directory.metadataClassName());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor.properties(), "sort_prefix").widgetHint());
+    assertEquals("LOCAL_DIRECTORY_PICKER",
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .valueToTree(directory).path("widgetHint").asText());
+  }
+
+  @Test
   void discoversTableInputTextBooleansAndTableShape() {
     Descriptor descriptor = AutomaticConfigDescriptor.describe(TableInputMeta.class);
 
