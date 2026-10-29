@@ -247,7 +247,7 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
-  void jsonInputFileListExposesNativeHopVfsPickerAndResolvesUtf8FileUri(
+  void jsonInputFileListExposesNativeHopVfsPickerAndResolvesUtf8LocalPath(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "JsonInput");
@@ -289,7 +289,7 @@ class TransformP0L2RoundTripTest {
     String contents = "{\"水位\":12}\n";
     java.nio.file.Files.writeString(jsonFile, contents, StandardCharsets.UTF_8);
     var inputFile = new org.apache.hop.core.fileinput.InputFile();
-    inputFile.setFileName(jsonFile.toUri().toString());
+    inputFile.setFileName(jsonFile.toAbsolutePath().toString());
     Object nativeFileInput = nativeMeta.getClass().getMethod("getFileInput").invoke(nativeMeta);
     nativeFileInput.getClass().getMethod("setInputFiles", List.class)
         .invoke(nativeFileInput, List.of(inputFile));
@@ -337,7 +337,7 @@ class TransformP0L2RoundTripTest {
     assertEquals(Shape.BOOLEAN, property(descriptor, "IsInFields").shape());
     assertEquals(WidgetHint.NONE, property(descriptor, "include_field").widgetHint());
     assertEquals(WidgetHint.NONE, property(descriptor, "rownum_field").widgetHint());
-    assertEquals(WidgetHint.NONE, property(descriptor, "file", "file", "name").widgetHint());
+    assertEquals(WidgetHint.VFS_PICKER, property(descriptor, "file", "file", "name").widgetHint());
 
     var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(source);
     assertEquals("valueField", json.path("key").asText());
