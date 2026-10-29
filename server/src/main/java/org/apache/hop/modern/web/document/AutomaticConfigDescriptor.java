@@ -47,7 +47,26 @@ public final class AutomaticConfigDescriptor {
             hint, metadataClassName(shape, metadata), pickerContext(type, hint)));
       }
     }
-    return new Descriptor(type.getName(), List.copyOf(properties), runtimePreconditions(type));
+    return new Descriptor(type.getName(), List.copyOf(properties), runtimePreconditions(type), canonicalWireLists(type));
+  }
+
+  /**
+   * Explicit, producer-owned wire locations for nested lists whose native Hop
+   * groupKey container cannot be reconstructed from descriptor layout alone.
+   * The item pointer is a template, not a JSON Pointer until {index} is replaced.
+   * Only paths verified against the pinned ConfigJsonSerializer are advertised.
+   */
+  private static List<WireListContract> canonicalWireLists(Class<?> type) {
+    return switch (type.getName()) {
+      case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" -> List.of(
+          new WireListContract("file.file", "/file/files/file", "/file/files/file/{index}"),
+          new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"));
+      case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
+          new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
+          new WireListContract("fields.remove", "/fields/remove", "/fields/remove/{index}"),
+          new WireListContract("fields.meta", "/fields/meta", "/fields/meta/{index}"));
+      default -> List.of();
+    };
   }
 
   private static Class<?> itemType(Field field, HopMetadataProperty metadata) {
@@ -1189,7 +1208,20 @@ public final class AutomaticConfigDescriptor {
   }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
-      String className, List<Property> properties, List<RuntimePrecondition> runtimePreconditions) {}
+      String className, List<Property> properties, List<RuntimePrecondition> runtimePreconditions,
+      List<WireListContract> wireLists) {
+    public Descriptor(String className, List<Property> properties,
+        List<RuntimePrecondition> runtimePreconditions) {
+      this(className, properties, runtimePreconditions, List.of());
+    }
+  }
+  public record WireListContract(
+      String descriptorPath, String listPointer, String itemPointerTemplate) {
+    public String itemPointer(int index) {
+      if (index < 0) throw new IllegalArgumentException("Negative list index: " + index);
+      return itemPointerTemplate.replace("{index}", Integer.toString(index));
+    }
+  }
   public record RuntimePrecondition(String code, List<String> keyListPointers, String explanation) {}
   public record Option(String label, String value) {}
   public record LayoutHint(int order, String group, Presentation presentation) {}
