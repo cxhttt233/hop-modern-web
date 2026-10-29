@@ -247,6 +247,68 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void jsonInputFileListExposesNativeHopVfsPickerAndResolvesUtf8FileUri(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(plugin, "production JsonInput plugin missing");
+    ITransformMeta nativeMeta = registry.loadClass(plugin, ITransformMeta.class);
+    nativeMeta.setDefault();
+
+    // The pinned InputFile.fileName annotation is untyped, but JsonInputMeta.getFiles()
+    // delegates to FileInputList, which opens each filename through HopVfs.
+    var annotation = metadataField(org.apache.hop.core.fileinput.InputFile.class, "fileName")
+        .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+    assertNotNull(annotation);
+    assertEquals("name", annotation.key());
+    assertNotEquals(org.apache.hop.metadata.api.HopMetadataPropertyType.FILE_PATH,
+        annotation.hopMetadataPropertyType());
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+    Property files = property(descriptor, "file", "file");
+    assertEquals(Shape.LIST, files.shape());
+    assertEquals("files", files.groupKey());
+    Property filename = property(descriptor, "file", "file", "name");
+    assertEquals(Shape.STRING, filename.shape());
+    assertEquals(WidgetHint.VFS_PICKER, filename.widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "file", "file", "filemask").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "file", "file", "exclude_filemask").widgetHint());
+    assertEquals(Shape.BOOLEAN,
+        property(descriptor, "file", "file", "file_required").shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "valueField").widgetHint(),
+        "field-driven JSON source remains an incoming-row picker, not a file path");
+
+    var serialized = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(filename);
+    assertEquals("VFS_PICKER", serialized.path("widgetHint").asText());
+    assertFalse(serialized.path("pickerContext").isObject());
+
+    java.nio.file.Path jsonFile = tempDir.resolve("测站-水位 甲.json");
+    String contents = "{\"水位\":12}\\n";
+    java.nio.file.Files.writeString(jsonFile, contents, StandardCharsets.UTF_8);
+    var inputFile = new org.apache.hop.core.fileinput.InputFile();
+    inputFile.setFileName(jsonFile.toUri().toString());
+    Object nativeFileInput = nativeMeta.getClass().getMethod("getFileInput").invoke(nativeMeta);
+    nativeFileInput.getClass().getMethod("setInputFiles", List.class)
+        .invoke(nativeFileInput, List.of(inputFile));
+    var filesFromNative = (org.apache.hop.core.fileinput.FileInputList)
+        nativeMeta.getClass().getMethod("getFiles",
+            org.apache.hop.core.variables.IVariables.class)
+            .invoke(nativeMeta, new org.apache.hop.core.variables.Variables());
+    assertEquals(1, filesFromNative.getFiles().size());
+    var resolved = filesFromNative.getFiles().get(0);
+    try {
+      assertTrue(resolved.exists());
+      assertEquals(java.nio.file.Files.size(jsonFile), resolved.getContent().getSize());
+    } finally {
+      resolved.close();
+    }
+    System.out.println("PROD_P0_JSONINPUT_NATIVE_VFS_FILENAME_PICKER=PASS");
+  }
+
+  @Test
   void jsonInputSourceFieldPickerMatchesNativeInputModeWithoutMislabelingOutputFields()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
