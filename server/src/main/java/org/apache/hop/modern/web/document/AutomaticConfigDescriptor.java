@@ -37,13 +37,14 @@ public final class AutomaticConfigDescriptor {
         List<Property> itemProperties = itemType != null && shape(itemType) == Shape.OBJECT
             ? describe(itemType, depth + 1, new HashSet<>(ancestors)).properties() : List.of();
         List<Option> options = shape == Shape.ENUM ? enumOptions(field.getType(), metadata.storeWithCode()) : List.of();
+        WidgetHint hint = widgetHint(type, key, shape, metadata);
         properties.add(new Property(key, field.getName(), shape, field.getType().getName(),
             metadata.groupKey(), metadata.password(), metadata.storeWithName(), metadata.storeWithCode(),
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
             textEditorHint(key, shape, metadata),
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
-            widgetHint(type, key, shape, metadata), metadataClassName(shape, metadata)));
+            hint, metadataClassName(shape, metadata), pickerContext(type, hint)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), runtimePreconditions(type));
@@ -91,6 +92,19 @@ public final class AutomaticConfigDescriptor {
     if (shape != Shape.STRING) return WidgetHint.NONE;
     return switch (metadata.hopMetadataPropertyType()) {
       case RDBMS_CONNECTION, REST_CONNECTION -> WidgetHint.METADATA_PICKER;
+      // RDBMS_TABLE is also used for TableOutput's dynamic incoming field name.
+      // Do not generalize a table picker from the annotation alone.
+      case RDBMS_SCHEMA -> owner.getName().equals(
+          "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")
+          && key.equals("schema") ? WidgetHint.DATABASE_SCHEMA_PICKER : WidgetHint.NONE;
+      case RDBMS_TABLE -> {
+        if (owner.getName().equals(
+            "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")) {
+          if (key.equals("table")) yield WidgetHint.DATABASE_TABLE_PICKER;
+          if (key.equals("tablename_field")) yield WidgetHint.UPSTREAM_FIELD_PICKER;
+        }
+        yield WidgetHint.NONE;
+      }
       case FILE_PATH, FILE_REFERENCE -> WidgetHint.VFS_PICKER;
       default -> {
         // Rest.java loads this trust store with FileInputStream, not HopVfs.
@@ -103,6 +117,17 @@ public final class AutomaticConfigDescriptor {
                 "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta")
             && key.equals("sql_from_file") ? WidgetHint.VFS_PICKER : WidgetHint.NONE;
       }
+    };
+  }
+
+  /** Producer-owned canonical pointers for a database picker, never inferred by React. */
+  private static PickerContext pickerContext(Class<?> owner, WidgetHint hint) {
+    if (!owner.getName().equals(
+        "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")) return null;
+    return switch (hint) {
+      case DATABASE_SCHEMA_PICKER -> new PickerContext("/connection", null);
+      case DATABASE_TABLE_PICKER -> new PickerContext("/connection", "/schema");
+      default -> null;
     };
   }
 
@@ -1040,16 +1065,21 @@ public final class AutomaticConfigDescriptor {
 
   public enum Shape { STRING, NUMBER, BOOLEAN, ENUM, OBJECT, LIST }
   public enum TextEditorHint { NONE, SQL, SCRIPT, TEMPLATE }
-  public enum WidgetHint { NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER }
+  public enum WidgetHint {
+    NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER,
+    DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, UPSTREAM_FIELD_PICKER
+  }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
       String className, List<Property> properties, List<RuntimePrecondition> runtimePreconditions) {}
   public record RuntimePrecondition(String code, List<String> keyListPointers, String explanation) {}
   public record Option(String label, String value) {}
   public record LayoutHint(int order, String group, Presentation presentation) {}
+  public record PickerContext(String connectionPointer, String schemaPointer) {}
   public record Property(String key, String javaField, Shape shape, String javaType, String groupKey,
       boolean sensitive, boolean storeWithName, boolean storeWithCode, boolean defaultBoolean,
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
       List<Property> elementProperties, List<Option> options, TextEditorHint textEditorHint,
-      LayoutHint layout, WidgetHint widgetHint, String metadataClassName) {}
+      LayoutHint layout, WidgetHint widgetHint, String metadataClassName,
+      PickerContext pickerContext) {}
 }
