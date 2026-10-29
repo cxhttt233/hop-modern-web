@@ -151,6 +151,10 @@ public final class AutomaticConfigDescriptor {
           key.equals("field");
       // Pinned CheckSum and SetVariable consume these names from incoming row metadata.
       // Their output field/variable names are not incoming-row references.
+      // SortRowsField.name is a sort key looked up in the incoming row metadata.
+      // Its native annotation is untyped, unlike its BOOLEAN/NUMBER sort options.
+      case "org.apache.hop.pipeline.transforms.sort.SortRowsField" ->
+          key.equals("name");
       case "org.apache.hop.pipeline.transforms.checksum.Field" ->
           key.equals("name");
       case "org.apache.hop.pipeline.transforms.setvariable.VariableItem" ->
