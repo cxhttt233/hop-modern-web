@@ -387,6 +387,20 @@ class TransformP0L2RoundTripTest {
         diskMeta, provider);
     assertTrue(disk.path("IsInFields").isBoolean());
     assertFalse(disk.path("IsInFields").booleanValue());
+    // The producer contract must resolve the native wire shape after actual XML
+    // disk reopen; the nested "files" group is not a presentational group only.
+    var sourceFilesWire = initial.descriptor().wireLists().stream()
+        .filter(w -> w.descriptorPath().equals("file.file")).findFirst().orElseThrow();
+    var outputFieldsWire = initial.descriptor().wireLists().stream()
+        .filter(w -> w.descriptorPath().equals("fields.field")).findFirst().orElseThrow();
+    assertEquals("/file/files/file", sourceFilesWire.listPointer());
+    assertTrue(disk.at(sourceFilesWire.listPointer()).isArray());
+    assertEquals(first.toAbsolutePath().toString(),
+        disk.at(sourceFilesWire.itemPointer(0) + "/name").asText());
+    assertEquals(second.toAbsolutePath().toString(),
+        disk.at(sourceFilesWire.itemPointer(1) + "/name").asText());
+    assertEquals("$.level", disk.at(outputFieldsWire.itemPointer(0) + "/path").asText());
+    System.out.println("PROD_P0_JSONINPUT_CANONICAL_WIRE_POINTER_DISK_REOPEN=PASS");
     assertTrue(disk.at("/file/files/file").isArray());
     assertEquals(2, disk.at("/file/files/file").size());
     assertEquals(first.toAbsolutePath().toString(), disk.at("/file/files/file/0/name").asText());
