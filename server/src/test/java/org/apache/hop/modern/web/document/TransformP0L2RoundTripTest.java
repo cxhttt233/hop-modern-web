@@ -23,6 +23,50 @@ class TransformP0L2RoundTripTest {
   @BeforeAll static void init() throws Exception { HopClientEnvironment.init(); ModernWebServer.initializePipelinePlugins(); }
 
   @Test
+  void uniqueRowsHashSetComparisonNamesExposeNativeInputPickerWithoutMislabelingOptions()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "UniqueRowsByHashSet");
+    assertNotNull(plugin, "production UniqueRowsByHashSet plugin missing");
+    ITransformMeta nativeMeta = registry.loadClass(plugin, ITransformMeta.class);
+    nativeMeta.setDefault();
+
+    // The pinned native transform resolves each CompareField.name against
+    // getInputRowMeta().indexOfValue(), but its annotation omits STREAM_FIELD.
+    Class<?> compareField = nativeMeta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta$CompareField");
+    var annotation = metadataField(compareField, "name")
+        .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+    assertNotNull(annotation);
+    assertEquals("name", annotation.key());
+    assertNotEquals(org.apache.hop.metadata.api.HopMetadataPropertyType.STREAM_FIELD,
+        annotation.hopMetadataPropertyType());
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+    Property fields = property(descriptor, "field");
+    assertEquals(Shape.LIST, fields.shape());
+    assertEquals("fields", fields.groupKey());
+    assertEquals(compareField.getName(), fields.elementJavaType());
+    Property source = property(descriptor, "field", "name");
+    assertEquals(Shape.STRING, source.shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, source.widgetHint());
+
+    // Comparison options and error output are not source-row field selectors.
+    assertEquals(Shape.BOOLEAN, property(descriptor, "store_values").shape());
+    assertEquals(WidgetHint.NONE, property(descriptor, "store_values").widgetHint());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "reject_duplicate_row").shape());
+    assertEquals(WidgetHint.NONE, property(descriptor, "error_description").widgetHint());
+
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    var json = mapper.valueToTree(source);
+    assertEquals("name", json.path("key").asText());
+    assertEquals("UPSTREAM_FIELD_PICKER", json.path("widgetHint").asText());
+    assertTrue(json.path("pickerContext").isNull());
+    assertTrue(json.path("metadataClassName").isNull());
+    System.out.println("PROD_P0_UNIQUE_ROWS_HASHSET_NATIVE_COMPARE_FIELD_PICKER=PASS");
+  }
+
+  @Test
   void execSqlNativeArgumentsAndVfsFileExposeDistinctProducerPickerSemantics()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
