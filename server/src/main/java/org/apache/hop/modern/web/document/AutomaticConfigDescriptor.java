@@ -92,9 +92,17 @@ public final class AutomaticConfigDescriptor {
     return switch (metadata.hopMetadataPropertyType()) {
       case RDBMS_CONNECTION, REST_CONNECTION -> WidgetHint.METADATA_PICKER;
       case FILE_PATH, FILE_REFERENCE -> WidgetHint.VFS_PICKER;
-      default -> owner.getName().equals(
-              "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta")
-          && key.equals("sql_from_file") ? WidgetHint.VFS_PICKER : WidgetHint.NONE;
+      default -> {
+        // Rest.java loads this trust store with FileInputStream, not HopVfs.
+        // A VFS picker could offer remote URLs that native Rest cannot open.
+        if (owner.getName().equals("org.apache.hop.pipeline.transforms.rest.RestMeta")
+            && key.equals("trustStoreFile")) {
+          yield WidgetHint.LOCAL_FILE_PICKER;
+        }
+        yield owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta")
+            && key.equals("sql_from_file") ? WidgetHint.VFS_PICKER : WidgetHint.NONE;
+      }
     };
   }
 
@@ -1032,7 +1040,7 @@ public final class AutomaticConfigDescriptor {
 
   public enum Shape { STRING, NUMBER, BOOLEAN, ENUM, OBJECT, LIST }
   public enum TextEditorHint { NONE, SQL, SCRIPT, TEMPLATE }
-  public enum WidgetHint { NONE, METADATA_PICKER, VFS_PICKER }
+  public enum WidgetHint { NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
       String className, List<Property> properties, List<RuntimePrecondition> runtimePreconditions) {}
