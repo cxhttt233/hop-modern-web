@@ -133,8 +133,12 @@ public final class AutomaticConfigDescriptor {
             && key.equals("trustStoreFile")) {
           yield WidgetHint.LOCAL_FILE_PICKER;
         }
-        yield owner.getName().equals(
+        // Both TableInput and ExecSql load sql_from_file through HopVfs.
+        // The ExecSql argument names, unlike this file path, refer to input-row columns.
+        yield (owner.getName().equals(
                 "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta")
+            || owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta"))
             && key.equals("sql_from_file") ? WidgetHint.VFS_PICKER : WidgetHint.NONE;
       }
     };
@@ -186,6 +190,10 @@ public final class AutomaticConfigDescriptor {
           key.equals("name");
       case "org.apache.hop.pipeline.transforms.groupby.Aggregation" ->
           key.equals("subject");
+      // ExecSql resolves each parameter name against input row metadata when
+      // execute_each_row is enabled, regardless of whether JDBC binding is selected.
+      case "org.apache.hop.pipeline.transforms.sql.ExecSqlArgumentItem" ->
+          key.equals("name");
       // InsertUpdate uses name2 as the second incoming row field for BETWEEN,
       // but pinned Hop Core omits STREAM_FIELD on InsertUpdateKeyField.keyStream2.
       case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField" ->
