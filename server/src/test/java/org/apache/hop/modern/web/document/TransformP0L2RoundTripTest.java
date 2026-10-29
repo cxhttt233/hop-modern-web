@@ -37,6 +37,40 @@ class TransformP0L2RoundTripTest {
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
   @Test
+  void jsonInputSourceFieldPickerMatchesNativeInputModeWithoutMislabelingOutputFields()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(plugin, "production JsonInput plugin missing");
+    ITransformMeta nativeMeta = registry.loadClass(plugin, ITransformMeta.class);
+    nativeMeta.setDefault();
+
+    // Pinned JsonInputMeta omits STREAM_FIELD on valueField, although it is
+    // resolved against the upstream row when IsInFields is enabled.
+    var sourceAnnotation = metadataField(nativeMeta.getClass(), "valueField")
+        .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+    assertNotNull(sourceAnnotation);
+    assertEquals("valueField", sourceAnnotation.key());
+    assertNotEquals(org.apache.hop.metadata.api.HopMetadataPropertyType.STREAM_FIELD,
+        sourceAnnotation.hopMetadataPropertyType());
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+    Property source = property(descriptor, "valueField");
+    assertEquals(Shape.STRING, source.shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, source.widgetHint());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "IsInFields").shape());
+    assertEquals(WidgetHint.NONE, property(descriptor, "include_field").widgetHint());
+    assertEquals(WidgetHint.NONE, property(descriptor, "rownum_field").widgetHint());
+    assertEquals(WidgetHint.NONE, property(descriptor, "file", "file", "name").widgetHint());
+
+    var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(source);
+    assertEquals("valueField", json.path("key").asText());
+    assertEquals("UPSTREAM_FIELD_PICKER", json.path("widgetHint").asText());
+    assertFalse(json.path("pickerContext").isObject());
+    System.out.println("PROD_P0_JSONINPUT_NATIVE_SOURCE_FIELD_PICKER=PASS");
+  }
+
+  @Test
   void tableOutputDatabasePickersCarryCanonicalContextWithoutConfusingDynamicRowFields()
       throws Exception {
     // This is P0-only: the minimal server/graph Maven chain does not install TableOutput.
