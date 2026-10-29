@@ -121,6 +121,13 @@ public final class AutomaticConfigDescriptor {
         if (nativeUnannotatedIncomingField(owner, key)) {
           yield WidgetHint.UPSTREAM_FIELD_PICKER;
         }
+        // JsonInput's nested InputFile.name is a filename resolved by FileInputList
+        // through HopVfs, not an incoming row field. The pinned InputFile annotation
+        // is untyped, so the producer must provide the file picker explicitly.
+        if (owner.getName().equals("org.apache.hop.core.fileinput.InputFile")
+            && key.equals("name")) {
+          yield WidgetHint.VFS_PICKER;
+        }
         // Native TableOutput uses partitioning_field to resolve an incoming DATE row column.
         // The Hop annotation lacks STREAM_FIELD, so handle this one known plugin field.
         if (owner.getName().equals("org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")
