@@ -682,7 +682,8 @@ class RestDynamicMethodFullPipelineP0Test {
       assertEquals("请求地址<&>", wire.at("/urlField").asText());
       assertEquals(fallbackUrl, wire.at("/url").asText());
       assertEquals("fixture-user", wire.at("/httpLogin").asText());
-      assertEquals("fixture-password", wire.at("/httpPassword").asText());
+      assertTrue(wire.at("/httpPassword").asText().startsWith("Encrypted "),
+          "Hop stores the fixture Basic password as an encrypted wire value");
       assertTrue(wire.at("/non_preemptive_basic_auth").isBoolean());
       assertFalse(wire.at("/non_preemptive_basic_auth").booleanValue());
       var contract = AutomaticConfigDescriptor.describe(diskMeta.getClass())
