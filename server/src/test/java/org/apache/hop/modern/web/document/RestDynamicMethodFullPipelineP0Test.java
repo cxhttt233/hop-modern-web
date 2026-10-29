@@ -558,4 +558,183 @@ class RestDynamicMethodFullPipelineP0Test {
       server.stop(0);
     }
   }
+
+  /**
+   * A field-driven REST URL has no fixed authentication origin. Verify that the
+   * native preemptive Basic client sends the same fixture credentials to two
+   * distinct loopback origins selected by upstream rows, after JSON editing
+   * and real HPL disk reopen. This test intentionally documents a risk, not
+   * a recommendation to enable credentials for arbitrary URL fields.
+   */
+  @Test
+  void restFieldDrivenUrlBasicCredentialsReachBothRowSelectedOriginsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    String expectedAuth = "Basic " + java.util.Base64.getEncoder().encodeToString(
+        "fixture-user:fixture-password".getBytes(StandardCharsets.UTF_8));
+    List<String> seen = new CopyOnWriteArrayList<>();
+    AtomicInteger unusedFallback = new AtomicInteger();
+    HttpServer first = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    HttpServer second = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    first.createContext("/secure", exchange -> {
+      try (exchange) {
+        seen.add("first:" + (expectedAuth.equals(
+            exchange.getRequestHeaders().getFirst("Authorization")) ? "authorized" : "missing"));
+        byte[] body = "first-黄河".getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(200, body.length);
+        exchange.getResponseBody().write(body);
+      }
+    });
+    first.createContext("/unused", exchange -> {
+      try (exchange) {
+        unusedFallback.incrementAndGet();
+        exchange.sendResponseHeaders(200, -1);
+      }
+    });
+    second.createContext("/secure", exchange -> {
+      try (exchange) {
+        seen.add("second:" + (expectedAuth.equals(
+            exchange.getRequestHeaders().getFirst("Authorization")) ? "authorized" : "missing"));
+        byte[] body = "second-长江".getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(200, body.length);
+        exchange.getResponseBody().write(body);
+      }
+    });
+    first.start();
+    second.start();
+    try {
+      String firstUrl = "http://127.0.0.1:" + first.getAddress().getPort() + "/secure";
+      String secondUrl = "http://127.0.0.1:" + second.getAddress().getPort() + "/secure";
+      String fallbackUrl = "http://127.0.0.1:" + first.getAddress().getPort() + "/unused";
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+      IPlugin restPlugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(gridPlugin);
+      assertNotNull(restPlugin);
+
+      ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+      grid.setDefault();
+      ClassLoader gridLoader = grid.getClass().getClassLoader();
+      Class<?> fieldType = gridLoader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+      Class<?> lineType = gridLoader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, "请求地址<&>");
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, List.of(field));
+      List<Object> lines = new ArrayList<>();
+      for (String url : List.of(firstUrl, secondUrl)) {
+        Object line = lineType.getConstructor().newInstance();
+        lineType.getMethod("setDatalines", List.class).invoke(line, List.of(url));
+        lines.add(line);
+      }
+      grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+      ITransformMeta rest = plugins.loadClass(restPlugin, ITransformMeta.class);
+      rest.setDefault();
+      rest.getClass().getMethod("setHttpLogin", String.class).invoke(rest, "fixture-user");
+      rest.getClass().getMethod("setHttpPassword", String.class).invoke(rest, "fixture-password");
+      TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+      TransformMeta target = new TransformMeta("Rest", "rest-node", rest);
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("rest-row-url-basic-multi-origin");
+      pipeline.addTransform(source);
+      pipeline.addTransform(target);
+      pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("rest-row-url-basic-multi-origin.hpl");
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("rest-row-url-basic-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("rest-row-url-basic-doc",
+          new PipelineConfigResource.ReadRequest("rest-node"));
+      assertEquals(200, read.getStatus());
+      var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      var password = initial.descriptor().properties().stream()
+          .filter(p -> p.key().equals("httpPassword")).findFirst().orElseThrow();
+      assertTrue(password.sensitive(), "Basic password must be marked sensitive");
+      ObjectNode draft = ((ObjectNode) initial.config()).deepCopy();
+      draft.put("urlInField", true);
+      draft.put("urlField", "请求地址<&>");
+      draft.put("url", fallbackUrl);
+      draft.put("method", "GET");
+      draft.put("non_preemptive_basic_auth", false);
+      ObjectNode result = (ObjectNode) draft.path("result");
+      result.put("name", "响应正文");
+      result.put("code", "HTTP状态");
+      result.put("response_header", "");
+      result.put("response_time", "");
+      result.put("binary", false);
+      var write = resource.write("rest-row-url-basic-doc",
+          new PipelineConfigResource.WriteRequest("rest-node", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      assertEquals(1, reopened.nrPipelineHops());
+      ITransformMeta diskMeta = reopened.findTransform("rest-node").getTransform();
+      JsonNode wire = ConfigJsonSerializer.toJson(diskMeta, provider);
+      assertTrue(wire.at("/urlInField").booleanValue());
+      assertEquals("请求地址<&>", wire.at("/urlField").asText());
+      assertEquals(fallbackUrl, wire.at("/url").asText());
+      assertEquals("fixture-user", wire.at("/httpLogin").asText());
+      assertEquals("fixture-password", wire.at("/httpPassword").asText());
+      assertTrue(wire.at("/non_preemptive_basic_auth").isBoolean());
+      assertFalse(wire.at("/non_preemptive_basic_auth").booleanValue());
+      var contract = AutomaticConfigDescriptor.describe(diskMeta.getClass())
+          .runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "REST_FIELD_URL_BASIC_AUTH_IS_NOT_BOUND_TO_ONE_ORIGIN"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/urlInField", "/urlField", "/url", "/httpLogin",
+          "/httpPassword", "/non_preemptive_basic_auth"), contract.keyListPointers());
+
+      List<Object[]> rows = new CopyOnWriteArrayList<>();
+      List<IRowMeta> metas = new CopyOnWriteArrayList<>();
+      LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+      engine.setMetadataProvider(provider);
+      try {
+        engine.prepareExecution();
+        ITransform output = engine.getRunThread("rest-node", 0);
+        assertNotNull(output);
+        output.addRowListener(new RowAdapter() {
+          @Override
+          public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+            metas.add(rowMeta.clone());
+            rows.add(row.clone());
+          }
+        });
+        engine.startThreads();
+        engine.waitUntilFinished();
+        assertEquals(0, engine.getErrors());
+      } finally {
+        if (!engine.isFinishedOrStopped()) engine.stopAll();
+        engine.cleanup();
+      }
+      assertEquals(2, rows.size());
+      assertEquals(2, metas.size());
+      for (IRowMeta meta : metas) {
+        assertEquals(List.of("请求地址<&>", "响应正文", "HTTP状态"),
+            meta.getValueMetaList().stream().map(IValueMeta::getName).toList());
+        assertEquals(IValueMeta.TYPE_STRING, meta.getValueMeta(1).getType());
+        assertEquals(IValueMeta.TYPE_INTEGER, meta.getValueMeta(2).getType());
+      }
+      assertTrue(rows.stream().anyMatch(r -> firstUrl.equals(r[0])
+          && "first-黄河".equals(r[1]) && Long.valueOf(200).equals(r[2])));
+      assertTrue(rows.stream().anyMatch(r -> secondUrl.equals(r[0])
+          && "second-长江".equals(r[1]) && Long.valueOf(200).equals(r[2])));
+      assertEquals(0, unusedFallback.get(), "row URL must override literal fallback");
+      assertEquals(2, seen.size(), "each origin should receive one request");
+      assertTrue(seen.contains("first:authorized"), "first origin received Basic credentials");
+      assertTrue(seen.contains("second:authorized"), "second origin received Basic credentials");
+      System.out.println("PROD_P0_REST_DYNAMIC_URL_BASIC_AUTH_MULTI_ORIGIN_JSON_HPL_ROWS=PASS");
+    } finally {
+      first.stop(0);
+      second.stop(0);
+    }
+  }
 }
