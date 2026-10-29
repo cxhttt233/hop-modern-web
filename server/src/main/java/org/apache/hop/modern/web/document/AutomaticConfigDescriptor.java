@@ -210,6 +210,11 @@ public final class AutomaticConfigDescriptor {
       // such as store_values and error_description are not input-row references.
       case "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta$CompareField" ->
           key.equals("name");
+      // StreamLookup has two distinct incoming rows. Only MatchKey.name belongs to
+      // the main input stream; MatchKey.field and ReturnValue.name belong to the
+      // selected lookup/info stream and must not use the main upstream picker.
+      case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$MatchKey" ->
+          key.equals("name");
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" -> key.equals("urlField");
       case "org.apache.hop.pipeline.transforms.http.HttpMeta$QueryParameter",
            "org.apache.hop.pipeline.transforms.http.HttpMeta$HeaderParameter" ->
