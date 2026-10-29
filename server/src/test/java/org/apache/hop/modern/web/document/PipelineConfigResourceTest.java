@@ -265,6 +265,39 @@ class PipelineConfigResourceTest {
   }
 
   @Test
+  void restCanonicalWireListPointersResolveNativeGroupedJsonWithoutLeafCollisions()
+      throws Exception {
+    RestMeta rest = new RestMeta();
+    rest.setDefault();
+    rest.setHeaderFields(List.of(
+        new HeaderField("水位", "X-Level"), new HeaderField("流量", "X-Flow")));
+    rest.setParameterFields(List.of(
+        new ParameterField("水位", "level"), new ParameterField("流量", "flow")));
+    rest.setMatrixParameterFields(List.of(
+        new MatrixParameterField("水位", "level"), new MatrixParameterField("流量", "flow")));
+
+    var json = ConfigJsonSerializer.toJson(rest, new MemoryMetadataProvider());
+    var contracts = AutomaticConfigDescriptor.describe(RestMeta.class).wireLists();
+    assertEquals(List.of("header", "parameter", "matrixParameter"),
+        contracts.stream().map(
+            AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/headers/header", "/parameters/parameter",
+            "/matrixParameters/matrixParameter"),
+        contracts.stream().map(
+            AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+
+    for (var contract : contracts) {
+      assertEquals(contract.listPointer() + "/{index}", contract.itemPointerTemplate());
+      assertEquals(2, json.at(contract.listPointer()).size());
+      assertEquals("水位", json.at(contract.itemPointer(0) + "/field").asText());
+      assertEquals("流量", json.at(contract.itemPointer(1) + "/field").asText());
+    }
+    assertEquals("X-Level", json.at(contracts.get(0).itemPointer(0) + "/name").asText());
+    assertEquals("level", json.at(contracts.get(1).itemPointer(0) + "/name").asText());
+    assertEquals("level", json.at(contracts.get(2).itemPointer(0) + "/name").asText());
+  }
+
+  @Test
   void failedResponseSerializationDoesNotCommitDecodedTransformConfig() throws Exception {
     MemoryMetadataProvider provider = new MemoryMetadataProvider();
     PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
