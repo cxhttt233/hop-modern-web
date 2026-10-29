@@ -38,6 +38,30 @@ class AutomaticConfigDescriptorTest {
   }
 
   @Test
+  void marksSelectValuesSelectedInputFieldButNotOutputRenameOrLaterStageNames() {
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(SelectValuesMeta.class);
+    Property fields = property(descriptor.properties(), "fields");
+    Property selected = property(fields.children(), "field");
+
+    assertEquals(Shape.LIST, selected.shape());
+    assertEquals("org.apache.hop.pipeline.transforms.selectvalues.SelectField",
+        selected.elementJavaType());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(selected.elementProperties(), "name").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(selected.elementProperties(), "rename").widgetHint());
+    assertEquals(Shape.NUMBER,
+        property(selected.elementProperties(), "length").shape());
+
+    // Remove and Meta consume the Select tab's output, not necessarily the raw input.
+    // A raw upstream picker for these names would hide newly renamed columns.
+    assertEquals(WidgetHint.NONE,
+        property(property(fields.children(), "remove").elementProperties(), "name").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(property(fields.children(), "meta").elementProperties(), "name").widgetHint());
+  }
+
+  @Test
   void discoversSortRowsListElementAndScalarMetadata() {
     Descriptor descriptor = AutomaticConfigDescriptor.describe(SortRowsMeta.class);
     Property sortFields = property(descriptor.properties(), "field");
