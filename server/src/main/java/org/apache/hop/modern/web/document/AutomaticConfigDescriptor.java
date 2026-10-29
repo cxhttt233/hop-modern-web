@@ -149,6 +149,10 @@ public final class AutomaticConfigDescriptor {
            "org.apache.hop.pipeline.transforms.rest.fields.ParameterField",
            "org.apache.hop.pipeline.transforms.rest.fields.MatrixParameterField" ->
           key.equals("field");
+      // ReplaceString reads the source and optional replacement-from-field from incoming rows.
+      // The output alias and literal replacement text must remain free-text fields.
+      case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta$RSField" ->
+          Set.of("in_stream_name", "replace_field_by_string").contains(key);
       // SelectValues Select & Alter reads this name from the incoming row; rename is output-only.
       // Later Remove/Meta tabs operate on the previous tab output and need stage-aware pickers.
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectField" ->
