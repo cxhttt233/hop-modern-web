@@ -313,4 +313,59 @@ class ReplaceStringDynamicFieldFullPipelineP0Test {
         "nonmatching input must be preserved by native Matcher.replaceAll");
     System.out.println("PROD_P0_REPLACESTRING_REGEX_CAPTURE_GROUPS_JSON_HPL_ROWS=PASS");
   }
+
+  @Test
+  void replaceStringDescriptorIdentifiesNativeIncomingFieldsWithoutMislabelingLiterals()
+      throws Exception {
+    IPlugin plugin = PluginRegistry.getInstance()
+        .findPluginWithId(TransformPluginType.class, "ReplaceString");
+    assertNotNull(plugin, "production ReplaceString plugin required");
+    ITransformMeta nativeMeta = PluginRegistry.getInstance()
+        .loadClass(plugin, ITransformMeta.class);
+    nativeMeta.setDefault();
+
+    Class<?> ruleType = nativeMeta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta$RSField");
+    for (String javaName : List.of("fieldInStream", "replaceFieldByString")) {
+      var annotation = ruleType.getDeclaredField(javaName)
+          .getAnnotation(org.apache.hop.metadata.api.HopMetadataProperty.class);
+      assertNotNull(annotation);
+      assertNotEquals(org.apache.hop.metadata.api.HopMetadataPropertyType.STREAM_FIELD,
+          annotation.hopMetadataPropertyType(),
+          "pinned Hop Core leaves this incoming-row reference unannotated");
+    }
+
+    var descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+    var rules = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field")).findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.Shape.LIST, rules.shape());
+    assertEquals(ruleType.getName(), rules.elementJavaType());
+    java.util.function.Function<String, AutomaticConfigDescriptor.Property> ruleField =
+        key -> rules.elementProperties().stream()
+            .filter(p -> p.key().equals(key)).findFirst().orElseThrow();
+
+    assertEquals(AutomaticConfigDescriptor.WidgetHint.UPSTREAM_FIELD_PICKER,
+        ruleField.apply("in_stream_name").widgetHint());
+    assertEquals(AutomaticConfigDescriptor.WidgetHint.UPSTREAM_FIELD_PICKER,
+        ruleField.apply("replace_field_by_string").widgetHint());
+    for (String key : List.of("out_stream_name", "replace_by_string", "replace_string")) {
+      assertEquals(AutomaticConfigDescriptor.WidgetHint.NONE,
+          ruleField.apply(key).widgetHint(), "literal/output field " + key);
+    }
+
+    JsonNode json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(rules);
+    assertEquals("field", json.path("key").asText());
+    assertEquals("fields", json.path("groupKey").asText());
+    assertEquals("LIST", json.path("shape").asText());
+    for (JsonNode child : json.path("elementProperties")) {
+      String key = child.path("key").asText();
+      if (key.equals("in_stream_name") || key.equals("replace_field_by_string")) {
+        assertEquals("UPSTREAM_FIELD_PICKER", child.path("widgetHint").asText());
+      } else if (List.of("out_stream_name", "replace_by_string", "replace_string")
+          .contains(key)) {
+        assertEquals("NONE", child.path("widgetHint").asText());
+      }
+    }
+    System.out.println("PROD_P0_REPLACESTRING_NATIVE_INPUT_FIELD_PICKERS=PASS");
+  }
 }
