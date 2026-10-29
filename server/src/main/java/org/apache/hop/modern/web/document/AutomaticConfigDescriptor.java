@@ -92,6 +92,8 @@ public final class AutomaticConfigDescriptor {
     if (shape != Shape.STRING) return WidgetHint.NONE;
     return switch (metadata.hopMetadataPropertyType()) {
       case RDBMS_CONNECTION, REST_CONNECTION -> WidgetHint.METADATA_PICKER;
+      // Hop marks incoming row references explicitly; do not mistake database columns for stream fields.
+      case STREAM_FIELD -> WidgetHint.UPSTREAM_FIELD_PICKER;
       // RDBMS_TABLE is also used for TableOutput's dynamic incoming field name.
       // Do not generalize a table picker from the annotation alone.
       case RDBMS_SCHEMA -> key.equals("schema")
@@ -113,6 +115,12 @@ public final class AutomaticConfigDescriptor {
       }
       case FILE_PATH, FILE_REFERENCE -> WidgetHint.VFS_PICKER;
       default -> {
+        // Native TableOutput uses partitioning_field to resolve an incoming DATE row column.
+        // The Hop annotation lacks STREAM_FIELD, so handle this one known plugin field.
+        if (owner.getName().equals("org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")
+            && key.equals("partitioning_field")) {
+          yield WidgetHint.UPSTREAM_FIELD_PICKER;
+        }
         // Rest.java loads this trust store with FileInputStream, not HopVfs.
         // A VFS picker could offer remote URLs that native Rest cannot open.
         if (owner.getName().equals("org.apache.hop.pipeline.transforms.rest.RestMeta")
