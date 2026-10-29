@@ -198,6 +198,11 @@ public final class AutomaticConfigDescriptor {
       // but pinned Hop Core omits STREAM_FIELD on InsertUpdateKeyField.keyStream2.
       case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField" ->
           key.equals("name2");
+      // UniqueRowsByHashSet resolves each comparison name with input-row indexOfValue().
+      // The pinned CompareField.name annotation omits STREAM_FIELD; other settings
+      // such as store_values and error_description are not input-row references.
+      case "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta$CompareField" ->
+          key.equals("name");
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" -> key.equals("urlField");
       case "org.apache.hop.pipeline.transforms.http.HttpMeta$QueryParameter",
            "org.apache.hop.pipeline.transforms.http.HttpMeta$HeaderParameter" ->
