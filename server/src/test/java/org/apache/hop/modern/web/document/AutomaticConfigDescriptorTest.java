@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Descriptor;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Property;
-import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.PickerContext;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Presentation;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Shape;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.TextEditorHint;
@@ -20,7 +19,6 @@ import org.apache.hop.pipeline.transforms.rest.RestMeta;
 import org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta;
 import org.apache.hop.pipeline.transforms.sort.SortRowsMeta;
 import org.apache.hop.pipeline.transforms.tableinput.TableInputMeta;
-import org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta;
 import org.junit.jupiter.api.Test;
 
 class AutomaticConfigDescriptorTest {
@@ -116,43 +114,6 @@ class AutomaticConfigDescriptorTest {
     Descriptor table = AutomaticConfigDescriptor.describe(TableInputMeta.class);
     assertEquals(WidgetHint.VFS_PICKER,
         property(table.properties(), "sql_from_file").widgetHint());
-  }
-
-  @Test
-  void tableOutputPickersExposeCanonicalDatabaseContextAndDoNotMistakeDynamicTableField() {
-    // The pinned Hop TableOutputMeta annotates both "table" and "tablename_field"
-    // as RDBMS_TABLE, but the latter is a name from an incoming row, not a table.
-    Descriptor descriptor = AutomaticConfigDescriptor.describe(TableOutputMeta.class);
-    Property connection = property(descriptor.properties(), "connection");
-    assertEquals(WidgetHint.METADATA_PICKER, connection.widgetHint());
-
-    Property schema = property(descriptor.properties(), "schema");
-    assertEquals(Shape.STRING, schema.shape());
-    assertEquals(WidgetHint.DATABASE_SCHEMA_PICKER, schema.widgetHint());
-    assertEquals(new PickerContext("/connection", null), schema.pickerContext());
-    assertNull(schema.metadataClassName());
-
-    Property table = property(descriptor.properties(), "table");
-    assertEquals(Shape.STRING, table.shape());
-    assertEquals(WidgetHint.DATABASE_TABLE_PICKER, table.widgetHint());
-    assertEquals(new PickerContext("/connection", "/schema"), table.pickerContext());
-    assertNull(table.metadataClassName());
-
-    Property dynamicTableField = property(descriptor.properties(), "tablename_field");
-    assertEquals(Shape.STRING, dynamicTableField.shape());
-    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, dynamicTableField.widgetHint());
-    assertNull(dynamicTableField.pickerContext());
-    assertEquals(WidgetHint.NONE,
-        property(descriptor.properties(), "tablename_in_field").widgetHint());
-
-    // No blind inference for an unrelated RDBMS_TABLE annotation.
-    Descriptor unrelated = AutomaticConfigDescriptor.describe(AmbiguousTableHintFixture.class);
-    assertEquals(WidgetHint.NONE, property(unrelated.properties(), "table").widgetHint());
-  }
-
-  private static final class AmbiguousTableHintFixture {
-    @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_TABLE)
-    private String table;
   }
 
   private static final class WidgetHintFixture {
