@@ -149,6 +149,10 @@ public final class AutomaticConfigDescriptor {
            "org.apache.hop.pipeline.transforms.rest.fields.ParameterField",
            "org.apache.hop.pipeline.transforms.rest.fields.MatrixParameterField" ->
           key.equals("field");
+      // SelectValues Select & Alter reads this name from the incoming row; rename is output-only.
+      // Later Remove/Meta tabs operate on the previous tab output and need stage-aware pickers.
+      case "org.apache.hop.pipeline.transforms.selectvalues.SelectField" ->
+          key.equals("name");
       // InsertUpdate uses name2 as the second incoming row field for BETWEEN,
       // but pinned Hop Core omits STREAM_FIELD on InsertUpdateKeyField.keyStream2.
       case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField" ->
