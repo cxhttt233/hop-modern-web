@@ -157,6 +157,14 @@ public final class AutomaticConfigDescriptor {
       // include_field and rownum_field are generated output names, not input references.
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
           key.equals("valueField");
+      // Pinned GroupBy resolves these three names against the incoming row.
+      // Aggregate output aliases and valuefield parameters are not input fields.
+      case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
+          key.equals("field_ignore");
+      case "org.apache.hop.pipeline.transforms.groupby.GroupingField" ->
+          key.equals("name");
+      case "org.apache.hop.pipeline.transforms.groupby.Aggregation" ->
+          key.equals("subject");
       // InsertUpdate uses name2 as the second incoming row field for BETWEEN,
       // but pinned Hop Core omits STREAM_FIELD on InsertUpdateKeyField.keyStream2.
       case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField" ->
