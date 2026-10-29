@@ -95,6 +95,27 @@ class AutomaticConfigDescriptorTest {
     assertNull(property(fixture.properties(), "numericConnection").metadataClassName());
   }
 
+  @Test
+  void distinguishesRestNativeLocalTrustStoreFromVfsAndUnrelatedStringFields() {
+    // Pinned Rest.java opens trustStoreFile with java.io.FileInputStream,
+    // so the descriptor must not offer remote HopVfs locations.
+    Descriptor rest = AutomaticConfigDescriptor.describe(RestMeta.class);
+    Property trustStore = property(rest.properties(), "trustStoreFile");
+    assertEquals(Shape.STRING, trustStore.shape());
+    assertEquals(WidgetHint.LOCAL_FILE_PICKER, trustStore.widgetHint());
+    assertNull(trustStore.metadataClassName());
+
+    assertEquals(WidgetHint.NONE, property(rest.properties(), "trustStorePassword").widgetHint());
+    assertEquals(WidgetHint.NONE, property(rest.properties(), "url").widgetHint());
+    assertEquals(WidgetHint.METADATA_PICKER,
+        property(rest.properties(), "connection_name").widgetHint());
+
+    // TableInput's existing file reference retains its VFS semantics.
+    Descriptor table = AutomaticConfigDescriptor.describe(TableInputMeta.class);
+    assertEquals(WidgetHint.VFS_PICKER,
+        property(table.properties(), "sql_from_file").widgetHint());
+  }
+
   private static final class WidgetHintFixture {
     @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.FILE_PATH)
     private String path;
