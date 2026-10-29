@@ -153,6 +153,10 @@ public final class AutomaticConfigDescriptor {
       // Later Remove/Meta tabs operate on the previous tab output and need stage-aware pickers.
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectField" ->
           key.equals("name");
+      // JsonInput reads valueField from the incoming row when IsInFields is true;
+      // include_field and rownum_field are generated output names, not input references.
+      case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" ->
+          key.equals("valueField");
       // InsertUpdate uses name2 as the second incoming row field for BETWEEN,
       // but pinned Hop Core omits STREAM_FIELD on InsertUpdateKeyField.keyStream2.
       case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField" ->
