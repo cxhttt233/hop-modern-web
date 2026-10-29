@@ -149,6 +149,12 @@ public final class AutomaticConfigDescriptor {
            "org.apache.hop.pipeline.transforms.rest.fields.ParameterField",
            "org.apache.hop.pipeline.transforms.rest.fields.MatrixParameterField" ->
           key.equals("field");
+      // Pinned CheckSum and SetVariable consume these names from incoming row metadata.
+      // Their output field/variable names are not incoming-row references.
+      case "org.apache.hop.pipeline.transforms.checksum.Field" ->
+          key.equals("name");
+      case "org.apache.hop.pipeline.transforms.setvariable.VariableItem" ->
+          key.equals("field_name");
       // StringCut and ConcatFields both select existing input-row fields, even though
       // their nested Hop annotations use the default (untyped) metadata property.
       // Their output aliases, cut boundaries, and formatting values remain free text.
