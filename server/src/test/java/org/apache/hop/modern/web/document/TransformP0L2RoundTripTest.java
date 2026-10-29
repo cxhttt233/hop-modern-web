@@ -8,6 +8,7 @@ import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Descriptor;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Property;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.Shape;
 import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.TextEditorHint;
+import org.apache.hop.modern.web.document.AutomaticConfigDescriptor.WidgetHint;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.plugins.*;
 import org.apache.hop.core.xml.XmlHandler;
@@ -35,6 +36,52 @@ class TransformP0L2RoundTripTest {
     }
     assertEquals(IDS.size(),pass); System.out.println("PROD_P0_L2_BATCH_PASS="+pass+"/"+IDS.size());
   }
+  @Test
+  void tableOutputDatabasePickersCarryCanonicalContextWithoutConfusingDynamicRowFields()
+      throws Exception {
+    // This is P0-only: the minimal server/graph Maven chain does not install TableOutput.
+    Descriptor descriptor = descriptorFor(PluginRegistry.getInstance(), "TableOutput");
+    assertEquals(WidgetHint.METADATA_PICKER,
+        property(descriptor, "connection").widgetHint());
+
+    Property schema = property(descriptor, "schema");
+    assertEquals(Shape.STRING, schema.shape());
+    assertEquals(WidgetHint.DATABASE_SCHEMA_PICKER, schema.widgetHint());
+    assertEquals(new AutomaticConfigDescriptor.PickerContext("/connection", null),
+        schema.pickerContext());
+
+    Property table = property(descriptor, "table");
+    assertEquals(Shape.STRING, table.shape());
+    assertEquals(WidgetHint.DATABASE_TABLE_PICKER, table.widgetHint());
+    assertEquals(new AutomaticConfigDescriptor.PickerContext("/connection", "/schema"),
+        table.pickerContext());
+    assertNull(table.metadataClassName());
+
+    // Hop annotates tablename_field as RDBMS_TABLE, but native TableOutput
+    // resolves its value from an incoming row, not from database metadata.
+    Property dynamicField = property(descriptor, "tablename_field");
+    assertEquals(Shape.STRING, dynamicField.shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, dynamicField.widgetHint());
+    assertNull(dynamicField.pickerContext());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "tablename_in_field").widgetHint());
+
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    var schemaJson = mapper.valueToTree(schema);
+    var tableJson = mapper.valueToTree(table);
+    var dynamicJson = mapper.valueToTree(dynamicField);
+    assertEquals("/connection",
+        schemaJson.at("/pickerContext/connectionPointer").asText());
+    assertEquals("/connection",
+        tableJson.at("/pickerContext/connectionPointer").asText());
+    assertEquals("/schema",
+        tableJson.at("/pickerContext/schemaPointer").asText());
+    assertEquals("DATABASE_TABLE_PICKER", tableJson.path("widgetHint").asText());
+    assertEquals("UPSTREAM_FIELD_PICKER", dynamicJson.path("widgetHint").asText());
+    assertFalse(dynamicJson.path("pickerContext").isObject());
+    System.out.println("PROD_P0_TABLEOUTPUT_PICKER_CANONICAL_CONTEXT=PASS");
+  }
+
   @Test
   void dataGridDeclaredFieldFormatsAndPrecisionPropagateToNativeOutputMetadata()
       throws Exception {
