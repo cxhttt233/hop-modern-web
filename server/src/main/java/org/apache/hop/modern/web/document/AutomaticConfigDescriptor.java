@@ -695,6 +695,22 @@ public final class AutomaticConfigDescriptor {
                       + "draft fields. The canonical pointers refer to the wire containers built "
                       + "from Hop groupKey, not a flattened form path."),
               new RuntimePrecondition(
+                  "REST_FIELD_URL_BASIC_AUTH_IS_NOT_BOUND_TO_ONE_ORIGIN",
+                  List.of("/urlInField", "/urlField", "/url", "/httpLogin",
+                      "/httpPassword", "/non_preemptive_basic_auth"),
+                  "With urlInField=true and transform-level Basic credentials, "
+                      + "native Rest.createTransformClientSettings() does not set an "
+                      + "authentication origin, even when a literal fallback url is "
+                      + "configured. A row-supplied URL can therefore select a different "
+                      + "HTTP origin while reusing the same credentials. With the default "
+                      + "non_preemptive_basic_auth=false, Basic credentials may be sent "
+                      + "on the first request to each row-selected origin. Treat the "
+                      + "upstream URL field as security-sensitive input and restrict "
+                      + "allowed destinations before execution; preserve the password "
+                      + "as sensitive metadata and never expose it in diagnostics. "
+                      + "This describes the pinned native runtime behavior, not a "
+                      + "draft-save validator or a claim of network isolation."),
+              new RuntimePrecondition(
                   "REST_BASIC_AUTH_PREEMPTIVE_FLAG_IS_INVERTED",
                   List.of("/non_preemptive_basic_auth"),
                   "RestMeta stores non_preemptive_basic_auth as the BOOLEAN inverse of isPreemptive(): false (the default) sends Basic credentials on the first request, while true waits for a 401 challenge. The legacy XML preemptive key was removed because it never affected runtime behavior; an old HPL lacking non_preemptive_basic_auth must retain the default preemptive behavior. Preserve this exact wire boolean through config JSON editing and Hop XML disk reopen; do not reverse the UI label into the persisted value or expose password material. This is a compatibility diagnostic, not a save-time validator."),
