@@ -291,6 +291,117 @@ class RestRetryExactTokenP0Test {
   }
 
   @Test
+  void restHttpClientMayRepeatPostOn503WithHopRetryListsExcludedAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    // HttpClient5's response-status retry is not restricted to idempotent verbs.
+    // A successful POST after a 503 can therefore mean two remote write attempts.
+    AtomicInteger attempts = new AtomicInteger();
+    var methods = new java.util.concurrent.CopyOnWriteArrayList<String>();
+    com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
+        new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/post503", request -> {
+      try (request) {
+        methods.add(request.getRequestMethod());
+        request.getRequestBody().readAllBytes();
+        int status = attempts.incrementAndGet() == 1 ? 503 : 200;
+        request.getResponseHeaders().add("Retry-After", "0");
+        byte[] body = "post-retry-雪".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        request.sendResponseHeaders(status, body.length);
+        request.getResponseBody().write(body);
+      }
+    });
+    server.start();
+    try {
+      String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/post503";
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(plugin);
+      ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+      original.setDefault();
+      original.getClass().getMethod("setUrl", String.class).invoke(original, url);
+
+      var contract = AutomaticConfigDescriptor.describe(original.getClass())
+          .runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "REST_HTTPCLIENT_DEFAULT_429_503_RETRIES_ARE_INDEPENDENT_OF_HOP_LISTS"))
+          .findFirst().orElseThrow();
+      assertTrue(contract.explanation().contains("POST receiving 503"));
+      assertEquals(List.of("/method", "/retryMethods/retryMethod",
+          "/retryStatusCodes/retryStatusCode", "/retryTimes", "/retryDelayMs"),
+          contract.keyListPointers());
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("rest-post-503-auto-retry.hpl");
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("rest-post-503-auto-retry");
+      pipeline.addTransform(new TransformMeta("Rest", "rest-post-retry-node", original));
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("rest-post-retry-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("rest-post-retry-doc",
+          new PipelineConfigResource.ReadRequest("rest-post-retry-node"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("method", "POST");
+      draft.put("retryTimes", 0);
+      draft.put("retryDelayMs", 1);
+      draft.putObject("retryMethods").putArray("retryMethod").add("GET");
+      draft.putObject("retryStatusCodes").putArray("retryStatusCode").add("418");
+      var write = resource.write("rest-post-retry-doc",
+          new PipelineConfigResource.WriteRequest("rest-post-retry-node", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform("rest-post-retry-node").getTransform();
+      JsonNode wire = ConfigJsonSerializer.toJson(diskMeta, provider);
+      assertEquals("POST", wire.at("/method").asText());
+      assertEquals(0, wire.at("/retryTimes").intValue());
+      assertEquals("GET", wire.at("/retryMethods/retryMethod/0").asText());
+      assertEquals("418", wire.at("/retryStatusCodes/retryStatusCode/0").asText());
+
+      ClassLoader loader = diskMeta.getClass().getClassLoader();
+      Class<?> restType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+      Object data = dataType.getConstructor().newInstance();
+      Object rest = restType.getConstructor(TransformMeta.class, diskMeta.getClass(),
+          dataType, int.class, PipelineMeta.class, org.apache.hop.pipeline.Pipeline.class)
+          .newInstance(reopened.findTransform("rest-post-retry-node"), diskMeta, data, 0,
+              reopened, Mockito.spy(new LocalPipelineEngine()));
+      restType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class).invoke(rest, provider);
+      assertTrue((Boolean) restType.getMethod("init").invoke(rest));
+      try {
+        dataType.getField("realUrl").set(data, url);
+        dataType.getField("method").set(data, "POST");
+        Method invoke = restType.getDeclaredMethod("invokeRestExchange", Object[].class,
+            String.class, java.util.LinkedHashMap.class, java.util.LinkedHashMap.class,
+            java.util.LinkedHashMap.class);
+        invoke.setAccessible(true);
+        Object result = invoke.invoke(rest, (Object) new Object[0], null,
+            new java.util.LinkedHashMap<String, String>(),
+            new java.util.LinkedHashMap<String, String>(),
+            new java.util.LinkedHashMap<String, String>());
+        var status = result.getClass().getDeclaredField("status");
+        status.setAccessible(true);
+        assertEquals(200, status.getInt(result));
+      } finally {
+        restType.getMethod("dispose").invoke(rest);
+      }
+      assertEquals(2, attempts.get(),
+          "HttpClient5 repeats POST on 503 despite Hop retryTimes=0 and excluded POST");
+      assertEquals(List.of("POST", "POST"), methods);
+      System.out.println("PROD_P0_REST_HTTPCLIENT_POST_503_AUTO_RETRY_DISK_REOPEN=PASS");
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
   void restMatchingRetryStatusWithZeroAttemptsFailsButNonmatchingStatusReturnsNativeResponse(
       @TempDir Path tempDir) throws Exception {
     // Native Rest.executeWithRetry treats a matching status as an error even
