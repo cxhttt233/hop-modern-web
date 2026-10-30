@@ -23,6 +23,47 @@ class TransformP0L2RoundTripTest {
   @BeforeAll static void init() throws Exception { HopClientEnvironment.init(); ModernWebServer.initializePipelinePlugins(); }
 
   @Test
+  void uniqueRowsHashSetComparisonListPublishesNativeIndexedWirePointers() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "UniqueRowsByHashSet");
+    assertNotNull(plugin, "production UniqueRowsByHashSet plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Class<?> compareField = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta$CompareField");
+    var constructor = compareField.getConstructor(String.class);
+    meta.getClass().getMethod("setCompareFields", List.class).invoke(meta,
+        List.of(constructor.newInstance("测站<&雪>"), constructor.newInstance("水位")));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(1, descriptor.wireLists().size());
+    var contract = descriptor.wireLists().get(0);
+    assertEquals("field", contract.descriptorPath());
+    assertEquals("/fields/field", contract.listPointer());
+    assertEquals("/fields/field/{index}", contract.itemPointerTemplate());
+    assertEquals("/fields/field/0", contract.itemPointer(0));
+    assertEquals("/fields/field/1", contract.itemPointer(1));
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "field", "name").widgetHint());
+
+    var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, new MemoryMetadataProvider());
+    assertTrue(nativeWire.at(contract.listPointer()).isArray());
+    assertEquals(2, nativeWire.at(contract.listPointer()).size());
+    assertEquals("测站<&雪>", nativeWire.at(contract.itemPointer(0) + "/name").asText());
+    assertEquals("水位", nativeWire.at(contract.itemPointer(1) + "/name").asText());
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/fields/field", published.at("/wireLists/0/listPointer").asText());
+    assertEquals("/fields/field/{index}",
+        published.at("/wireLists/0/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_UNIQUE_ROWS_HASHSET_CANONICAL_COMPARE_WIRE_LIST=PASS");
+  }
+
+  @Test
   void uniqueRowsHashSetComparisonNamesExposeNativeInputPickerWithoutMislabelingOptions()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
