@@ -124,6 +124,14 @@ public final class AutomaticConfigDescriptor {
       // fields group. The list is distinct from the root store_values flag.
       case "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta" -> List.of(
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
+      // Legacy JavaScript ScriptValueMod keeps executable scripts and declared
+      // output fields in separate native groupKey containers. Both are ordered
+      // lists; publishing their wire paths prevents an editor from treating
+      // script names and output field names as the same repeated leaf.
+      case "org.apache.hop.pipeline.transforms.javascript.ScriptValuesMeta" -> List.of(
+          new WireListContract("jsScript", "/jsScripts/jsScript",
+              "/jsScripts/jsScript/{index}"),
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
           new WireListContract("fields.remove", "/fields/remove", "/fields/remove/{index}"),
