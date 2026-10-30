@@ -6232,6 +6232,63 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEOUTPUT_CANONICAL_STREAM_COLUMN_WIRE_LIST=PASS");
   }
 
+  @Test
+  void mergeJoinTwoPrimitiveStringKeyListsPublishIndependentCanonicalWirePointers()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "MergeJoin");
+    assertNotNull(plugin, "production MergeJoin plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.getClass().getMethod("setKeyFields1", List.class)
+        .invoke(meta, List.of("主键<&>雪", "左侧B"));
+    meta.getClass().getMethod("setKeyFields2", List.class)
+        .invoke(meta, List.of("主键<&>雪", "右侧B"));
+    meta.getClass().getMethod("setJoinType", String.class).invoke(meta, "INNER");
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(List.of("keys_1.key", "keys_2.key"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/keys_1/key", "/keys_2/key"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertEquals(List.of("keys_1", "keys_2"),
+        descriptor.properties().stream().filter(p -> p.key().equals("key"))
+            .map(Property::groupKey).toList());
+    assertTrue(descriptor.properties().stream()
+        .filter(p -> p.key().equals("key"))
+        .allMatch(p -> p.shape() == Shape.LIST));
+
+    var provider = new MemoryMetadataProvider();
+    var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, provider);
+    for (var contract : descriptor.wireLists()) {
+      assertEquals(contract.listPointer() + "/{index}", contract.itemPointerTemplate());
+      assertEquals(2, nativeWire.at(contract.listPointer()).size());
+      assertEquals("主键<&>雪", nativeWire.at(contract.itemPointer(0)).asText());
+    }
+    assertEquals("左侧B", nativeWire.at("/keys_1/key/1").asText());
+    assertEquals("右侧B", nativeWire.at("/keys_2/key/1").asText());
+    assertEquals("INNER", nativeWire.at("/join_type").asText());
+
+    // Editing the right-side list must not overwrite the same-named left-side leaf.
+    var edited = nativeWire.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ArrayNode) edited.at("/keys_2/key"))
+        .set(1, com.fasterxml.jackson.databind.node.TextNode.valueOf("右侧更新<&>"));
+    var decoded = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.fromJson(
+        edited, meta.getClass(), provider);
+    var roundTrip = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        decoded, provider);
+    assertEquals("左侧B", roundTrip.at("/keys_1/key/1").asText());
+    assertEquals("右侧更新<&>", roundTrip.at("/keys_2/key/1").asText());
+    assertEquals("INNER", roundTrip.at("/join_type").asText());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/keys_2/key/{index}",
+        published.at("/wireLists/1/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_MERGEJOIN_CANONICAL_DUAL_STRING_KEYS=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
