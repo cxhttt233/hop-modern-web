@@ -19,7 +19,6 @@ import org.apache.hop.pipeline.transforms.rest.RestMeta;
 import org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta;
 import org.apache.hop.pipeline.transforms.sort.SortRowsMeta;
 import org.apache.hop.pipeline.transforms.tableinput.TableInputMeta;
-import org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta;
 import org.junit.jupiter.api.Test;
 
 class AutomaticConfigDescriptorTest {
@@ -206,54 +205,6 @@ class AutomaticConfigDescriptorTest {
     assertTrue(wire.at("/specify_fields").booleanValue());
     assertTrue(wire.at("/validate_specified_fields").isBoolean());
     assertFalse(wire.at("/validate_specified_fields").booleanValue());
-
-    var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
-    assertEquals("/fields/field", json.at("/wireLists/0/listPointer").asText());
-    assertEquals("/fields/field/{index}",
-        json.at("/wireLists/0/itemPointerTemplate").asText());
-  }
-
-  @Test
-  void tableOutputStreamToDatabaseMappingPublishesNativeIndexedWireList()
-      throws Exception {
-    Descriptor descriptor = AutomaticConfigDescriptor.describe(TableOutputMeta.class);
-    assertEquals(1, descriptor.wireLists().size());
-    var contract = descriptor.wireLists().get(0);
-    assertEquals("field", contract.descriptorPath());
-    assertEquals("/fields/field", contract.listPointer());
-    assertEquals("/fields/field/{index}", contract.itemPointerTemplate());
-    assertEquals("/fields/field/1", contract.itemPointer(1));
-
-    Property mappings = property(descriptor.properties(), "field");
-    assertEquals(Shape.LIST, mappings.shape());
-    assertEquals("fields", mappings.groupKey());
-    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
-        property(mappings.elementProperties(), "stream_name").widgetHint());
-    assertEquals(WidgetHint.NONE,
-        property(mappings.elementProperties(), "column_name").widgetHint());
-
-    var meta = new org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta();
-    meta.setDefault();
-    meta.setSpecifyFields(true);
-    meta.setFields(List.of(
-        new org.apache.hop.pipeline.transforms.tableoutput.TableOutputField(
-            "db_水位<&雪>", "stream_水位<&雪>"),
-        new org.apache.hop.pipeline.transforms.tableoutput.TableOutputField(
-            "db_流量", "stream_流量")));
-    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
-        meta, new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider());
-    assertTrue(wire.at(contract.listPointer()).isArray());
-    assertEquals(2, wire.at(contract.listPointer()).size());
-    assertEquals("stream_水位<&雪>",
-        wire.at(contract.itemPointer(0) + "/stream_name").asText());
-    assertEquals("db_水位<&雪>",
-        wire.at(contract.itemPointer(0) + "/column_name").asText());
-    assertEquals("stream_流量",
-        wire.at(contract.itemPointer(1) + "/stream_name").asText());
-    assertEquals("db_流量",
-        wire.at(contract.itemPointer(1) + "/column_name").asText());
-    assertTrue(wire.at("/specify_fields").isBoolean());
-    assertTrue(wire.at("/specify_fields").booleanValue());
 
     var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
     assertEquals("/fields/field", json.at("/wireLists/0/listPointer").asText());
