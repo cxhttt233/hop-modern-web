@@ -6538,6 +6538,113 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_DATAGRID_CANONICAL_COLUMNS_ROWS_WIRE_LISTS=PASS");
   }
 
+
+  @Test
+  void tableInputSpecifiedOutputFieldsPreserveNativeIndexedWireAndRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableInput");
+    assertNotNull(plugin, "production TableInput plugin missing");
+    var meta = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+        plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.setSpecifyFields(true);
+    meta.setValidateSpecifiedFields(false);
+
+    var station = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    station.setName("测站<&雪>");
+    station.setType(org.apache.hop.core.row.IValueMeta.TYPE_STRING);
+    station.setLength(48);
+    var level = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    level.setName("水位");
+    level.setType(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
+    level.setLength(18);
+    meta.setFields(List.of(station, level));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(Shape.NUMBER, property(descriptor, "field", "type").shape());
+    assertEquals(Shape.NUMBER, property(descriptor, "field", "length").shape());
+    assertEquals(List.of("field"), descriptor.wireLists().stream()
+        .map(AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    var contract = descriptor.wireLists().get(0);
+    assertEquals("/fields/field", contract.listPointer());
+    assertEquals("/fields/field/{index}", contract.itemPointerTemplate());
+    assertEquals("/fields/field/1", contract.itemPointer(1));
+
+    var provider = new MemoryMetadataProvider();
+    var initialWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, provider);
+    assertTrue(initialWire.at(contract.listPointer()).isArray());
+    assertEquals(2, initialWire.at(contract.listPointer()).size());
+    assertEquals("测站<&雪>", initialWire.at(contract.itemPointer(0) + "/name").asText());
+    assertEquals("水位", initialWire.at(contract.itemPointer(1) + "/name").asText());
+    assertEquals(48, initialWire.at(contract.itemPointer(0) + "/length").intValue());
+    assertEquals(18, initialWire.at(contract.itemPointer(1) + "/length").intValue());
+
+    PipelineDocumentStore store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    java.nio.file.Path hpl = tempDir.resolve("tableinput-specified-fields.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("tableinput-specified-fields");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableInput", "tableinput-node", meta));
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("tableinput-fields-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    jakarta.ws.rs.core.Response read = resource.read(
+        "tableinput-fields-doc", new PipelineConfigResource.ReadRequest("tableinput-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    var edited = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    var second = (com.fasterxml.jackson.databind.node.ObjectNode)
+        edited.at(contract.itemPointer(1));
+    second.put("name", "水位_更新<&雪>");
+    second.put("length", 24);
+    jakarta.ws.rs.core.Response write = resource.write(
+        "tableinput-fields-doc",
+        new PipelineConfigResource.WriteRequest("tableinput-node", edited));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    var reopened = store.open(hpl);
+    var transform = reopened.findTransform("tableinput-node");
+    assertNotNull(transform);
+    var diskMeta = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+        transform.getTransform();
+    var disk = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertEquals(2, disk.at(contract.listPointer()).size());
+    assertEquals("测站<&雪>", disk.at(contract.itemPointer(0) + "/name").asText());
+    assertEquals("水位_更新<&雪>", disk.at(contract.itemPointer(1) + "/name").asText());
+    assertEquals(48, disk.at(contract.itemPointer(0) + "/length").intValue());
+    assertEquals(24, disk.at(contract.itemPointer(1) + "/length").intValue());
+    assertEquals(initialWire.at(contract.itemPointer(0) + "/type"),
+        disk.at(contract.itemPointer(0) + "/type"));
+    assertEquals(initialWire.at(contract.itemPointer(1) + "/type"),
+        disk.at(contract.itemPointer(1) + "/type"));
+    assertTrue(disk.at("/specify_fields").booleanValue());
+    assertFalse(disk.at("/validate_specified_fields").booleanValue());
+
+    var output = diskMeta.createSpecifiedRowMeta("tableinput-node", null);
+    assertEquals(2, output.size());
+    assertEquals("测站<&雪>", output.getValueMeta(0).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        output.getValueMeta(0).getType());
+    assertEquals("水位_更新<&雪>", output.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        output.getValueMeta(1).getType());
+    assertEquals(24, output.getValueMeta(1).getLength());
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/fields/field/{index}",
+        published.at("/wireLists/0/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_TABLEINPUT_SPECIFIED_FIELDS_INDEXED_DISK_REOPEN=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
