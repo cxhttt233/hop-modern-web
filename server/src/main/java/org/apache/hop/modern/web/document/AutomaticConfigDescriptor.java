@@ -120,6 +120,10 @@ public final class AutomaticConfigDescriptor {
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" -> List.of(
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
+      // UniqueRowsByHashSet stores ordered comparison column names in the native
+      // fields group. The list is distinct from the root store_values flag.
+      case "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta" -> List.of(
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
           new WireListContract("fields.remove", "/fields/remove", "/fields/remove/{index}"),
