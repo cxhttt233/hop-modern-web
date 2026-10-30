@@ -956,4 +956,136 @@ class SelectValuesFullPipelineP0Test {
     System.out.println("PROD_P0_SELECTVALUES_ISO_OFFSET_INSTANT_JSON_HPL_ROWS=PASS");
   }
 
+
+  /**
+   * Precision and rounding metadata affect formatting, but a Number-to-Number
+   * SelectValues stage does not mutate the already-typed Double in the row.
+   * Prove this distinction with the real engine after JSON edit and HPL reopen.
+   */
+  @Test
+  void selectValuesSameTypeNumberPrecisionDoesNotRoundRowsAfterHplDiskReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String[] spec : new String[][] {
+        {"实测水位<&>", "Number"}, {"站点", "String"}}) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, spec[0]);
+      fieldType.getMethod("setType", String.class).invoke(column, spec[1]);
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("1.2345", "黄河"), List.of("2.3456", "长江"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SelectValues", "select-node", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-same-type-number-precision");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-same-type-number-precision.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-precision-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-precision-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject());
+    fields.putArray("meta").addObject()
+        .put("name", "实测水位<&>")
+        .put("rename", "显示水位")
+        .put("type", "Number")
+        .put("length", 12)
+        .put("precision", 2)
+        .put("roundingType", "half_up");
+    var write = resource.write("select-precision-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertEquals("实测水位<&>", wire.at("/fields/meta/0/name").asText());
+    assertEquals("显示水位", wire.at("/fields/meta/0/rename").asText());
+    assertEquals("Number", wire.at("/fields/meta/0/type").asText());
+    assertEquals(2, wire.at("/fields/meta/0/precision").intValue());
+    assertEquals("half_up", wire.at("/fields/meta/0/roundingType").asText());
+    var requirement = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("select-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SELECT_VALUES_SAME_TYPE_NUMBER_PRECISION_IS_METADATA_ONLY"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/meta"), requirement.keyListPointers());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("select-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "same-type Number pipeline must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(emittedMeta.get());
+    assertEquals("显示水位", emittedMeta.get().getValueMeta(0).getName());
+    assertEquals(IValueMeta.TYPE_NUMBER, emittedMeta.get().getValueMeta(0).getType());
+    assertEquals(2, emittedMeta.get().getValueMeta(0).getPrecision());
+    assertEquals("half_up", emittedMeta.get().getValueMeta(0).getRoundingType());
+    assertEquals(2, emitted.size());
+    java.util.Map<String, Double> expected =
+        java.util.Map.of("黄河", 1.2345, "长江", 2.3456);
+    for (Object[] row : emitted) {
+      assertInstanceOf(Double.class, row[0]);
+      assertEquals(expected.get((String) row[1]), (Double) row[0], 0.000000001,
+          "precision metadata must not silently round raw row values");
+    }
+    System.out.println("PROD_P0_SELECTVALUES_SAME_TYPE_PRECISION_METADATA_ONLY=PASS");
+  }
 }
