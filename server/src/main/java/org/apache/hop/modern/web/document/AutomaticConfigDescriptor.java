@@ -93,6 +93,10 @@ public final class AutomaticConfigDescriptor {
       // This list is output metadata, not a list of upstream parameter names.
       case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta" -> List.of(
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
+      // TableOutput maps an incoming stream column to a database column in each
+      // ordered TableOutputField; native Hop stores both names under fields.field.
+      case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" -> List.of(
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" -> List.of(
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
