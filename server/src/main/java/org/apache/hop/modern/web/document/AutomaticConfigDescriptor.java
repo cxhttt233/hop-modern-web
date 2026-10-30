@@ -1140,6 +1140,23 @@ public final class AutomaticConfigDescriptor {
                       + "conversion entries across JSON editing and HPL disk reopen. "
                       + "This is a runtime data-accuracy diagnostic, not a save-time validator."),
               new RuntimePrecondition(
+                  "SELECT_VALUES_INTEGER_TO_NUMBER_LOSES_PRECISION_ABOVE_2_POW_53",
+                  List.of("/fields/meta"),
+                  "When fields.meta[*].type=Number converts an incoming Integer "
+                      + "(signed 64-bit Long), pinned SelectValues.metadataValues() "
+                      + "delegates to ValueMetaBase.getNumber(), which calls "
+                      + "Long.doubleValue(). IEEE-754 binary64 cannot represent "
+                      + "every integer above 2^53: 9007199254740991 stays exact, "
+                      + "but 9007199254740993 becomes 9007199254740992 and "
+                      + "-9007199254740993 becomes -9007199254740992 without an "
+                      + "exception. Preserve the original Integer source type, "
+                      + "ordered /fields/meta typed LIST, target Number and rename "
+                      + "through JSON editing and HPL disk reopen; flag potential "
+                      + "loss of integer identifier or measurement precision before "
+                      + "execution. Do not silently substitute BigNumber or reject "
+                      + "editable drafts. This is a native runtime data-loss "
+                      + "diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
                   "SELECT_VALUES_BIGNUMBER_INTEGER_OVERFLOW_WRAP",
                   List.of("/fields/meta"),
                   "When fields.meta[*].type=Integer converts an incoming BigNumber "
