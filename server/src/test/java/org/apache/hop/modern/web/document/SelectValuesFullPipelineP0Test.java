@@ -821,4 +821,132 @@ class SelectValuesFullPipelineP0Test {
     }
     System.out.println("PROD_P0_SELECTVALUES_BOOLEAN_UNKNOWN_TOKEN_JSON_HPL_ROWS=PASS");
   }
+
+  /**
+   * A monitoring timestamp with an explicit ISO-8601 offset denotes an instant,
+   * not the wall-clock time of the runner. Verify the pinned SelectValues
+   * conversion mask handles +08:00, -04:00 and Z as the same instant after
+   * T3 JSON editing and a real Hop HPL disk reopen.
+   */
+  @Test
+  void selectValuesIso8601OffsetTimestampsPreserveInstantAcrossHplDiskReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String name : List.of("采集时刻<&>", "站点")) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, name);
+      fieldType.getMethod("setType", String.class).invoke(column, "String");
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("2026-10-31T08:30:00+08:00", "黄河"),
+        List.of("2026-10-30T20:30:00-04:00", "长江"),
+        List.of("2026-10-31T00:30:00Z", "珠江"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SelectValues", "select-node", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-iso-offset-instant");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-iso-offset.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-offset-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-offset-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject());
+    fields.putArray("meta").addObject()
+        .put("name", "采集时刻<&>")
+        .put("rename", "UTC采集时刻")
+        .put("type", "Date")
+        .put("length", -1)
+        .put("precision", -1)
+        .put("conversion_mask", "yyyy-MM-dd'T'HH:mm:ssXXX");
+    var write = resource.write("select-offset-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertEquals("采集时刻<&>", wire.at("/fields/meta/0/name").asText());
+    assertEquals("UTC采集时刻", wire.at("/fields/meta/0/rename").asText());
+    assertEquals("Date", wire.at("/fields/meta/0/type").asText());
+    assertEquals("yyyy-MM-dd'T'HH:mm:ssXXX",
+        wire.at("/fields/meta/0/conversion_mask").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("select-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native ISO offset conversion must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(emittedMeta.get());
+    assertEquals(IValueMeta.TYPE_DATE, emittedMeta.get().getValueMeta(0).getType());
+    assertEquals("UTC采集时刻", emittedMeta.get().getValueMeta(0).getName());
+    assertEquals(3, emitted.size());
+    long expected = java.time.Instant.parse("2026-10-31T00:30:00Z").toEpochMilli();
+    java.util.Set<String> stations = new java.util.HashSet<>();
+    for (Object[] row : emitted) {
+      assertInstanceOf(java.util.Date.class, row[0]);
+      assertEquals(expected, ((java.util.Date) row[0]).getTime(),
+          "explicit offsets must normalize to the same instant for " + row[1]);
+      stations.add((String) row[1]);
+    }
+    assertEquals(java.util.Set.of("黄河", "长江", "珠江"), stations);
+    System.out.println("PROD_P0_SELECTVALUES_ISO_OFFSET_INSTANT_JSON_HPL_ROWS=PASS");
+  }
+
 }
