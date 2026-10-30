@@ -23,6 +23,99 @@ class TransformP0L2RoundTripTest {
   @BeforeAll static void init() throws Exception { HopClientEnvironment.init(); ModernWebServer.initializePipelinePlugins(); }
 
   @Test
+  void scriptValueModScriptsAndOutputFieldsPublishDistinctIndexedNativeWireLists()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ScriptValueMod");
+    assertNotNull(plugin, "production JavaScript transform plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    // Use the pinned production plugin, not a hand-written imitation of its
+    // native groupKey JSON. Keep the standalone server tests plugin-independent.
+    Class<?> scriptType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.javascript.ScriptValuesScript");
+    Object firstScript = scriptType.getConstructor(int.class, String.class, String.class)
+        .newInstance(0, "计算<&>雪", "var a = 1;\\nvar b = '雪';");
+    Object secondScript = scriptType.getConstructor(int.class, String.class, String.class)
+        .newInstance(0, "计算二", "var c = a + 1;");
+    metadataField(meta.getClass(), "jsScripts")
+        .set(meta, List.of(firstScript, secondScript));
+
+    Class<?> fieldType = java.util.Arrays.stream(meta.getClass().getDeclaredClasses())
+        .filter(c -> c.getSimpleName().equals("ScriptField")).findFirst().orElseThrow();
+    Object firstField = fieldType.getConstructor().newInstance();
+    fieldType.getMethod("setName", String.class).invoke(firstField, "a");
+    fieldType.getMethod("setRename", String.class).invoke(firstField, "结果<&>雪");
+    fieldType.getMethod("setLength", int.class).invoke(firstField, 12);
+    fieldType.getMethod("setReplace", boolean.class).invoke(firstField, false);
+    Object secondField = fieldType.getConstructor().newInstance();
+    fieldType.getMethod("setName", String.class).invoke(secondField, "c");
+    fieldType.getMethod("setRename", String.class).invoke(secondField, "结果二");
+    fieldType.getMethod("setLength", int.class).invoke(secondField, 24);
+    fieldType.getMethod("setReplace", boolean.class).invoke(secondField, true);
+    metadataField(meta.getClass(), "scriptFields")
+        .set(meta, List.of(firstField, secondField));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(List.of("jsScript", "field"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/jsScripts/jsScript", "/fields/field"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertEquals("jsScripts", property(descriptor, "jsScript").groupKey());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(Shape.LIST, property(descriptor, "jsScript").shape());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals(TextEditorHint.SCRIPT,
+        property(descriptor, "jsScript", "jsScript_script").textEditorHint());
+
+    var provider = new MemoryMetadataProvider();
+    var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, provider);
+    for (var contract : descriptor.wireLists()) {
+      assertEquals(contract.listPointer() + "/{index}", contract.itemPointerTemplate());
+      assertEquals(2, nativeWire.at(contract.listPointer()).size());
+      assertEquals(contract.listPointer() + "/1", contract.itemPointer(1));
+    }
+    assertEquals("计算<&>雪", nativeWire.at("/jsScripts/jsScript/0/jsScript_name").asText());
+    assertEquals("var a = 1;\\nvar b = '雪';",
+        nativeWire.at("/jsScripts/jsScript/0/jsScript_script").asText());
+    assertEquals("结果<&>雪", nativeWire.at("/fields/field/0/rename").asText());
+    assertEquals(24, nativeWire.at("/fields/field/1/length").intValue());
+    assertTrue(nativeWire.at("/fields/field/1/replace").isBoolean());
+    assertTrue(nativeWire.at("/fields/field/1/replace").booleanValue());
+
+    // Two lists share no location: changing the second script and output alias
+    // must preserve the first script and first output field.
+    var edited = nativeWire.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) edited.at("/jsScripts/jsScript/1"))
+        .put("jsScript_script", "var c = 3;\\n// 修改<&>雪");
+    ((com.fasterxml.jackson.databind.node.ObjectNode) edited.at("/fields/field/1"))
+        .put("rename", "新结果<&>");
+    var decoded = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.fromJson(
+        edited, meta.getClass(), provider);
+    var after = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        decoded, provider);
+    assertEquals("var a = 1;\\nvar b = '雪';",
+        after.at("/jsScripts/jsScript/0/jsScript_script").asText());
+    assertEquals("var c = 3;\\n// 修改<&>雪",
+        after.at("/jsScripts/jsScript/1/jsScript_script").asText());
+    assertEquals("结果<&>雪", after.at("/fields/field/0/rename").asText());
+    assertEquals("新结果<&>", after.at("/fields/field/1/rename").asText());
+    assertEquals(24, after.at("/fields/field/1/length").intValue());
+    assertTrue(after.at("/fields/field/1/replace").booleanValue());
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/jsScripts/jsScript/{index}",
+        published.at("/wireLists/0/itemPointerTemplate").asText());
+    assertEquals("/fields/field/{index}",
+        published.at("/wireLists/1/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_SCRIPTVALUE_DUAL_CANONICAL_SCRIPT_FIELD_LISTS=PASS");
+  }
+
+  @Test
   void uniqueRowsHashSetComparisonListPublishesNativeIndexedWirePointers() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "UniqueRowsByHashSet");
