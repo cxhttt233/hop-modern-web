@@ -1088,4 +1088,147 @@ class SelectValuesFullPipelineP0Test {
     }
     System.out.println("PROD_P0_SELECTVALUES_SAME_TYPE_PRECISION_METADATA_ONLY=PASS");
   }
+  /**
+   * Native SelectValues Integer conversion is source-type dependent:
+   * Double is Math.round'ed, while BigDecimal is truncated toward zero.
+   * Prove both branches on equal decimal values after JSON edit and HPL reopen.
+   */
+  @Test
+  void selectValuesNumberAndBigNumberToIntegerUseDifferentNativeRoundingAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String[] spec : new String[][] {
+        {"浮点水位<&>", "Number"}, {"精确水位<&>", "BigNumber"},
+        {"测站", "String"}}) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, spec[0]);
+      fieldType.getMethod("setType", String.class).invoke(column, spec[1]);
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("1.6", "1.6", "黄河"),
+        List.of("-1.6", "-1.6", "长江"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SelectValues", "select-node", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-number-vs-big-number-to-integer");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-integer-rounding.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-integer-rounding-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-integer-rounding-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject());
+    ArrayNode metadata = fields.putArray("meta");
+    metadata.addObject()
+        .put("name", "浮点水位<&>")
+        .put("rename", "浮点整型")
+        .put("type", "Integer");
+    metadata.addObject()
+        .put("name", "精确水位<&>")
+        .put("rename", "精确整型")
+        .put("type", "Integer");
+    var write = resource.write("select-integer-rounding-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertEquals(2, wire.at("/fields/meta").size());
+    assertEquals("浮点水位<&>", wire.at("/fields/meta/0/name").asText());
+    assertEquals("精确水位<&>", wire.at("/fields/meta/1/name").asText());
+    assertEquals("Integer", wire.at("/fields/meta/0/type").asText());
+    assertEquals("Integer", wire.at("/fields/meta/1/type").asText());
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("select-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SELECT_VALUES_NUMBER_VS_BIGNUMBER_TO_INTEGER_ROUNDING_DIFFERS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/meta"), contract.keyListPointers());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("select-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native Integer conversion must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(emittedMeta.get());
+    assertEquals(3, emittedMeta.get().size());
+    assertEquals("浮点整型", emittedMeta.get().getValueMeta(0).getName());
+    assertEquals("精确整型", emittedMeta.get().getValueMeta(1).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, emittedMeta.get().getValueMeta(0).getType());
+    assertEquals(IValueMeta.TYPE_INTEGER, emittedMeta.get().getValueMeta(1).getType());
+    assertEquals(2, emitted.size());
+    for (Object[] row : emitted) {
+      assertInstanceOf(Long.class, row[0]);
+      assertInstanceOf(Long.class, row[1]);
+      if ("黄河".equals(row[2])) {
+        assertEquals(2L, row[0], "Double 1.6 rounds to 2");
+        assertEquals(1L, row[1], "BigDecimal 1.6 truncates to 1");
+      } else if ("长江".equals(row[2])) {
+        assertEquals(-2L, row[0], "Double -1.6 rounds to -2");
+        assertEquals(-1L, row[1], "BigDecimal -1.6 truncates to -1");
+      } else {
+        fail("unexpected station: " + row[2]);
+      }
+    }
+    System.out.println("PROD_P0_SELECTVALUES_NUMBER_BIGNUMBER_INTEGER_ROUNDING=PASS");
+  }
+
 }
