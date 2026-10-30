@@ -36,6 +36,61 @@ try {
   const toolbarSave = page.getByRole("button", { name: "保存（Save）", exact: true });
   await panel.waitFor({ state: "visible" });
 
+  // Independent clean-document regression: an accepted config write must
+  // dirty the Pipeline even if Cancel invalidates the dialog generation and
+  // the best-effort config refresh returns an HTTP error.
+  const cleanSql = "SELECT 'clean-write-黄河' AS marker";
+  let enteredCleanWrite;
+  const cleanWriteStarted = new Promise(resolve => { enteredCleanWrite = resolve; });
+  let releaseCleanWrite;
+  const cleanWriteGate = new Promise(resolve => { releaseCleanWrite = resolve; });
+  const writeRoute = "**/api/pipelines/**/config/write";
+  const readRoute = "**/api/pipelines/**/config/read";
+  await page.route(writeRoute, async route => {
+    enteredCleanWrite();
+    await cleanWriteGate;
+    await route.continue();
+  });
+  await page.route(readRoute, async route => {
+    await route.fulfill({ status: 503, contentType: "application/json",
+      body: JSON.stringify({ code: "clean_refresh_unavailable" }) });
+  });
+  if (await toolbarSave.isEnabled() || await page.locator(".dirty-state.is-dirty").count() !== 0) {
+    throw new Error("V7 clean scenario must begin with unsaved state absent");
+  }
+  await sqlField.fill(cleanSql);
+  const cleanWritePending = page.waitForResponse(r => post(r, "/config/write"));
+  const cleanReadPending = page.waitForResponse(r => post(r, "/config/read") && r.status() === 503);
+  await panel.getByRole("button", { name: "保存配置（Save）", exact: true }).click();
+  await cleanWriteStarted;
+  await panel.getByRole("button", { name: "取消配置（Cancel）", exact: true }).click();
+  releaseCleanWrite();
+  if (!(await cleanWritePending).ok() || (await cleanReadPending).status() !== 503) {
+    throw new Error("V7 clean write or failed refresh was not exercised");
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  await page.waitForFunction(() =>
+    document.querySelector('button[aria-label="保存（Save）"]')?.disabled === false);
+  await page.unroute(writeRoute);
+  await page.unroute(readRoute);
+  const cleanSavePending = page.waitForResponse(r => post(r, "/save"));
+  await toolbarSave.click();
+  if (!(await cleanSavePending).ok()) throw new Error("V7 clean write was not disk-saved");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const cleanReopenPending = page.waitForResponse(r => post(r, "/api/pipelines/open"));
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  if (!(await cleanReopenPending).ok()) throw new Error("V7 clean write reopen failed");
+  await node.waitFor({ state: "visible" });
+  await node.click();
+  const cleanRereadPending = page.waitForResponse(r => post(r, "/config/read"));
+  await page.getByRole("button", { name: "Configure" }).click();
+  const cleanReopened = await (await cleanRereadPending).json();
+  if (cleanReopened.config?.sql !== cleanSql) {
+    throw new Error("Clean-document accepted write was lost across Cancel, failed refresh and disk reopen");
+  }
+  await panel.waitFor({ state: "visible" });
+
   // First successful write makes the opened Pipeline dirty.
   const firstSql = "SELECT 'pending-A' AS marker";
   await sqlField.fill(firstSql);
@@ -47,7 +102,8 @@ try {
   }
   await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
   await toolbarSave.waitFor({ state: "visible" });
-  if (!(await toolbarSave.isEnabled())) throw new Error("Successful config mutation must enable Pipeline Save");
+  await page.waitForFunction(() =>
+    document.querySelector('button[aria-label="保存（Save）"]')?.disabled === false);
 
   // Hold a second HTTP mutation while the Pipeline is already dirty. The
   // toolbar must not persist an older snapshot or clear the subsequent dirty state.
