@@ -119,8 +119,40 @@ class AutomaticConfigDescriptorTest {
     assertEquals("/fields/remove", json.at("/wireLists/1/listPointer").asText());
     assertEquals("/fields/remove/{index}",
         json.at("/wireLists/1/itemPointerTemplate").asText());
-    assertTrue(AutomaticConfigDescriptor.describe(SortRowsMeta.class).wireLists().isEmpty(),
-        "Do not advertise unverified canonical wire paths for unrelated plugins");
+    assertEquals("/fields/field",
+        AutomaticConfigDescriptor.describe(SortRowsMeta.class).wireLists().get(0).listPointer());
+  }
+
+  @Test
+  void publishesNativeSortRowsIndexedWirePointerWithOrderedTypedItems() throws Exception {
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(SortRowsMeta.class);
+    assertEquals(1, descriptor.wireLists().size());
+    var contract = descriptor.wireLists().get(0);
+    assertEquals("field", contract.descriptorPath());
+    assertEquals("/fields/field", contract.listPointer());
+    assertEquals("/fields/field/{index}", contract.itemPointerTemplate());
+    assertEquals(Shape.LIST, property(descriptor.properties(), contract.descriptorPath()).shape());
+
+    SortRowsMeta meta = new SortRowsMeta();
+    meta.setDefault();
+    meta.setSortFields(List.of(
+        new org.apache.hop.pipeline.transforms.sort.SortRowsField(
+            "站点<&雪>", false, true, true, 2, false),
+        new org.apache.hop.pipeline.transforms.sort.SortRowsField(
+            "流量", true, false, false, 3, true)));
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider());
+    assertTrue(wire.at(contract.listPointer()).isArray());
+    assertEquals(2, wire.at(contract.listPointer()).size());
+    assertEquals("站点<&雪>", wire.at(contract.itemPointer(0) + "/name").asText());
+    assertEquals("流量", wire.at(contract.itemPointer(1) + "/name").asText());
+    assertTrue(wire.at(contract.itemPointer(0) + "/ascending").isBoolean());
+    assertFalse(wire.at(contract.itemPointer(0) + "/ascending").booleanValue());
+    assertTrue(wire.at(contract.itemPointer(0) + "/collator_strength").isNumber());
+    assertEquals(2, wire.at(contract.itemPointer(0) + "/collator_strength").intValue());
+    assertEquals("/fields/field",
+        new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor)
+            .at("/wireLists/0/listPointer").asText());
   }
 
   @Test
