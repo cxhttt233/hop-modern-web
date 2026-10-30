@@ -72,6 +72,12 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" -> List.of(
           new WireListContract("lookup.key", "/lookup/key", "/lookup/key/{index}"),
           new WireListContract("lookup.value", "/lookup/value", "/lookup/value/{index}"));
+      // Both native transforms serialize their incoming-row field list under
+      // the fields groupKey, even though the Java members are named differently.
+      // Publish the canonical wire path rather than asking consumers to infer it.
+      case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta",
+           "org.apache.hop.pipeline.transforms.setvariable.SetVariableMeta" -> List.of(
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
           new WireListContract("fields.remove", "/fields/remove", "/fields/remove/{index}"),
