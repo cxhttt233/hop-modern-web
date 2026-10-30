@@ -1136,6 +1136,21 @@ public final class AutomaticConfigDescriptor {
                       + "conversion entries across JSON editing and HPL disk reopen. "
                       + "This is a runtime data-accuracy diagnostic, not a save-time validator."),
               new RuntimePrecondition(
+                  "SELECT_VALUES_BIGNUMBER_INTEGER_OVERFLOW_WRAP",
+                  List.of("/fields/meta"),
+                  "When fields.meta[*].type=Integer converts an incoming BigNumber "
+                      + "(BigDecimal), pinned Hop ValueMetaBase.getInteger() calls "
+                      + "BigDecimal.longValue(), not longValueExact(). Values outside "
+                      + "the signed 64-bit range silently discard high-order bits: "
+                      + "9223372036854775808 becomes -9223372036854775808, and "
+                      + "-9223372036854775809 becomes 9223372036854775807. "
+                      + "No conversion exception is raised solely for this overflow. "
+                      + "Diagnose the incoming BigNumber magnitude before an Integer "
+                      + "conversion and preserve the ordered /fields/meta typed LIST "
+                      + "through JSON editing and HPL disk reopen; do not silently "
+                      + "clamp, rewrite, or reject an editable draft. This is a "
+                      + "native data-loss compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
                   "SELECT_VALUES_BIGNUMBER_EXACT_DECIMAL_CONVERSION",
                   List.of("/fields/meta"),
                   "For a post-selection STRING field whose fields.meta[*].type is BigNumber, "
