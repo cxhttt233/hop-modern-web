@@ -657,7 +657,11 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "FILTER_ROWS_CONDITION_FIELDS_RESET_DESCENDING_SORT_METADATA",
                   List.of("/compare/condition"),
-                  "FilterRowsMeta.getFields() obtains both left and right field operands from compare.condition through Condition.getUsedFields() and clears sortedDescending on each matching incoming IValueMeta in place. Unreferenced fields retain their descending-sort metadata, and missing condition field names are skipped by getFields() rather than validated here. This prevents sorted-descending metadata from inverting subsequent condition comparisons; derive downstream row metadata from the native projection, not the upstream sort flags. This is a compatibility diagnostic, not a save-time validator."));
+                  "FilterRowsMeta.getFields() obtains both left and right field operands from compare.condition through Condition.getUsedFields() and clears sortedDescending on each matching incoming IValueMeta in place. Unreferenced fields retain their descending-sort metadata, and missing condition field names are skipped by getFields() rather than validated here. This prevents sorted-descending metadata from inverting subsequent condition comparisons; derive downstream row metadata from the native projection, not the upstream sort flags. This is a compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "FILTER_ROWS_TWO_NULL_FIELDS_COMPARE_EQUAL_UNLIKE_SQL",
+                  List.of("/compare/condition"),
+                  "When a native FilterRows Condition compares two incoming fields using EQUAL, Hop ValueMetaBase.compare() returns zero when both row values are null. Thus two missing measurements pass an equality filter; a single null versus a non-null value does not, and equal non-null values still pass. This differs from SQL three-valued NULL equality. Preserve both field references and the EQUAL function through JSON editing and HPL disk reopen; diagnose missing measurements rather than silently assuming SQL NULL semantics. This is a native execution compatibility diagnostic, not a draft-save validator."));
       case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
           List.of(
               new RuntimePrecondition(
