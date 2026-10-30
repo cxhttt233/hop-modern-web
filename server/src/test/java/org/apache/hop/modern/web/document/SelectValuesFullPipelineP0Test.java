@@ -909,6 +909,13 @@ class SelectValuesFullPipelineP0Test {
     assertEquals("Date", wire.at("/fields/meta/0/type").asText());
     assertEquals("yyyy-MM-dd'T'HH:mm:ssXXX",
         wire.at("/fields/meta/0/conversion_mask").asText());
+    var requirement = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("select-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals("SELECT_VALUES_ISO8601_OFFSET_MASK_NORMALIZES_INSTANT"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/meta"), requirement.keyListPointers());
+    assertTrue(requirement.explanation().contains("yyyy-MM-dd'T'HH:mm:ssXXX"));
 
     List<Object[]> emitted = new CopyOnWriteArrayList<>();
     AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
