@@ -1095,6 +1095,20 @@ public final class AutomaticConfigDescriptor {
                       + "Boolean validation; this is a runtime compatibility diagnostic, "
                       + "not a save-time validator."),
               new RuntimePrecondition(
+                  "SELECT_VALUES_ISO8601_OFFSET_MASK_NORMALIZES_INSTANT",
+                  List.of("/fields/meta"),
+                  "For a post-selection STRING timestamp converted to Date, "
+                      + "fields.meta[*].conversion_mask=yyyy-MM-dd'T'HH:mm:ssXXX "
+                      + "parses explicit ISO-8601 offsets into a Java Date instant. "
+                      + "Native SelectValues.metadataValues() preserves the absolute "
+                      + "instant: 2026-10-31T08:30:00+08:00, "
+                      + "2026-10-30T20:30:00-04:00 and 2026-10-31T00:30:00Z "
+                      + "produce the same epoch milliseconds after JSON editing "
+                      + "and HPL disk reopen. A mask without offset tokens does "
+                      + "not establish this guarantee. Keep the literal mask, "
+                      + "target Date type and ordered metadata LIST; this is a "
+                      + "timestamp interoperability diagnostic, not a draft-save validator."),
+              new RuntimePrecondition(
                   "SELECT_VALUES_BIGNUMBER_EXACT_DECIMAL_CONVERSION",
                   List.of("/fields/meta"),
                   "For a post-selection STRING field whose fields.meta[*].type is BigNumber, "
