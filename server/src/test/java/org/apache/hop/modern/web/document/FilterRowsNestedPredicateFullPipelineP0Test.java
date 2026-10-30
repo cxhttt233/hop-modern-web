@@ -200,4 +200,157 @@ class FilterRowsNestedPredicateFullPipelineP0Test {
         List.of(outputRows.get(1)));
     System.out.println("PROD_P0_FILTERROWS_NESTED_AND_OR_JSON_HPL_ROWS=PASS");
   }
+
+  /**
+   * Native Condition EQUAL compares two missing incoming fields as equal.
+   * This is not SQL three-valued NULL equality. Prove it with actual DataGrid
+   * rows, a JSON-edited FilterRows condition and a reopened on-disk HPL.
+   */
+  @Test
+  void filterRowsTwoMissingFieldsPassNativeEqualityAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin filterPlugin = plugins.findPluginWithId(TransformPluginType.class, "FilterRows");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(filterPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String name : List.of("水位甲", "水位乙", "样本")) {
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, name);
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      columns.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("", "", "双缺测"),
+        List.of("7", "", "甲有值"),
+        List.of("", "7", "乙有值"),
+        List.of("7", "7", "两值相等"),
+        List.of("7", "8", "两值不同"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta filter = plugins.loadClass(filterPlugin, ITransformMeta.class);
+    filter.setDefault();
+    filter.getClass().getMethod("setCondition", Condition.class).invoke(
+        filter, new Condition("待编辑水位甲", Condition.Function.EQUAL, "水位乙", null));
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-null", grid);
+    TransformMeta predicate = new TransformMeta("FilterRows", "filter-null", filter);
+    TransformMeta sink = new TransformMeta("SelectValues", "select-null", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("filter-rows-two-null-fields-native-equality");
+    pipeline.addTransform(source);
+    pipeline.addTransform(predicate);
+    pipeline.addTransform(sink);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, predicate));
+    pipeline.addPipelineHop(new PipelineHopMeta(predicate, sink));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("filter-rows-null-field-equality.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("filter-null-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("filter-null-doc",
+        new PipelineConfigResource.ReadRequest("filter-null"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    assertEquals("待编辑水位甲", draft.at("/compare/condition/leftvalue").asText());
+    ((ObjectNode) draft.at("/compare/condition")).put("leftvalue", "水位甲");
+    var write = resource.write("filter-null-doc",
+        new PipelineConfigResource.WriteRequest("filter-null", draft));
+    assertEquals(200, write.getStatus());
+
+    var selectRead = resource.read("filter-null-doc",
+        new PipelineConfigResource.ReadRequest("select-null"));
+    assertEquals(200, selectRead.getStatus());
+    ObjectNode selectDraft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) selectRead.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) selectDraft.path("fields");
+    assertTrue(fields.isObject());
+    fields.put("select_unspecified", false);
+    fields.putArray("field").addObject().put("name", "样本").put("rename", "样本");
+    fields.putArray("remove");
+    fields.putArray("meta");
+    assertEquals(200, resource.write("filter-null-doc",
+        new PipelineConfigResource.WriteRequest("select-null", selectDraft)).getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(3, reopened.nrTransforms());
+    assertEquals(2, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("filter-null").getTransform(), provider);
+    assertEquals("水位甲", wire.at("/compare/condition/leftvalue").asText());
+    assertEquals("水位乙", wire.at("/compare/condition/rightvalue").asText());
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("filter-null").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals("FILTER_ROWS_TWO_NULL_FIELDS_COMPARE_EQUAL_UNLIKE_SQL"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/compare/condition"), contract.keyListPointers());
+
+    List<Object[]> gridRows = new CopyOnWriteArrayList<>();
+    List<Object[]> outputRows = new CopyOnWriteArrayList<>();
+    List<IRowMeta> outputMetas = new CopyOnWriteArrayList<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform gridOutput = engine.getRunThread("grid-null", 0);
+      ITransform output = engine.getRunThread("select-null", 0);
+      assertNotNull(gridOutput);
+      assertNotNull(output);
+      gridOutput.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          gridRows.add(row.clone());
+        }
+      });
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMetas.add(rowMeta.clone());
+          outputRows.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native FilterRows null comparison must execute");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertEquals(5, gridRows.size());
+    assertNull(gridRows.get(0)[0], "DataGrid empty cell must be a native null value");
+    assertNull(gridRows.get(0)[1], "both measured fields must really be null");
+    assertEquals(2, outputRows.size(),
+        "both-null and equal non-null field pairs pass; mixed-null and unequal pairs do not");
+    assertEquals(List.of("样本"), outputMetas.get(0).getValueMetaList().stream()
+        .map(IValueMeta::getName).toList());
+    assertEquals(List.of("双缺测", "两值相等"),
+        outputRows.stream().map(row -> (String) row[0]).toList());
+    System.out.println("PROD_P0_FILTERROWS_TWO_NULL_FIELDS_NATIVE_EQUAL_JSON_HPL_ROWS=PASS");
+  }
 }
