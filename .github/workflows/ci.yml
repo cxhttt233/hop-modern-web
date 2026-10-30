@@ -115,6 +115,11 @@ jobs:
         env:
           REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
         run: node e2e/v6-palette-authoritative.mjs
+      - name: Prove pending config write and disk save consistency
+        working-directory: modern
+        env:
+          REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/v4-table-input-proof.hpl
+        run: node e2e/v7-save-mutation-gate.mjs
       - name: Show runtime logs on failure
         if: failure()
         run: |
