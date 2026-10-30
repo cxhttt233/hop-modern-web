@@ -72,6 +72,12 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" -> List.of(
           new WireListContract("lookup.key", "/lookup/key", "/lookup/key/{index}"),
           new WireListContract("lookup.value", "/lookup/value", "/lookup/value/{index}"));
+      // InsertUpdate has two ordered lists nested inside one lookup OBJECT.
+      // The lookup keys consume upstream fields while update values map DB
+      // columns to upstream fields; their same-named leaves are not interchangeable.
+      case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateMeta" -> List.of(
+          new WireListContract("lookup.key", "/lookup/key", "/lookup/key/{index}"),
+          new WireListContract("lookup.value", "/lookup/value", "/lookup/value/{index}"));
       // MergeJoin stores two independent ordered STRING key lists with the same
       // native leaf key; expose their groupKey containers to avoid collisions.
       case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" -> List.of(
