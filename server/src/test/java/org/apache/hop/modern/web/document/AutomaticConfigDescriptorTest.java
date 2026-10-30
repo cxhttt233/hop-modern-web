@@ -156,6 +156,63 @@ class AutomaticConfigDescriptorTest {
   }
 
   @Test
+  void tableInputSpecifiedOutputFieldsPublishNativeCanonicalIndexedWireList()
+      throws Exception {
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(TableInputMeta.class);
+    assertEquals(1, descriptor.wireLists().size());
+    var contract = descriptor.wireLists().get(0);
+    assertEquals("field", contract.descriptorPath());
+    assertEquals("/fields/field", contract.listPointer());
+    assertEquals("/fields/field/{index}", contract.itemPointerTemplate());
+    assertEquals("/fields/field/1", contract.itemPointer(1));
+
+    Property outputFields = property(descriptor.properties(), "field");
+    assertEquals(Shape.LIST, outputFields.shape());
+    assertEquals("fields", outputFields.groupKey());
+    assertEquals(WidgetHint.NONE,
+        property(outputFields.elementProperties(), "name").widgetHint());
+    assertEquals(Shape.NUMBER,
+        property(outputFields.elementProperties(), "length").shape());
+    assertEquals(Shape.NUMBER,
+        property(outputFields.elementProperties(), "precision").shape());
+
+    var first = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    first.setName("水位<&雪>");
+    first.setType(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER);
+    first.setLength(18);
+    first.setPrecision(3);
+    var second = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    second.setName("站点");
+    second.setType(org.apache.hop.core.row.IValueMeta.TYPE_STRING);
+    second.setLength(64);
+
+    TableInputMeta meta = new TableInputMeta();
+    meta.setDefault();
+    meta.setSpecifyFields(true);
+    meta.setValidateSpecifiedFields(false);
+    meta.setFields(List.of(first, second));
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider());
+    assertTrue(wire.at(contract.listPointer()).isArray());
+    assertEquals(2, wire.at(contract.listPointer()).size());
+    assertEquals("水位<&雪>", wire.at(contract.itemPointer(0) + "/name").asText());
+    assertEquals("站点", wire.at(contract.itemPointer(1) + "/name").asText());
+    assertTrue(wire.at(contract.itemPointer(0) + "/length").isNumber());
+    assertEquals(18, wire.at(contract.itemPointer(0) + "/length").intValue());
+    assertTrue(wire.at(contract.itemPointer(0) + "/precision").isNumber());
+    assertEquals(3, wire.at(contract.itemPointer(0) + "/precision").intValue());
+    assertTrue(wire.at("/specify_fields").isBoolean());
+    assertTrue(wire.at("/specify_fields").booleanValue());
+    assertTrue(wire.at("/validate_specified_fields").isBoolean());
+    assertFalse(wire.at("/validate_specified_fields").booleanValue());
+
+    var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/fields/field", json.at("/wireLists/0/listPointer").asText());
+    assertEquals("/fields/field/{index}",
+        json.at("/wireLists/0/itemPointerTemplate").asText());
+  }
+
+  @Test
   void discoversTableInputTextBooleansAndTableShape() {
     Descriptor descriptor = AutomaticConfigDescriptor.describe(TableInputMeta.class);
 
