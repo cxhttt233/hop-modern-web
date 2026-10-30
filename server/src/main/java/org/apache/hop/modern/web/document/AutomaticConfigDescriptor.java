@@ -88,6 +88,11 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta" -> List.of(
           new WireListContract("argument", "/arguments/argument",
               "/arguments/argument/{index}"));
+      // TableInput specified JDBC output columns are an ordered native LIST.
+      // Hop wraps the annotated field key inside the fields groupKey container.
+      // This list is output metadata, not a list of upstream parameter names.
+      case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta" -> List.of(
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" -> List.of(
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
