@@ -6179,6 +6179,59 @@ class TransformP0L2RoundTripTest {
     return field;
   }
 
+  @Test
+  void tableOutputNativeStreamToDatabaseMappingsPublishCanonicalIndexedWireList()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Class<?> fieldClass = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.tableoutput.TableOutputField");
+    var ctor = fieldClass.getConstructor(String.class, String.class);
+    Object first = ctor.newInstance("db_水位<&雪>", "stream_水位<&雪>");
+    Object second = ctor.newInstance("db_流量", "stream_流量");
+    meta.getClass().getMethod("setSpecifyFields", boolean.class).invoke(meta, true);
+    meta.getClass().getMethod("setFields", List.class).invoke(meta, List.of(first, second));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(1, descriptor.wireLists().size());
+    var contract = descriptor.wireLists().get(0);
+    assertEquals("field", contract.descriptorPath());
+    assertEquals("/fields/field", contract.listPointer());
+    assertEquals("/fields/field/{index}", contract.itemPointerTemplate());
+    assertEquals("/fields/field/1", contract.itemPointer(1));
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "field", "stream_name").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "field", "column_name").widgetHint());
+
+    var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, new MemoryMetadataProvider());
+    assertTrue(nativeWire.at(contract.listPointer()).isArray());
+    assertEquals(2, nativeWire.at(contract.listPointer()).size());
+    assertEquals("stream_水位<&雪>",
+        nativeWire.at(contract.itemPointer(0) + "/stream_name").asText());
+    assertEquals("db_水位<&雪>",
+        nativeWire.at(contract.itemPointer(0) + "/column_name").asText());
+    assertEquals("stream_流量",
+        nativeWire.at(contract.itemPointer(1) + "/stream_name").asText());
+    assertEquals("db_流量",
+        nativeWire.at(contract.itemPointer(1) + "/column_name").asText());
+    assertTrue(nativeWire.at("/specify_fields").isBoolean());
+    assertTrue(nativeWire.at("/specify_fields").booleanValue());
+
+    var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/fields/field", json.at("/wireLists/0/listPointer").asText());
+    assertEquals("/fields/field/{index}",
+        json.at("/wireLists/0/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_TABLEOUTPUT_CANONICAL_STREAM_COLUMN_WIRE_LIST=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
