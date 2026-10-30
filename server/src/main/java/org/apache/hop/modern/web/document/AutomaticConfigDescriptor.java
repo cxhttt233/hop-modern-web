@@ -83,6 +83,11 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta",
            "org.apache.hop.pipeline.transforms.setvariable.SetVariableMeta" -> List.of(
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
+      // ExecSql binds an ordered list of incoming-row argument names; Hop wraps
+      // the native argument key inside the arguments groupKey container.
+      case "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta" -> List.of(
+          new WireListContract("argument", "/arguments/argument",
+              "/arguments/argument/{index}"));
       case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" -> List.of(
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
