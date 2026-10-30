@@ -6289,6 +6289,102 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_MERGEJOIN_CANONICAL_DUAL_STRING_KEYS=PASS");
   }
 
+  @Test
+  void insertUpdateKeyAndValueListsPublishDistinctIndexedNativeWireContracts()
+      throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "InsertUpdate");
+    assertNotNull(plugin, "production InsertUpdate plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    ClassLoader loader = meta.getClass().getClassLoader();
+    Class<?> keyType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField");
+    Class<?> valueType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateValue");
+    Object key0 = keyType.getConstructor(
+        String.class, String.class, String.class, String.class)
+        .newInstance("上游键<&雪>", "db_key", "=", "");
+    Object key1 = keyType.getConstructor(
+        String.class, String.class, String.class, String.class)
+        .newInstance("区间起点", "db_range", "BETWEEN", "区间终点");
+    Object value0 = valueType.getConstructor(
+        String.class, String.class, boolean.class)
+        .newInstance("db_水位<&雪>", "上游水位<&雪>", true);
+    Object value1 = valueType.getConstructor(
+        String.class, String.class, boolean.class)
+        .newInstance("db_流量", "上游流量", false);
+    Object lookup = meta.getClass().getMethod("getInsertUpdateLookupField").invoke(meta);
+    lookup.getClass().getMethod("setLookupKeys", List.class)
+        .invoke(lookup, new ArrayList<>(List.of(key0, key1)));
+    lookup.getClass().getMethod("setValueFields", List.class)
+        .invoke(lookup, new ArrayList<>(List.of(value0, value1)));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(Shape.OBJECT, property(descriptor, "lookup").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "key").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "value").shape());
+    assertEquals(List.of("lookup.key", "lookup.value"),
+        descriptor.wireLists().stream()
+            .map(AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/lookup/key", "/lookup/value"),
+        descriptor.wireLists().stream()
+            .map(AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "lookup", "key", "name").widgetHint());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "lookup", "key", "name2").widgetHint());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "lookup", "value", "rename").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "lookup", "key", "field").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "lookup", "value", "name").widgetHint());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "lookup", "value", "update").shape());
+
+    var provider = new MemoryMetadataProvider();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, provider);
+    for (var contract : descriptor.wireLists()) {
+      assertEquals(contract.listPointer() + "/{index}", contract.itemPointerTemplate());
+      assertTrue(wire.at(contract.listPointer()).isArray(), contract.descriptorPath());
+      assertEquals(2, wire.at(contract.listPointer()).size(), contract.descriptorPath());
+    }
+    assertEquals("上游键<&雪>", wire.at("/lookup/key/0/name").asText());
+    assertEquals("db_key", wire.at("/lookup/key/0/field").asText());
+    assertEquals("BETWEEN", wire.at("/lookup/key/1/condition").asText());
+    assertEquals("区间终点", wire.at("/lookup/key/1/name2").asText());
+    assertEquals("db_水位<&雪>", wire.at("/lookup/value/0/name").asText());
+    assertEquals("上游水位<&雪>", wire.at("/lookup/value/0/rename").asText());
+    assertTrue(wire.at("/lookup/value/0/update").isBoolean());
+    assertTrue(wire.at("/lookup/value/0/update").booleanValue());
+    assertTrue(wire.at("/lookup/value/1/update").isBoolean());
+    assertFalse(wire.at("/lookup/value/1/update").booleanValue());
+
+    // Editing a value mapping must preserve both lookup keys and typed flags.
+    var edited = wire.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) edited.at("/lookup/value/1"))
+        .put("rename", "上游流量_更新<&雪>");
+    var decoded = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.fromJson(
+        edited, meta.getClass(), provider);
+    var after = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        decoded, provider);
+    assertEquals("上游键<&雪>", after.at("/lookup/key/0/name").asText());
+    assertEquals("区间终点", after.at("/lookup/key/1/name2").asText());
+    assertEquals("上游水位<&雪>", after.at("/lookup/value/0/rename").asText());
+    assertEquals("上游流量_更新<&雪>", after.at("/lookup/value/1/rename").asText());
+    assertTrue(after.at("/lookup/value/1/update").isBoolean());
+    assertFalse(after.at("/lookup/value/1/update").booleanValue());
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/lookup/key/{index}",
+        published.at("/wireLists/0/itemPointerTemplate").asText());
+    assertEquals("/lookup/value/{index}",
+        published.at("/wireLists/1/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_INSERTUPDATE_CANONICAL_KEY_VALUE_WIRE_LISTS=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
