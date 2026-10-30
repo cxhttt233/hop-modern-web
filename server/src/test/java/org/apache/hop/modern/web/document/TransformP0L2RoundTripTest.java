@@ -6465,6 +6465,79 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REPLACESTRING_CANONICAL_RULE_LIST=PASS");
   }
 
+  @Test
+  void dataGridDeclaredColumnsAndLiteralRowsPublishSeparateNativeIndexedWireLists()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "DataGrid");
+    assertNotNull(plugin, "production DataGrid plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    ClassLoader loader = meta.getClass().getClassLoader();
+    Class<?> columnType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> rowType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    Object first = columnType.getConstructor().newInstance();
+    columnType.getMethod("setName", String.class).invoke(first, "测站<&雪>");
+    columnType.getMethod("setType", String.class).invoke(first, "String");
+    columnType.getMethod("setLenght", int.class).invoke(first, 18);
+    Object second = columnType.getConstructor().newInstance();
+    columnType.getMethod("setName", String.class).invoke(second, "水位");
+    columnType.getMethod("setType", String.class).invoke(second, "String");
+    columnType.getMethod("setEmptyString", boolean.class).invoke(second, true);
+    meta.getClass().getMethod("setDataGridFields", List.class)
+        .invoke(meta, List.of(first, second));
+
+    Object row0 = rowType.getConstructor().newInstance();
+    rowType.getMethod("setDatalines", List.class)
+        .invoke(row0, List.of("黄河<&>", "100.25"));
+    Object row1 = rowType.getConstructor().newInstance();
+    rowType.getMethod("setDatalines", List.class)
+        .invoke(row1, List.of("长江", "200.50"));
+    meta.getClass().getMethod("setDataLines", List.class)
+        .invoke(meta, List.of(row0, row1));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(List.of("field", "line"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/fields/field", "/data/line"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(Shape.LIST, property(descriptor, "line").shape());
+    assertEquals("data", property(descriptor, "line").groupKey());
+
+    var columns = descriptor.wireLists().get(0);
+    var rows = descriptor.wireLists().get(1);
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, new MemoryMetadataProvider());
+    assertTrue(wire.at(columns.listPointer()).isArray());
+    assertTrue(wire.at(rows.listPointer()).isArray());
+    assertEquals(2, wire.at(columns.listPointer()).size());
+    assertEquals(2, wire.at(rows.listPointer()).size());
+    assertEquals("测站<&雪>", wire.at(columns.itemPointer(0) + "/field/name").asText());
+    assertEquals("水位", wire.at(columns.itemPointer(1) + "/field/name").asText());
+    assertTrue(wire.at(columns.itemPointer(0) + "/field/length").isNumber());
+    assertEquals(18, wire.at(columns.itemPointer(0) + "/field/length").intValue());
+    assertTrue(wire.at(columns.itemPointer(1) + "/field/set_empty_string").isBoolean());
+    assertTrue(wire.at(columns.itemPointer(1) + "/field/set_empty_string").booleanValue());
+    assertEquals("黄河<&>", wire.at(rows.itemPointer(0) + "/item/0").asText());
+    assertEquals("100.25", wire.at(rows.itemPointer(0) + "/item/1").asText());
+    assertEquals("长江", wire.at(rows.itemPointer(1) + "/item/0").asText());
+    assertEquals("200.50", wire.at(rows.itemPointer(1) + "/item/1").asText());
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/fields/field/{index}",
+        published.at("/wireLists/0/itemPointerTemplate").asText());
+    assertEquals("/data/line/{index}",
+        published.at("/wireLists/1/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_DATAGRID_CANONICAL_COLUMNS_ROWS_WIRE_LISTS=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
