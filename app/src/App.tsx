@@ -79,6 +79,17 @@ export function App() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  // Save must not race with an in-flight authoritative edit/config write.
+  const pendingMutationsRef = useRef(0);
+  const [pendingMutations, setPendingMutations] = useState(0);
+  const beginMutation = useCallback(() => {
+    pendingMutationsRef.current += 1;
+    setPendingMutations(pendingMutationsRef.current);
+  }, []);
+  const finishMutation = useCallback(() => {
+    pendingMutationsRef.current = Math.max(0, pendingMutationsRef.current - 1);
+    setPendingMutations(pendingMutationsRef.current);
+  }, []);
   const [showOpenPanel, setShowOpenPanel] = useState(!initialPipelinePath);
 
   // A newly opened .hpl may have nodes far outside the previous file's
@@ -147,14 +158,15 @@ export function App() {
       setNodes(graphNodes(document));
       return;
     }
+    beginMutation();
     movePipelineTransforms(document.id, [node.id], dx, dy).then((graph) => {
       setDocument(graph);
       setNodes(graphNodes(graph));
       setDirty(true);
     }).catch(() => {
       setNodes(graphNodes(document));
-    });
-  }, [document, source]);
+    }).finally(finishMutation);
+  }, [beginMutation, document, finishMutation, source]);
   const reconcileGraph = useCallback((graph: HopGraphDocument) => {
     setDocument(graph);
     setNodes(graphNodes(graph));
@@ -165,6 +177,7 @@ export function App() {
     // A new authoritative edit supersedes an earlier failure notice.
     // If this request also fails, its own error will be displayed below.
     setConfigError(undefined);
+    beginMutation();
     command().then((graph) => {
       reconcileGraph(graph);
       setDirty(true);
@@ -172,8 +185,8 @@ export function App() {
     }).catch((error: unknown) => {
       setConfigError(error instanceof Error ? error.message : "Pipeline edit failed");
       setNodes(graphNodes(document));
-    });
-  }, [document, reconcileGraph, source]);
+    }).finally(finishMutation);
+  }, [beginMutation, document, finishMutation, reconcileGraph, source]);
 
   const addTransformAt = useCallback((pluginId: string, x: number, y: number) => {
     if (source.kind !== "server" || savingRef.current) return;
@@ -267,22 +280,28 @@ export function App() {
     const generation = ++configRequestGeneration.current;
     setConfigLoading(true);
     setConfigError(undefined);
+    beginMutation();
     writePipelineTransformConfig(document.id, nodeId, value)
-      .then(() => readPipelineTransformConfig(document.id, nodeId))
+      .then(() => {
+        // The server has already mutated Hop Meta. Cancel or a failed refresh must
+        // never erase the unsaved state or block a subsequent explicit Save.
+        setDirty(true);
+        return readPipelineTransformConfig(document.id, nodeId);
+      })
       .then((authoritative) => {
         if (generation !== configRequestGeneration.current) return;
         setServerConfig(authoritative);
         setConfigId(nodeId);
-        setDirty(true);
       })
       .catch((error: unknown) => {
         if (generation !== configRequestGeneration.current) return;
-        setConfigError(error instanceof Error ? error.message : "Transform config write failed");
+        setConfigError(error instanceof Error ? error.message : "Transform config write/refresh failed");
       })
       .finally(() => {
+        finishMutation();
         if (generation === configRequestGeneration.current) setConfigLoading(false);
       });
-  }, [document.id, serverConfig, source]);
+  }, [beginMutation, document.id, finishMutation, serverConfig, source]);
 
   const removeTransform = useCallback((nodeId: string) => {
     if (source.kind !== "server" || savingRef.current) return;
@@ -297,7 +316,7 @@ export function App() {
   }, [document.id, runGraphCommand, source]);
 
   const saveDocument = useCallback(() => {
-    if (source.kind !== "server" || !dirty || savingRef.current) return;
+    if (source.kind !== "server" || !dirty || savingRef.current || pendingMutationsRef.current > 0) return;
     // A fast double-click must never issue two concurrent disk saves.
     savingRef.current = true;
     setSaving(true);
@@ -338,18 +357,19 @@ export function App() {
         </div>
 
         <div className="editor-actions">
-          <button type="button" aria-label="打开流程（Choose pipeline）" disabled={saving} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
+          <button type="button" aria-label="打开流程（Choose pipeline）" disabled={saving || pendingMutations > 0} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
           {isRealGraph && <>
             <button type="button" aria-label="适配画布（Fit canvas）" disabled={!flow || nodes.length === 0} title="将当前流程的全部节点适配到可见画布" onClick={() => { void flow?.fitView({ padding: 0.18, maxZoom: 1, duration: 250 }); }}>适配画布</button>
             <button type="button" aria-label="撤销（Undo）" disabled={saving} onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
             <button type="button" aria-label="重做（Redo）" disabled={saving} onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
-            <button type="button" aria-label="保存（Save）" aria-busy={saving} className="primary-action" disabled={!dirty || saving} onClick={saveDocument}>{saving ? "保存中…" : "保存"}</button>
+            <button type="button" aria-label="保存（Save）" aria-busy={saving} className="primary-action" disabled={!dirty || saving || pendingMutations > 0} onClick={saveDocument}>{saving ? "保存中…" : "保存"}</button>
           </>}
         </div>
 
         {showOpenPanel && (
           <form className="pipeline-open" onSubmit={(event) => {
             event.preventDefault();
+            if (savingRef.current || pendingMutationsRef.current > 0) return;
             const path = pipelinePathDraft.trim();
             if (!path) return;
             if (path === pipelinePath) setPipelineOpenRevision((current) => current + 1);
@@ -380,7 +400,7 @@ export function App() {
             )}
             <div className="pipeline-open-actions">
               {isRealGraph && <button type="button" onClick={() => setShowOpenPanel(false)}>取消</button>}
-              <button type="submit" aria-label="打开文件（Open pipeline）" className="primary-action" disabled={!pipelinePathDraft.trim() || source.kind === "loading" || saving}>打开文件</button>
+              <button type="submit" aria-label="打开文件（Open pipeline）" className="primary-action" disabled={!pipelinePathDraft.trim() || source.kind === "loading" || saving || pendingMutations > 0}>打开文件</button>
             </div>
           </form>
         )}
