@@ -65,7 +65,14 @@ public final class AutomaticConfigDescriptor {
           new WireListContract("header", "/headers/header", "/headers/header/{index}"),
           new WireListContract("parameter", "/parameters/parameter", "/parameters/parameter/{index}"),
           new WireListContract("matrixParameter", "/matrixParameters/matrixParameter",
-              "/matrixParameters/matrixParameter/{index}"));
+              "/matrixParameters/matrixParameter/{index}"),
+          // Native retry policies are two independent ordered String LISTs.
+          // Their groupKey wrappers are part of the persisted JSON wire shape;
+          // consumers must preserve literal token case, spaces and duplicates.
+          new WireListContract("retryStatusCode", "/retryStatusCodes/retryStatusCode",
+              "/retryStatusCodes/retryStatusCode/{index}"),
+          new WireListContract("retryMethod", "/retryMethods/retryMethod",
+              "/retryMethods/retryMethod/{index}"));
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" -> List.of(
           new WireListContract("lookup.arg", "/lookup/arg", "/lookup/arg/{index}"),
           new WireListContract("lookup.header", "/lookup/header", "/lookup/header/{index}"));
