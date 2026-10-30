@@ -83,6 +83,10 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" -> List.of(
           new WireListContract("keys_1.key", "/keys_1/key", "/keys_1/key/{index}"),
           new WireListContract("keys_2.key", "/keys_2/key", "/keys_2/key/{index}"));
+      // ReplaceString stores ordered replacement rules in the native fields group.
+      // Publish the list container, not a guessed leaf path, for table editors.
+      case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta" -> List.of(
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       // Native StringCut and ConcatFields also place ordered source-row fields
       // under the fields container, despite distinct Java member names.
       case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta",
