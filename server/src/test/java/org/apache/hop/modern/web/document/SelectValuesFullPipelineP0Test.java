@@ -1370,4 +1370,169 @@ class SelectValuesFullPipelineP0Test {
     assertEquals(expected.keySet(), seen);
     System.out.println("PROD_P0_SELECTVALUES_BIGNUMBER_INTEGER_OVERFLOW_WRAP=PASS");
   }
+
+  /**
+   * The source Integer is a 64-bit Long, but native SelectValues converts
+   * it to Number with Long.doubleValue(), losing odd integers above 2^53.
+   * Verify both exact DataGrid inputs and rounded SelectValues output after
+   * a real JSON edit and persisted HPL reopen.
+   */
+  @Test
+  void selectValuesIntegerToNumberLosesBinary64PrecisionAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String[] spec : new String[][] {
+        {"整数测量<&>", "Integer"}, {"站点", "String"}}) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, spec[0]);
+      fieldType.getMethod("setType", String.class).invoke(column, spec[1]);
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("9007199254740991", "黄河"),
+        List.of("9007199254740993", "长江"),
+        List.of("-9007199254740993", "珠江"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SelectValues", "select-node", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-integer-to-number-binary64");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-integer-to-number.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-binary64-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-binary64-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject());
+    fields.putArray("meta").addObject()
+        .put("name", "整数测量<&>")
+        .put("rename", "浮点测量")
+        .put("type", "Number");
+    var write = resource.write("select-binary64-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertEquals(1, wire.at("/fields/meta").size());
+    assertEquals("整数测量<&>", wire.at("/fields/meta/0/name").asText());
+    assertEquals("浮点测量", wire.at("/fields/meta/0/rename").asText());
+    assertEquals("Number", wire.at("/fields/meta/0/type").asText());
+    var descriptor = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("select-node").getTransform().getClass());
+    assertEquals("/fields/meta", descriptor.wireLists().get(2).listPointer());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SELECT_VALUES_INTEGER_TO_NUMBER_LOSES_PRECISION_ABOVE_2_POW_53"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/meta"), contract.keyListPointers());
+    assertTrue(contract.explanation().contains("Long.doubleValue()"));
+
+    List<Object[]> inputRows = new CopyOnWriteArrayList<>();
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform input = engine.getRunThread("grid-node", 0);
+      ITransform output = engine.getRunThread("select-node", 0);
+      assertNotNull(input);
+      assertNotNull(output);
+      input.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          inputRows.add(row.clone());
+        }
+      });
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native Integer-to-Number conversion must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    java.util.Map<String, Long> exactInputs = java.util.Map.of(
+        "黄河", 9007199254740991L,
+        "长江", 9007199254740993L,
+        "珠江", -9007199254740993L);
+    assertEquals(3, inputRows.size());
+    java.util.Set<String> inputStations = new java.util.HashSet<>();
+    for (Object[] row : inputRows) {
+      assertInstanceOf(Long.class, row[0]);
+      assertInstanceOf(String.class, row[1]);
+      String station = (String) row[1];
+      assertTrue(inputStations.add(station));
+      assertEquals(exactInputs.get(station), row[0],
+          "DataGrid must emit the original exact 64-bit Integer");
+    }
+    assertEquals(exactInputs.keySet(), inputStations);
+
+    assertNotNull(emittedMeta.get());
+    assertEquals(2, emittedMeta.get().size());
+    assertEquals("浮点测量", emittedMeta.get().getValueMeta(0).getName());
+    assertEquals(IValueMeta.TYPE_NUMBER, emittedMeta.get().getValueMeta(0).getType());
+    assertEquals(3, emitted.size());
+    java.util.Map<String, Double> roundedOutputs = java.util.Map.of(
+        "黄河", 9007199254740991d,
+        "长江", 9007199254740992d,
+        "珠江", -9007199254740992d);
+    java.util.Set<String> outputStations = new java.util.HashSet<>();
+    for (Object[] row : emitted) {
+      assertInstanceOf(Double.class, row[0]);
+      assertInstanceOf(String.class, row[1]);
+      String station = (String) row[1];
+      assertTrue(outputStations.add(station));
+      assertEquals(roundedOutputs.get(station), (Double) row[0], 0.0,
+          "native Long.doubleValue() must expose precision loss above 2^53");
+    }
+    assertEquals(roundedOutputs.keySet(), outputStations);
+    System.out.println("PROD_P0_SELECTVALUES_INTEGER_NUMBER_BINARY64_PRECISION_LOSS=PASS");
+  }
 }
