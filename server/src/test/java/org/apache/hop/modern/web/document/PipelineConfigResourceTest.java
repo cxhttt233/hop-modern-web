@@ -278,15 +278,17 @@ class PipelineConfigResourceTest {
 
     var json = ConfigJsonSerializer.toJson(rest, new MemoryMetadataProvider());
     var contracts = AutomaticConfigDescriptor.describe(RestMeta.class).wireLists();
-    assertEquals(List.of("header", "parameter", "matrixParameter"),
+    assertEquals(List.of("header", "parameter", "matrixParameter",
+            "retryStatusCode", "retryMethod"),
         contracts.stream().map(
             AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
     assertEquals(List.of("/headers/header", "/parameters/parameter",
-            "/matrixParameters/matrixParameter"),
+            "/matrixParameters/matrixParameter",
+            "/retryStatusCodes/retryStatusCode", "/retryMethods/retryMethod"),
         contracts.stream().map(
             AutomaticConfigDescriptor.WireListContract::listPointer).toList());
 
-    for (var contract : contracts) {
+    for (var contract : contracts.subList(0, 3)) {
       assertEquals(contract.listPointer() + "/{index}", contract.itemPointerTemplate());
       assertEquals(2, json.at(contract.listPointer()).size());
       assertEquals("水位", json.at(contract.itemPointer(0) + "/field").asText());
@@ -295,6 +297,74 @@ class PipelineConfigResourceTest {
     assertEquals("X-Level", json.at(contracts.get(0).itemPointer(0) + "/name").asText());
     assertEquals("level", json.at(contracts.get(1).itemPointer(0) + "/name").asText());
     assertEquals("level", json.at(contracts.get(2).itemPointer(0) + "/name").asText());
+  }
+
+
+  @Test
+  void restRetryStringListsPublishIndexedNativeWireAndPreserveDuplicateTokens()
+      throws Exception {
+    RestMeta rest = new RestMeta();
+    rest.setDefault();
+    rest.setRetryStatusCodes(List.of("503", "503", " 429 "));
+    rest.setRetryMethods(List.of("GET", "get", "GET"));
+
+    var descriptor = AutomaticConfigDescriptor.describe(RestMeta.class);
+    var contracts = descriptor.wireLists();
+    var status = contracts.stream().filter(c -> c.descriptorPath().equals("retryStatusCode"))
+        .findFirst().orElseThrow();
+    var method = contracts.stream().filter(c -> c.descriptorPath().equals("retryMethod"))
+        .findFirst().orElseThrow();
+    assertEquals("/retryStatusCodes/retryStatusCode/{index}", status.itemPointerTemplate());
+    assertEquals("/retryMethods/retryMethod/{index}", method.itemPointerTemplate());
+    assertEquals("/retryStatusCodes/retryStatusCode/2", status.itemPointer(2));
+    assertEquals("/retryMethods/retryMethod/1", method.itemPointer(1));
+
+    var statusProperty = descriptor.properties().stream()
+        .filter(p -> p.key().equals("retryStatusCode")).findFirst().orElseThrow();
+    var methodProperty = descriptor.properties().stream()
+        .filter(p -> p.key().equals("retryMethod")).findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.Shape.LIST, statusProperty.shape());
+    assertEquals(AutomaticConfigDescriptor.Shape.LIST, methodProperty.shape());
+    assertEquals("retryStatusCodes", statusProperty.groupKey());
+    assertEquals("retryMethods", methodProperty.groupKey());
+    assertEquals("java.lang.String", statusProperty.elementJavaType());
+    assertEquals("java.lang.String", methodProperty.elementJavaType());
+
+    var provider = new MemoryMetadataProvider();
+    var wire = ConfigJsonSerializer.toJson(rest, provider);
+    assertTrue(wire.at(status.listPointer()).isArray());
+    assertTrue(wire.at(method.listPointer()).isArray());
+    assertEquals(3, wire.at(status.listPointer()).size());
+    assertEquals(3, wire.at(method.listPointer()).size());
+    assertEquals("503", wire.at(status.itemPointer(0)).asText());
+    assertEquals("503", wire.at(status.itemPointer(1)).asText());
+    assertEquals(" 429 ", wire.at(status.itemPointer(2)).asText());
+    assertEquals("GET", wire.at(method.itemPointer(0)).asText());
+    assertEquals("get", wire.at(method.itemPointer(1)).asText());
+    assertEquals("GET", wire.at(method.itemPointer(2)).asText());
+
+    var changed = wire.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ArrayNode) changed.at(status.listPointer()))
+        .set(1, com.fasterxml.jackson.databind.node.TextNode.valueOf("429"));
+    ((com.fasterxml.jackson.databind.node.ArrayNode) changed.at(method.listPointer()))
+        .set(1, com.fasterxml.jackson.databind.node.TextNode.valueOf("POST"));
+    RestMeta decoded = ConfigJsonSerializer.fromJson(changed, RestMeta.class, provider);
+    var roundTripped = ConfigJsonSerializer.toJson(decoded, provider);
+    assertEquals(List.of("503", "429", " 429 "), decoded.getRetryStatusCodes());
+    assertEquals(List.of("GET", "POST", "GET"), decoded.getRetryMethods());
+    assertEquals("503", roundTripped.at(status.itemPointer(0)).asText());
+    assertEquals("429", roundTripped.at(status.itemPointer(1)).asText());
+    assertEquals(" 429 ", roundTripped.at(status.itemPointer(2)).asText());
+    assertEquals("GET", roundTripped.at(method.itemPointer(0)).asText());
+    assertEquals("POST", roundTripped.at(method.itemPointer(1)).asText());
+    assertEquals("GET", roundTripped.at(method.itemPointer(2)).asText());
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals(status.itemPointerTemplate(),
+        published.at("/wireLists/3/itemPointerTemplate").asText());
+    assertEquals(method.itemPointerTemplate(),
+        published.at("/wireLists/4/itemPointerTemplate").asText());
+    System.out.println("REST_RETRY_CANONICAL_STRING_LISTS=PASS");
   }
 
   @Test
