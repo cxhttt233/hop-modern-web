@@ -83,6 +83,12 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" -> List.of(
           new WireListContract("keys_1.key", "/keys_1/key", "/keys_1/key/{index}"),
           new WireListContract("keys_2.key", "/keys_2/key", "/keys_2/key/{index}"));
+      // DataGrid publishes two independent ordered lists: declared output columns
+      // and literal input rows. Native column properties carry a second "field"
+      // container per item; row cells remain nested under each line.item array.
+      case "org.apache.hop.pipeline.transforms.datagrid.DataGridMeta" -> List.of(
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"),
+          new WireListContract("line", "/data/line", "/data/line/{index}"));
       // ReplaceString stores ordered replacement rules in the native fields group.
       // Publish the list container, not a guessed leaf path, for table editors.
       case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta" -> List.of(
