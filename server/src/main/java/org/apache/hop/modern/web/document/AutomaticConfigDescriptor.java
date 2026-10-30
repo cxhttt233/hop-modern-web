@@ -1109,6 +1109,19 @@ public final class AutomaticConfigDescriptor {
                       + "target Date type and ordered metadata LIST; this is a "
                       + "timestamp interoperability diagnostic, not a draft-save validator."),
               new RuntimePrecondition(
+                  "SELECT_VALUES_SAME_TYPE_NUMBER_PRECISION_IS_METADATA_ONLY",
+                  List.of("/fields/meta"),
+                  "When an incoming field is already Number and fields.meta[*].type "
+                      + "remains Number, native SelectValues.metadataValues() updates "
+                      + "the output IValueMeta precision and roundingType but does not "
+                      + "round or replace the in-flight Double: the conversion branch "
+                      + "only runs when source and target Hop types differ. A declared "
+                      + "precision of 2 and roundingType half_up can therefore coexist "
+                      + "with a raw row value of 1.2345. Preserve these metadata fields "
+                      + "across JSON editing and HPL disk reopen; display formatting "
+                      + "must not be mistaken for numeric transformation. This is a "
+                      + "runtime compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
                   "SELECT_VALUES_BIGNUMBER_EXACT_DECIMAL_CONVERSION",
                   List.of("/fields/meta"),
                   "For a post-selection STRING field whose fields.meta[*].type is BigNumber, "
