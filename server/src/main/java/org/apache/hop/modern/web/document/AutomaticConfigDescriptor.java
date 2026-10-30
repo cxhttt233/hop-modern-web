@@ -83,6 +83,8 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta",
            "org.apache.hop.pipeline.transforms.setvariable.SetVariableMeta" -> List.of(
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
+      case "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" -> List.of(
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
           new WireListContract("fields.remove", "/fields/remove", "/fields/remove/{index}"),
