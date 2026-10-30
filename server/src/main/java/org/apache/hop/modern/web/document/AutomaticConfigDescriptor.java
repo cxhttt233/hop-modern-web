@@ -66,6 +66,9 @@ public final class AutomaticConfigDescriptor {
           new WireListContract("parameter", "/parameters/parameter", "/parameters/parameter/{index}"),
           new WireListContract("matrixParameter", "/matrixParameters/matrixParameter",
               "/matrixParameters/matrixParameter/{index}"));
+      case "org.apache.hop.pipeline.transforms.http.HttpMeta" -> List.of(
+          new WireListContract("lookup.arg", "/lookup/arg", "/lookup/arg/{index}"),
+          new WireListContract("lookup.header", "/lookup/header", "/lookup/header/{index}"));
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" -> List.of(
           new WireListContract("lookup.key", "/lookup/key", "/lookup/key/{index}"),
           new WireListContract("lookup.value", "/lookup/value", "/lookup/value/{index}"));
