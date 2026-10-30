@@ -5906,6 +5906,77 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_HTTP_CONFIG_ENCODING_OVERRIDES_HEADER_DISK_REOPEN=PASS");
   }
 
+
+  @Test
+  void httpQueryAndHeaderTablesPublishNativeIndexedWirePointersWithoutLeafCollisions()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "Http");
+    assertNotNull(plugin, "production Http plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Object lookup = metadataField(meta.getClass(), "lookupParameters").get(meta);
+    assertNotNull(lookup);
+    ClassLoader loader = meta.getClass().getClassLoader();
+    Class<?> queryType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.http.HttpMeta$QueryParameter");
+    Class<?> headerType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.http.HttpMeta$HeaderParameter");
+    metadataField(lookup.getClass(), "queryParameters").set(lookup, List.of(
+        queryType.getConstructor(String.class, String.class)
+            .newInstance("查询字段<&甲>", "token"),
+        queryType.getConstructor(String.class, String.class)
+            .newInstance("查询字段_乙", "token")));
+    metadataField(lookup.getClass(), "headers").set(lookup, List.of(
+        headerType.getConstructor(String.class, String.class)
+            .newInstance("请求头字段_丙", "X-Trace"),
+        headerType.getConstructor(String.class, String.class)
+            .newInstance("请求头字段_丁", "X-Trace")));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    var contracts = descriptor.wireLists();
+    assertEquals(List.of("lookup.arg", "lookup.header"),
+        contracts.stream().map(
+            AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/lookup/arg", "/lookup/header"),
+        contracts.stream().map(
+            AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "arg").shape());
+    assertEquals(Shape.LIST, property(descriptor, "lookup", "header").shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "lookup", "arg", "name").widgetHint());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "lookup", "header", "name").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "lookup", "arg", "parameter").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "lookup", "header", "parameter").widgetHint());
+
+    var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, new MemoryMetadataProvider());
+    assertTrue(nativeWire.at(contracts.get(0).listPointer()).isArray());
+    assertTrue(nativeWire.at(contracts.get(1).listPointer()).isArray());
+    assertEquals(2, nativeWire.at(contracts.get(0).listPointer()).size());
+    assertEquals(2, nativeWire.at(contracts.get(1).listPointer()).size());
+    assertEquals("查询字段<&甲>", nativeWire.at(contracts.get(0).itemPointer(0) + "/name").asText());
+    assertEquals("查询字段_乙", nativeWire.at(contracts.get(0).itemPointer(1) + "/name").asText());
+    assertEquals("请求头字段_丙", nativeWire.at(contracts.get(1).itemPointer(0) + "/name").asText());
+    assertEquals("请求头字段_丁", nativeWire.at(contracts.get(1).itemPointer(1) + "/name").asText());
+    for (int index = 0; index < 2; index++) {
+      assertEquals("token",
+          nativeWire.at(contracts.get(0).itemPointer(index) + "/parameter").asText());
+      assertEquals("X-Trace",
+          nativeWire.at(contracts.get(1).itemPointer(index) + "/parameter").asText());
+    }
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/lookup/arg/{index}",
+        published.at("/wireLists/0/itemPointerTemplate").asText());
+    assertEquals("/lookup/header/{index}",
+        published.at("/wireLists/1/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_HTTP_CANONICAL_QUERY_HEADER_WIRE_LISTS=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
