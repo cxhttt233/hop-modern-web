@@ -290,6 +290,107 @@ class RestRetryExactTokenP0Test {
     }
   }
 
+  @Test
+  void restMatchingRetryStatusWithZeroAttemptsFailsButNonmatchingStatusReturnsNativeResponse(
+      @TempDir Path tempDir) throws Exception {
+    // Native Rest.executeWithRetry treats a matching status as an error even
+    // when retryTimes is zero; this is different from an unmatched HTTP error.
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin);
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/zero-retry");
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("rest-zero-retry-status.hpl");
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("rest-zero-retry-status");
+    pipeline.addTransform(new TransformMeta("Rest", "rest-zero-retry-node", original));
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("rest-zero-retry-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("rest-zero-retry-doc",
+        new PipelineConfigResource.ReadRequest("rest-zero-retry-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("method", "GET");
+    draft.put("retryTimes", 0);
+    draft.put("retryDelayMs", 1);
+    draft.putObject("retryMethods").putArray("retryMethod").add("GET");
+    draft.putObject("retryStatusCodes").putArray("retryStatusCode").add("418");
+    var write = resource.write("rest-zero-retry-doc",
+        new PipelineConfigResource.WriteRequest("rest-zero-retry-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    ITransformMeta diskMeta = reopened.findTransform("rest-zero-retry-node").getTransform();
+    JsonNode wire = ConfigJsonSerializer.toJson(diskMeta, provider);
+    assertEquals(0, wire.at("/retryTimes").intValue());
+    assertTrue(wire.at("/retryTimes").isNumber());
+    assertEquals("GET", wire.at("/retryMethods/retryMethod/0").asText());
+    assertEquals("418", wire.at("/retryStatusCodes/retryStatusCode/0").asText());
+
+    ClassLoader loader = diskMeta.getClass().getClassLoader();
+    Class<?> restType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+    Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+    Object data = dataType.getConstructor().newInstance();
+    dataType.getField("method").set(data, "GET");
+    Object nativeRest = restType.getConstructor(TransformMeta.class, diskMeta.getClass(),
+        dataType, int.class, PipelineMeta.class, org.apache.hop.pipeline.Pipeline.class)
+        .newInstance(reopened.findTransform("rest-zero-retry-node"), diskMeta, data, 0,
+            reopened, Mockito.spy(new LocalPipelineEngine()));
+
+    Class<?> exchangeType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.rest.Rest$HttpExchange");
+    Class<?> contentType = loader.loadClass("org.apache.hc.core5.http.ContentType");
+    Constructor<?> exchangeConstructor = exchangeType.getDeclaredConstructor(
+        int.class, byte[].class, Map.class, contentType);
+    exchangeConstructor.setAccessible(true);
+    Method status = exchangeType.getDeclaredMethod("status");
+    status.setAccessible(true);
+    Method retry = restType.getDeclaredMethod("executeWithRetry", Supplier.class);
+    retry.setAccessible(true);
+
+    AtomicInteger calls = new AtomicInteger();
+    Supplier<Object> always418 = () -> {
+      calls.incrementAndGet();
+      return exchange(exchangeConstructor, 418);
+    };
+    var thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,
+        () -> retry.invoke(nativeRest, always418));
+    assertInstanceOf(org.apache.hop.core.exception.HopException.class, thrown.getCause());
+    assertTrue(thrown.getCause().getMessage().contains("Request failed after retries"));
+    assertEquals(1, calls.get(), "zero retries still rejects the matching 418 response");
+
+    // Excluding the same status from the list returns the original HTTP response.
+    diskMeta.getClass().getMethod("setRetryStatusCodes", List.class)
+        .invoke(diskMeta, List.of("419"));
+    calls.set(0);
+    Object result = retry.invoke(nativeRest, always418);
+    assertEquals(418, ((Number) status.invoke(result)).intValue());
+    assertEquals(1, calls.get());
+
+    // With one configured retry the same 418 is retried and a 200 can succeed.
+    diskMeta.getClass().getMethod("setRetryStatusCodes", List.class)
+        .invoke(diskMeta, List.of("418"));
+    diskMeta.getClass().getMethod("setRetryTimes", Integer.class)
+        .invoke(diskMeta, 1);
+    calls.set(0);
+    Supplier<Object> then200 = () -> exchange(exchangeConstructor,
+        calls.incrementAndGet() == 1 ? 418 : 200);
+    result = retry.invoke(nativeRest, then200);
+    assertEquals(200, ((Number) status.invoke(result)).intValue());
+    assertEquals(2, calls.get());
+    System.out.println("PROD_P0_REST_ZERO_RETRY_MATCHING_STATUS_FAILS_DISK_REOPEN=PASS");
+  }
+
   private static Object exchange(Constructor<?> ctor, int status) {
     try {
       return ctor.newInstance(status, new byte[0], Map.of(), null);
