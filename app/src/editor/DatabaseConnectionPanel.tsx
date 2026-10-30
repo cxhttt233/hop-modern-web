@@ -27,21 +27,21 @@ export function DatabaseConnectionPanel({ value, onApply, onClose }: Props) {
     setDraft((current) => ({ ...current, rdbms: { ...current.rdbms, [key]: next } }));
 
   const fields: Array<[keyof DatabaseConnection["rdbms"], string]> = [
-    ["hostname", "Host name"],
-    ["databaseName", "Database name"],
-    ["port", "Port"],
-    ["username", "User name"],
+    ["hostname", "主机地址"],
+    ["databaseName", "数据库"],
+    ["port", "端口"],
+    ["username", "用户名"],
     ["manualUrl", "JDBC URL"],
   ];
 
   return (
     <aside className="config-panel" aria-label="Database connection editor">
       <div className="config-heading">
-        <div><strong>Database Connection</strong><span>{value.name}</span></div>
+        <div><strong>数据库连接</strong><span>{value.name}</span></div>
         <button className="icon-button" type="button" aria-label="Close" onClick={onClose}>×</button>
       </div>
       <label className="field">
-        <span>Connection name</span>
+        <span>连接名称</span>
         <input value={draft.name} onChange={(event) => setName(event.target.value)} />
       </label>
       {fields.map(([key, label]) => (
@@ -51,8 +51,8 @@ export function DatabaseConnectionPanel({ value, onApply, onClose }: Props) {
         </label>
       ))}
       <div className="config-actions">
-        <button type="button" onClick={onClose}>Cancel</button>
-        <button className="primary" type="button" disabled={!draft.name.trim()} onClick={() => onApply(draft)}>Apply</button>
+        <button type="button" aria-label="Cancel" onClick={onClose}>取消</button>
+        <button className="primary" type="button" aria-label="Apply" disabled={!draft.name.trim()} onClick={() => onApply(draft)}>应用</button>
       </div>
     </aside>
   );

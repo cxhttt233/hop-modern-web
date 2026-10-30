@@ -1,66 +1,141 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange } from "@xyflow/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connection, type Edge, type Node, type NodeChange, type ReactFlowInstance } from "@xyflow/react";
 import type { HopGraphDocument } from "@hop-modern/contracts";
-import { DatabaseConnectionPanel, type DatabaseConnection } from "./editor/DatabaseConnectionPanel";
 import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
+import { TRANSFORM_ICONS_A } from "./transformIconsA";
+import { TRANSFORM_ICONS_B } from "./transformIconsB";
+import { CATEGORY_ORDER, P0_TRANSFORMS, transformMeta, transformPrimaryName, transformSecondaryName } from "./transformCatalog";
+import { TransformNode, TransformNodeActionsContext } from "./editor/TransformNode";
 
-const sample: HopGraphDocument = {
-  id: "sample", name: "Pipeline", revision: "0",
-  nodes: [
-    { id: "input", name: "Table input", kind: "transform", pluginId: "TableInput", x: 80, y: 120 },
-    { id: "select", name: "Select values", kind: "transform", pluginId: "SelectValues", x: 360, y: 120 },
-    { id: "sort", name: "Sort rows", kind: "transform", pluginId: "SortRows", x: 640, y: 120 },
-  ],
-  edges: [
-    { id: "input-select", source: "input", target: "select", enabled: true },
-    { id: "select-sort", source: "select", target: "sort", enabled: true },
-  ],
+const TRANSFORM_ICONS: Record<string, string> = { ...TRANSFORM_ICONS_A, ...TRANSFORM_ICONS_B };
+
+const NODE_TYPES = { transform: TransformNode };
+
+function uniqueTransformId(pluginId: string, document: HopGraphDocument): string {
+  const stem = pluginId.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
+  let index = 1;
+  let candidate = `${stem}-${index}`;
+  while (document.nodes.some((node) => node.id === candidate)) candidate = `${stem}-${++index}`;
+  return candidate;
+}
+
+// Keep duplicate .hpl basenames distinguishable in the session-only recent list.
+// Use the shortest unique path suffix; full paths remain available in title/aria-label.
+function recentPathLabel(path: string, paths: string[]): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  if (!parts.length) return path;
+  for (let depth = 1; depth <= parts.length; depth++) {
+    const suffix = parts.slice(-depth).join(" / ");
+    if (paths.every((other) => other === path ||
+      other.split(/[\\/]/).filter(Boolean).slice(-depth).join(" / ") !== suffix)) return suffix;
+  }
+  return path;
+}
+
+const emptyDocument: HopGraphDocument = {
+  id: "", name: "", revision: "", nodes: [], edges: [],
 };
 
 function graphNodes(document: HopGraphDocument): Node[] {
-  return document.nodes.map((node) => ({ id: node.id, position: { x: node.x, y: node.y }, data: { label: node.name, pluginId: node.pluginId } }));
+  return document.nodes.map((node) => {
+    const meta = transformMeta(node.pluginId ?? "Unknown");
+    return {
+      id: node.id,
+      type: "transform",
+      position: { x: node.x, y: node.y },
+      className: "hop-transform-node category-" + meta.category,
+      data: {
+        pluginId: node.pluginId,
+        title: transformPrimaryName(node),
+        secondary: transformSecondaryName(node),
+        icon: TRANSFORM_ICONS[node.pluginId ?? ""],
+        glyph: meta.glyph,
+      },
+    };
+  });
 }
 
-const initialConnections: DatabaseConnection[] = [
-  { name: "Warehouse", rdbms: { hostname: "db.internal", databaseName: "warehouse", port: "5432", username: "hop" } },
-  { name: "Reporting", rdbms: { hostname: "reports.internal", databaseName: "reporting", port: "5432", username: "hop" } },
-];
 
 export function App() {
   const initialPipelinePath = import.meta.env.VITE_HOP_PIPELINE_PATH?.trim() ?? "";
-  const [document, setDocument] = useState<HopGraphDocument>(sample);
+  const [document, setDocument] = useState<HopGraphDocument>(emptyDocument);
   const [source, setSource] = useState<GraphSource>({ kind: "sample" });
-  const [nodes, setNodes] = useState<Node[]>(() => graphNodes(sample));
-  const [selectedId, setSelectedId] = useState<string>();
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [configId, setConfigId] = useState<string>();
   const [serverConfig, setServerConfig] = useState<TransformConfigDocument>();
   const [configLoading, setConfigLoading] = useState(false);
+  const configRequestGeneration = useRef(0);
   const [configError, setConfigError] = useState<string>();
-  const [metadataName, setMetadataName] = useState<string>();
-  const [connections, setConnections] = useState(initialConnections);
-  const [tableInputConfigs, setTableInputConfigs] = useState<Record<string, Record<string, unknown>>>({ input: { connection: "Warehouse", sql: "SELECT *\nFROM orders" } });
   const [pipelinePath, setPipelinePath] = useState(initialPipelinePath);
   const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  // Keep only successfully opened server paths, in memory for this editor session.
+  const [recentPipelinePaths, setRecentPipelinePaths] = useState<string[]>([]);
+  // Show only successfully added plugin types; never record failed Hop requests.
+  const [recentTransformIds, setRecentTransformIds] = useState<string[]>([]);
+  const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  // Save must not race with an in-flight authoritative edit/config write.
+  const pendingMutationsRef = useRef(0);
+  const [pendingMutations, setPendingMutations] = useState(0);
+  const beginMutation = useCallback(() => {
+    pendingMutationsRef.current += 1;
+    setPendingMutations(pendingMutationsRef.current);
+  }, []);
+  const finishMutation = useCallback(() => {
+    pendingMutationsRef.current = Math.max(0, pendingMutationsRef.current - 1);
+    setPendingMutations(pendingMutationsRef.current);
+  }, []);
+  const [showOpenPanel, setShowOpenPanel] = useState(!initialPipelinePath);
+
+  // A newly opened .hpl may have nodes far outside the previous file's
+  // viewport. Fit only on a successful open/reopen, never after an edit or
+  // user pan/zoom, so navigation remains predictable.
+  useEffect(() => {
+    if (source.kind !== "server" || !flow || document.nodes.length === 0) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        void flow.fitView({ padding: 0.18, maxZoom: 1, duration: 0 });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+    // Deliberately exclude document revision/nodes: edits must not reset zoom.
+  }, [document.id, flow, pipelineOpenRevision, pipelinePath, source.kind]);
 
   useEffect(() => {
-    if (!pipelinePath) return;
+    // A new open attempt must never display the previous file as the current one.
+    configRequestGeneration.current += 1;
+    setDocument(emptyDocument);
+    setNodes([]);
+    setConfigId(undefined);
+    setServerConfig(undefined);
+    setConfigError(undefined);
+    setConfigLoading(false);
+    setDirty(false);
+    if (!pipelinePath) {
+      setSource({ kind: "sample" });
+      return;
+    }
     const controller = new AbortController();
     setSource({ kind: "loading", path: pipelinePath });
     openPipelineGraph(pipelinePath, controller.signal).then((graph) => {
+      if (controller.signal.aborted) return;
       setDocument(graph);
       setNodes(graphNodes(graph));
-      setSelectedId(undefined);
-      setConfigId(undefined);
-      setServerConfig(undefined);
-      setConfigError(undefined);
       setSource({ kind: "server", path: pipelinePath });
+      setRecentPipelinePaths((current) => [pipelinePath, ...current.filter((path) => path !== pipelinePath)].slice(0, 4));
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
-      setDocument(sample);
-      setNodes(graphNodes(sample));
-      setSource({ kind: "sample", reason: error instanceof Error ? error.message : "Pipeline open failed" });
+      setSource({ kind: "sample", reason: error instanceof Error ? error.message : "无法打开流程" });
+      setShowOpenPanel(true);
     });
     return () => controller.abort();
   }, [pipelinePath, pipelineOpenRevision]);
@@ -68,7 +143,10 @@ export function App() {
   const edges = useMemo<Edge[]>(() => document.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })), [document]);
   const onNodesChange = useCallback((changes: NodeChange<Node>[]) => setNodes((current) => applyNodeChanges(changes, current)), []);
   const onNodeDragStop = useCallback((_: unknown, node: Node) => {
-    if (source.kind !== "server") return;
+    if (source.kind !== "server" || savingRef.current) {
+      setNodes(graphNodes(document));
+      return;
+    }
     const authoritative = document.nodes.find((candidate) => candidate.id === node.id && candidate.kind === "transform");
     if (!authoritative) {
       setNodes(graphNodes(document));
@@ -80,40 +158,96 @@ export function App() {
       setNodes(graphNodes(document));
       return;
     }
+    beginMutation();
     movePipelineTransforms(document.id, [node.id], dx, dy).then((graph) => {
       setDocument(graph);
       setNodes(graphNodes(graph));
+      setDirty(true);
     }).catch(() => {
       setNodes(graphNodes(document));
-    });
-  }, [document, source]);
+    }).finally(finishMutation);
+  }, [beginMutation, document, finishMutation, source]);
   const reconcileGraph = useCallback((graph: HopGraphDocument) => {
     setDocument(graph);
     setNodes(graphNodes(graph));
-    setSelectedId((current) => current && graph.nodes.some((node) => node.id === current) ? current : undefined);
   }, []);
 
-  const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>) => {
-    if (source.kind !== "server") return;
-    command().then(reconcileGraph).catch((error: unknown) => {
+  const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>, onSuccess?: () => void) => {
+    if (source.kind !== "server" || savingRef.current) return;
+    // A new authoritative edit supersedes an earlier failure notice.
+    // If this request also fails, its own error will be displayed below.
+    setConfigError(undefined);
+    beginMutation();
+    command().then((graph) => {
+      reconcileGraph(graph);
+      setDirty(true);
+      onSuccess?.();
+    }).catch((error: unknown) => {
       setConfigError(error instanceof Error ? error.message : "Pipeline edit failed");
       setNodes(graphNodes(document));
-    });
-  }, [document, reconcileGraph, source]);
+    }).finally(finishMutation);
+  }, [beginMutation, document, finishMutation, reconcileGraph, source]);
 
-  const addTransform = useCallback(() => {
-    if (source.kind !== "server") return;
-    let index = document.nodes.length + 1;
-    let nodeId = `new-transform-${index}`;
-    while (document.nodes.some((node) => node.id === nodeId)) nodeId = `new-transform-${++index}`;
-    const nextX = Math.max(160, ...document.nodes.map((node) => node.x + 180));
-    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId: "TableInput", x: nextX, y: 160 }));
+  const addTransformAt = useCallback((pluginId: string, x: number, y: number) => {
+    if (source.kind !== "server" || savingRef.current) return;
+    const nodeId = uniqueTransformId(pluginId, document);
+    runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId, x: Math.round(x), y: Math.round(y) }), () => {
+      setRecentTransformIds((current) => [pluginId, ...current.filter((id) => id !== pluginId)].slice(0, 3));
+    });
   }, [document, runGraphCommand, source]);
 
-  const deleteSelected = useCallback(() => {
-    if (source.kind !== "server" || !selectedId) return;
-    runGraphCommand(() => deletePipelineTransform(document.id, selectedId));
-  }, [document.id, runGraphCommand, selectedId, source]);
+  // Palette buttons must work with mouse clicks and keyboard activation too:
+  // a drag gesture still uses the exact same authoritative /edit/add endpoint.
+  const addTransformFromPalette = useCallback((pluginId: string) => {
+    if (source.kind !== "server" || !flow) return;
+    const bounds = window.document.querySelector(".react-flow")?.getBoundingClientRect();
+    if (!bounds || !bounds.width || !bounds.height) return;
+    const center = flow.screenToFlowPosition({
+      x: bounds.left + bounds.width / 2,
+      y: bounds.top + bounds.height / 2,
+    });
+    // Prefer a free visible position instead of stacking repeated clicks.
+    const offsets = [
+      [0, 0], [-190, 0], [190, 0],
+      [0, -110], [-190, -110], [190, -110],
+      [0, 110], [-190, 110], [190, 110],
+    ];
+    const candidate = offsets.map(([dx, dy]) => ({
+      x: Math.round(center.x + dx - 88),
+      y: Math.round(center.y + dy - 32),
+    })).find(({ x, y }) => !document.nodes.some((node) =>
+      Math.abs(node.x - x) < 170 && Math.abs(node.y - y) < 80));
+    const position = candidate ?? { x: Math.round(center.x - 88), y: Math.round(center.y - 32) };
+    addTransformAt(pluginId, position.x, position.y);
+  }, [addTransformAt, document.nodes, flow, source]);
+
+  const onPaletteDragStart = useCallback((event: React.DragEvent, pluginId: string) => {
+    event.dataTransfer.setData("application/x-hop-transform", pluginId);
+    event.dataTransfer.effectAllowed = "copy";
+  }, []);
+
+  const onCanvasDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    if (source.kind !== "server" || !flow) return;
+    const pluginId = event.dataTransfer.getData("application/x-hop-transform");
+    if (!P0_TRANSFORMS.includes(pluginId as (typeof P0_TRANSFORMS)[number])) return;
+    const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    // Place the node body under the cursor, not its top-left corner.
+    // The same 176 × ~64 canvas footprint is used by click-to-add.
+    addTransformAt(pluginId, point.x - 88, point.y - 32);
+  }, [addTransformAt, flow, source]);
+
+  const filteredTransforms = useMemo(() => {
+    const query = paletteQuery.trim().toLowerCase();
+    if (!query) return [...P0_TRANSFORMS];
+    return P0_TRANSFORMS.filter((pluginId) => {
+      const meta = transformMeta(pluginId);
+      const category = CATEGORY_ORDER.find((entry) => entry.id === meta.category);
+      return pluginId.toLowerCase().includes(query)
+        || meta.name.toLowerCase().includes(query)
+        || Boolean(category?.label.toLowerCase().includes(query));
+    });
+  }, [paletteQuery]);
 
   const connectNodes = useCallback((connection: Connection) => {
     if (source.kind !== "server" || !connection.source || !connection.target) return;
@@ -121,87 +255,258 @@ export function App() {
   }, [document.id, runGraphCommand, source]);
 
   const openTransformConfig = useCallback((nodeId: string) => {
-    if (source.kind !== "server") {
-      setServerConfig(undefined);
-      setConfigError(undefined);
-      setConfigId(nodeId);
-      return;
-    }
+    if (source.kind !== "server") return;
+    const generation = ++configRequestGeneration.current;
+    setConfigId(undefined);
     setConfigLoading(true);
     setConfigError(undefined);
     setServerConfig(undefined);
     readPipelineTransformConfig(document.id, nodeId).then((result) => {
+      if (generation !== configRequestGeneration.current) return;
       setServerConfig(result);
       setConfigId(nodeId);
     }).catch((error: unknown) => {
+      if (generation !== configRequestGeneration.current) return;
       setConfigId(undefined);
       setConfigError(error instanceof Error ? error.message : "Transform config read failed");
-    }).finally(() => setConfigLoading(false));
+    }).finally(() => {
+      if (generation === configRequestGeneration.current) setConfigLoading(false);
+    });
   }, [document.id, source]);
 
   const applyTransformConfig = useCallback((nodeId: string, value: Record<string, unknown>) => {
-    if (source.kind !== "server") {
-      setTableInputConfigs((current) => ({ ...current, [nodeId]: value }));
-      setConfigId(undefined);
-      return;
-    }
+    if (source.kind !== "server" || savingRef.current) return;
     if (!serverConfig || serverConfig.nodeId !== nodeId) return;
+    const generation = ++configRequestGeneration.current;
     setConfigLoading(true);
     setConfigError(undefined);
+    beginMutation();
     writePipelineTransformConfig(document.id, nodeId, value)
-      .then(() => readPipelineTransformConfig(document.id, nodeId))
+      .then(() => {
+        // The server has already mutated Hop Meta. Cancel or a failed refresh must
+        // never erase the unsaved state or block a subsequent explicit Save.
+        setDirty(true);
+        return readPipelineTransformConfig(document.id, nodeId);
+      })
       .then((authoritative) => {
+        if (generation !== configRequestGeneration.current) return;
         setServerConfig(authoritative);
         setConfigId(nodeId);
       })
       .catch((error: unknown) => {
-        setConfigError(error instanceof Error ? error.message : "Transform config write failed");
+        if (generation !== configRequestGeneration.current) return;
+        setConfigError(error instanceof Error ? error.message : "Transform config write/refresh failed");
       })
-      .finally(() => setConfigLoading(false));
-  }, [document.id, serverConfig, source]);
+      .finally(() => {
+        finishMutation();
+        if (generation === configRequestGeneration.current) setConfigLoading(false);
+      });
+  }, [beginMutation, document.id, finishMutation, serverConfig, source]);
 
-  const selected = nodes.find((node) => node.id === selectedId);
+  const removeTransform = useCallback((nodeId: string) => {
+    if (source.kind !== "server" || savingRef.current) return;
+    // A deleted node must not leave a config dialog that reappears after Undo.
+    // Also discard any late config/read response for that node.
+    configRequestGeneration.current += 1;
+    setConfigId(undefined);
+    setServerConfig(undefined);
+    setConfigLoading(false);
+    setConfigError(undefined);
+    runGraphCommand(() => deletePipelineTransform(document.id, nodeId));
+  }, [document.id, runGraphCommand, source]);
+
+  const saveDocument = useCallback(() => {
+    if (source.kind !== "server" || !dirty || savingRef.current || pendingMutationsRef.current > 0) return;
+    // A fast double-click must never issue two concurrent disk saves.
+    savingRef.current = true;
+    setSaving(true);
+    setConfigError(undefined);
+    savePipeline(document.id)
+      .then((graph) => {
+        reconcileGraph(graph);
+        setDirty(false);
+      })
+      .catch((error: unknown) => {
+        setConfigError(error instanceof Error ? error.message : "Pipeline save failed");
+      })
+      .finally(() => {
+        savingRef.current = false;
+        setSaving(false);
+      });
+  }, [dirty, document.id, reconcileGraph, source]);
+
   const configured = nodes.find((node) => node.id === configId);
-  const metadata = connections.find((connection) => connection.name === metadataName);
-  const canConfigure = Boolean(selected);
   const isRealGraph = source.kind === "server";
-  const sourceLabel = source.kind === "server" ? "Server graph" : source.kind === "loading" ? "Loading real pipeline…" : "Development sample";
+  const displayPipelineName = isRealGraph ? (document.name || "未命名流程") : "未打开流程";
 
   return (
     <main className="shell">
-      <header>
-        <div><strong>Hop Modern Web</strong><span>{document.name}</span><span className="preview-badge" title={isRealGraph ? source.path : "Development fallback; open a server-visible .hpl path or configure VITE_HOP_PIPELINE_PATH."}>{sourceLabel}</span></div>
-        <form className="pipeline-open" onSubmit={(event) => { event.preventDefault(); const path = pipelinePathDraft.trim(); if (!path) return; if (path === pipelinePath) setPipelineOpenRevision((current) => current + 1); else setPipelinePath(path); }}>
-          <input aria-label="Server-visible pipeline path" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="Server-visible .hpl path" />
-          <button type="submit" disabled={!pipelinePathDraft.trim() || source.kind === "loading"}>Open pipeline</button>
-        </form>
-        <div className="selection-actions">
-          <small>{selected ? String(selected.data.label) : "Select a transform"}</small>
-          <button type="button" onClick={() => { const connection = selected ? tableInputConfigs[selected.id]?.connection : undefined; setMetadataName((typeof connection === "string" ? connection : undefined) ?? connections[0]?.name); }}>Connections</button>
-          {isRealGraph && <button type="button" onClick={addTransform}>Add Table Input</button>}
-          {isRealGraph && selected && <button type="button" onClick={deleteSelected}>Delete</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>Undo</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>Redo</button>}
-          {isRealGraph && <button type="button" onClick={() => runGraphCommand(() => savePipeline(document.id))}>Save</button>}
-          {canConfigure && selected && <button type="button" disabled={configLoading} onClick={() => openTransformConfig(selected.id)}>Configure</button>}
+      <header className="topbar">
+        <div className="product-brand">
+          <span className="brand-mark">H</span>
+          <span className="brand-copy">
+            <strong>Hop 流程设计器</strong>
+            <small>流程编排与配置</small>
+          </span>
         </div>
-      </header>
-      <section className="workspace">
-        {source.kind !== "server" && <div className="preview-note">{source.kind === "loading" ? `Opening ${source.path}` : source.reason ? `Development sample fallback · ${source.reason}` : "Walking skeleton · open a server-visible .hpl above or set VITE_HOP_PIPELINE_PATH"}</div>}
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onNodeClick={(_, node) => setSelectedId(node.id)} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} onPaneClick={() => setSelectedId(undefined)} fitView nodesDraggable nodesConnectable={isRealGraph} panOnDrag zoomOnScroll zoomOnPinch>
-          <MiniMap /><Controls /><Background />
-        </ReactFlow>
-        {configError && <div className="preview-note" role="alert">{configError}</div>}
-        {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
-          <GenericConfigPanel
-            descriptor={serverConfig.descriptor}
-            config={serverConfig.config}
-            disabled={configLoading}
-            onCancel={() => { setConfigId(undefined); setServerConfig(undefined); setConfigError(undefined); }}
-            onSave={(value) => applyTransformConfig(configured.id, value)}
-          />
+
+        <div className="file-identity" data-document-name={document.name}>
+          <span className="file-dot" aria-hidden="true" />
+          <strong>{displayPipelineName}</strong>
+          {isRealGraph && dirty && <span className="dirty-state is-dirty" role="status">未保存</span>}
+        </div>
+
+        <div className="editor-actions">
+          <button type="button" aria-label="打开流程（Choose pipeline）" disabled={saving || pendingMutations > 0} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
+          {isRealGraph && <>
+            <button type="button" aria-label="适配画布（Fit canvas）" disabled={!flow || nodes.length === 0} title="将当前流程的全部节点适配到可见画布" onClick={() => { void flow?.fitView({ padding: 0.18, maxZoom: 1, duration: 250 }); }}>适配画布</button>
+            <button type="button" aria-label="撤销（Undo）" disabled={saving} onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
+            <button type="button" aria-label="重做（Redo）" disabled={saving} onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
+            <button type="button" aria-label="保存（Save）" aria-busy={saving} className="primary-action" disabled={!dirty || saving || pendingMutations > 0} onClick={saveDocument}>{saving ? "保存中…" : "保存"}</button>
+          </>}
+        </div>
+
+        {showOpenPanel && (
+          <form className="pipeline-open" onSubmit={(event) => {
+            event.preventDefault();
+            if (savingRef.current || pendingMutationsRef.current > 0) return;
+            const path = pipelinePathDraft.trim();
+            if (!path) return;
+            if (path === pipelinePath) setPipelineOpenRevision((current) => current + 1);
+            else setPipelinePath(path);
+            setShowOpenPanel(false);
+          }}>
+            <div>
+              <strong>打开流程</strong>
+              <small>输入服务器上的 .hpl 文件路径</small>
+            </div>
+            <input aria-label="服务器流程路径（Server-visible pipeline path）" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="/workspace/example.hpl" autoFocus />
+            {recentPipelinePaths.length > 0 && (
+              <div className="pipeline-open-actions" role="group" aria-label="最近打开的流程" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
+                <small style={{ alignSelf: "center" }}>最近打开</small>
+                {recentPipelinePaths.map((path) => (
+                  <button key={path} type="button" title={path} aria-label={`填入最近流程：${path}`}
+                    disabled={saving || source.kind === "loading"} onClick={() => setPipelinePathDraft(path)}
+                    style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {recentPathLabel(path, recentPipelinePaths)}
+                  </button>
+                ))}
+                <button type="button" aria-label="清空最近打开记录"
+                  disabled={saving || source.kind === "loading"}
+                  onClick={() => setRecentPipelinePaths([])}>
+                  清空记录
+                </button>
+              </div>
+            )}
+            <div className="pipeline-open-actions">
+              {isRealGraph && <button type="button" onClick={() => setShowOpenPanel(false)}>取消</button>}
+              <button type="submit" aria-label="打开文件（Open pipeline）" className="primary-action" disabled={!pipelinePathDraft.trim() || source.kind === "loading" || saving || pendingMutations > 0}>打开文件</button>
+            </div>
+          </form>
         )}
-        {metadata && <DatabaseConnectionPanel value={metadata} onClose={() => setMetadataName(undefined)} onApply={(value) => { setConnections((current) => current.map((item) => item.name === metadata.name ? value : item)); setTableInputConfigs((current) => Object.fromEntries(Object.entries(current).map(([id, config]) => [id, config.connection === metadata.name ? { ...config, connection: value.name } : config]))); setMetadataName(undefined); }} />}
+      </header>
+
+      <section className="workspace">
+        {isRealGraph && (
+          <aside className="transform-palette" aria-label="Transform palette">
+            <div className="palette-heading">
+              <div>
+                <strong>转换组件</strong>
+                <small>拖动放置，或点击添加</small>
+              </div>
+              <span>{P0_TRANSFORMS.length}</span>
+            </div>
+            <div className="palette-search">
+              <span aria-hidden="true">⌕</span>
+              <input aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} />
+            </div>
+            <div className="transform-list">
+              {recentTransformIds.length > 0 && !paletteQuery.trim() && (
+                <section className="recent-transform-section" aria-label="最近使用的组件" style={{ paddingBottom: 8, borderBottom: "1px solid #e4e8ef", marginBottom: 8 }}>
+                  <div className="transform-group-title"><span>最近使用</span><small>{recentTransformIds.length}</small></div>
+                  <div className="transform-items">
+                    {recentTransformIds.map((pluginId) => {
+                      const meta = transformMeta(pluginId);
+                      return <button key={pluginId} type="button" aria-label={`最近使用：${meta.name}（${pluginId}）`}
+                        draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)}
+                        onClick={() => addTransformFromPalette(pluginId)} title={`${meta.name} · ${pluginId} · 点击再次添加或拖动放置`}>
+                        <span className={`palette-icon category-${meta.category}`}>{TRANSFORM_ICONS[pluginId] ? <img src={TRANSFORM_ICONS[pluginId]} alt="" /> : meta.glyph}</span>
+                        <span className="palette-item-copy"><strong>{meta.name}</strong><small>{pluginId}</small></span>
+                        <span className="drag-grip" aria-hidden="true">⋮⋮</span>
+                      </button>;
+                    })}
+                  </div>
+                </section>
+              )}
+              {CATEGORY_ORDER.map((category) => {
+                const items = filteredTransforms.filter((pluginId) => transformMeta(pluginId).category === category.id);
+                if (!items.length) return null;
+                return (
+                  <section className="transform-group" key={category.id}>
+                    <div className="transform-group-title">
+                      <span>{category.label}</span>
+                      <small>{items.length}</small>
+                    </div>
+                    <div className="transform-items">
+                      {items.map((pluginId) => {
+                        const meta = transformMeta(pluginId);
+                        return (
+                          <button key={pluginId} type="button" aria-label={`${meta.name}（${pluginId}）`} draggable onDragStart={(event) => onPaletteDragStart(event, pluginId)} onClick={() => addTransformFromPalette(pluginId)} title={`${meta.name} · ${pluginId} · 点击添加或拖动放置`}>
+                            <span className={`palette-icon category-${meta.category}`}>{TRANSFORM_ICONS[pluginId] ? <img src={TRANSFORM_ICONS[pluginId]} alt="" /> : meta.glyph}</span>
+                            <span className="palette-item-copy">
+                              <strong>{meta.name}</strong>
+                              <small>{pluginId}</small>
+                            </span>
+                            <span className="drag-grip" aria-hidden="true">⋮⋮</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </aside>
+        )}
+
+        <div className="canvas-chrome" aria-hidden="true">
+          <span>{document.nodes.length} 个转换</span>
+          <i />
+          <span>{document.edges.length} 条连接</span>
+        </div>
+
+        {source.kind !== "server" && (
+          <div className="preview-note">
+            {source.kind === "loading" ? "正在打开流程…" : source.reason ? `流程打开失败：${source.reason}` : "打开服务器上的 .hpl 文件后开始编辑"}
+          </div>
+        )}
+        {isRealGraph && document.nodes.length === 0 && (
+          <div className="preview-note empty-graph-hint" role="status" style={{ pointerEvents: "none" }}>
+            当前流程还没有转换组件。请从左侧拖入组件，或点击组件添加。
+          </div>
+        )}
+
+        <TransformNodeActionsContext.Provider value={{
+          configure: openTransformConfig,
+          remove: removeTransform,
+          editable: isRealGraph && !saving,
+          loading: configLoading || saving,
+        }}>
+        <ReactFlow nodeTypes={NODE_TYPES} nodes={nodes} edges={edges} onInit={setFlow} onDragOver={(event) => { if (isRealGraph) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={onCanvasDrop} onNodesChange={onNodesChange} onNodeDoubleClick={(_, node) => openTransformConfig(node.id)} onNodeDragStop={onNodeDragStop} onConnect={connectNodes} fitView fitViewOptions={{ maxZoom: 1 }} nodesDraggable={!saving} nodesConnectable={isRealGraph && !saving} panOnDrag zoomOnScroll zoomOnPinch>
+          <MiniMap pannable zoomable />
+          <Controls />
+          <Background gap={24} size={1} />
+        </ReactFlow>
+        </TransformNodeActionsContext.Provider>
+
+        {configError && <div className="preview-note error-note" role="alert">操作失败：{configError}</div>}
+        {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
+          <GenericConfigPanel descriptor={serverConfig.descriptor} config={serverConfig.config}
+            transformName={String(configured.data.title ?? configured.id)} transformId={configured.id}
+            disabled={configLoading || saving}
+            onCancel={() => { configRequestGeneration.current += 1; setConfigId(undefined); setServerConfig(undefined); setConfigLoading(false); setConfigError(undefined); }}
+            onSave={(value) => applyTransformConfig(configured.id, value)} />
+        )}
       </section>
     </main>
   );

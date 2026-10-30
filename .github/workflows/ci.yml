@@ -37,7 +37,7 @@ jobs:
           cache: maven
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/filterrows,plugins/transforms/sort -am -DskipTests install
       - name: Test standalone server
         working-directory: modern/server
         run: mvn -q test
@@ -63,7 +63,7 @@ jobs:
           node-version: 24
       - name: Install pinned Hop engine
         working-directory: hop
-        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/sort -am -DskipTests install
+        run: ./mvnw -q -pl lib,core,engine,plugins/transforms/tableinput,plugins/transforms/selectvalues,plugins/transforms/filterrows,plugins/transforms/sort -am -DskipTests install
       - name: Build server runtime classpath
         working-directory: modern/server
         run: mvn -q -DskipTests package dependency:build-classpath -Dmdep.outputFile=classpath.txt
@@ -83,7 +83,7 @@ jobs:
           npm run dev -w @hop-modern/app -- --host 127.0.0.1 >/tmp/hop-modern-vite.log 2>&1 &
           echo $! >/tmp/hop-modern-vite.pid
           for i in {1..60}; do
-            if curl -fsS http://127.0.0.1:5173 >/dev/null && curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/pipelines/open >/tmp/server-status 2>/dev/null; then
+            if curl -fsS http://127.0.0.1:5173 >/dev/null && curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/pipelines/open >/tmp/server-status 2>/dev/null; then
               break
             fi
             sleep 2
@@ -110,6 +110,16 @@ jobs:
         env:
           REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
         run: node e2e/v5-authoritative-edit-save.mjs
+      - name: Prove three-transform Palette edit/config/save workflow
+        working-directory: modern
+        env:
+          REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/real-graph-proof.hpl
+        run: node e2e/v6-palette-authoritative.mjs
+      - name: Prove pending config write and disk save consistency
+        working-directory: modern
+        env:
+          REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/v4-table-input-proof.hpl
+        run: node e2e/v7-save-mutation-gate.mjs
       - name: Show runtime logs on failure
         if: failure()
         run: |
