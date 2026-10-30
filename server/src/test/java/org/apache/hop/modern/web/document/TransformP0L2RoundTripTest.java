@@ -6123,6 +6123,50 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_STRINGCUT_CONCATFIELDS_CANONICAL_FIELD_LISTS=PASS");
   }
 
+
+  @Test
+  void execSqlCanonicalArgumentWireListMatchesNativeOrderedSerializer() throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "ExecSql");
+    assertNotNull(plugin, "production ExecSql plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    // Use the real P0 plugin without adding it to the standalone server classpath.
+    Class<?> argumentClass = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.sql.ExecSqlArgumentItem");
+    Object first = argumentClass.getConstructor(String.class).newInstance("输入<&甲>");
+    Object second = argumentClass.getConstructor(String.class).newInstance("输入字段二");
+    meta.getClass().getMethod("setArguments", List.class)
+        .invoke(meta, List.of(first, second));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(Shape.LIST, property(descriptor, "argument").shape());
+    assertEquals("arguments", property(descriptor, "argument").groupKey());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "argument", "name").widgetHint());
+    assertEquals(1, descriptor.wireLists().size());
+    var contract = descriptor.wireLists().get(0);
+    assertEquals("argument", contract.descriptorPath());
+    assertEquals("/arguments/argument", contract.listPointer());
+    assertEquals("/arguments/argument/0", contract.itemPointer(0));
+    assertEquals("/arguments/argument/1", contract.itemPointer(1));
+
+    var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, new MemoryMetadataProvider());
+    assertTrue(nativeWire.at(contract.listPointer()).isArray());
+    assertEquals(2, nativeWire.at(contract.listPointer()).size());
+    assertEquals("输入<&甲>", nativeWire.at(contract.itemPointer(0) + "/name").asText());
+    assertEquals("输入字段二", nativeWire.at(contract.itemPointer(1) + "/name").asText());
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/arguments/argument",
+        published.at("/wireLists/0/listPointer").asText());
+    assertEquals("/arguments/argument/{index}",
+        published.at("/wireLists/0/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_EXECSQL_CANONICAL_ARGUMENT_WIRE_LIST=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
