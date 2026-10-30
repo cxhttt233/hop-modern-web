@@ -6385,6 +6385,86 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_INSERTUPDATE_CANONICAL_KEY_VALUE_WIRE_LISTS=PASS");
   }
 
+  @Test
+  void replaceStringNativeRuleListPublishesIndexedCanonicalWirePointer()
+      throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "ReplaceString");
+    assertNotNull(plugin, "production ReplaceString plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Class<?> ruleType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta$RSField");
+    Object first = ruleType.getConstructor().newInstance();
+    Object second = ruleType.getConstructor().newInstance();
+    ruleType.getMethod("setFieldInStream", String.class)
+        .invoke(first, "上游列<&雪>");
+    ruleType.getMethod("setFieldOutStream", String.class)
+        .invoke(first, "输出列<&雪>");
+    ruleType.getMethod("setReplaceString", String.class)
+        .invoke(first, "原文<&>");
+    ruleType.getMethod("setReplaceByString", String.class)
+        .invoke(first, "替换值");
+    ruleType.getMethod("setUsingRegEx", boolean.class).invoke(first, true);
+    ruleType.getMethod("setFieldInStream", String.class)
+        .invoke(second, "第二上游列");
+    ruleType.getMethod("setFieldOutStream", String.class)
+        .invoke(second, "第二输出列");
+    ruleType.getMethod("setReplaceString", String.class)
+        .invoke(second, "old");
+    ruleType.getMethod("setReplaceByString", String.class)
+        .invoke(second, "new");
+    ruleType.getMethod("setCaseSensitive", boolean.class).invoke(second, true);
+    meta.getClass().getMethod("setFields", List.class)
+        .invoke(meta, new ArrayList<>(List.of(first, second)));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("fields", property(descriptor, "field").groupKey());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "field", "in_stream_name").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "field", "out_stream_name").widgetHint());
+    assertEquals(Shape.BOOLEAN,
+        property(descriptor, "field", "use_regex").shape());
+    assertEquals(1, descriptor.wireLists().size());
+    var contract = descriptor.wireLists().get(0);
+    assertEquals("field", contract.descriptorPath());
+    assertEquals("/fields/field", contract.listPointer());
+    assertEquals("/fields/field/{index}", contract.itemPointerTemplate());
+
+    var provider = new MemoryMetadataProvider();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, provider);
+    assertTrue(wire.at(contract.listPointer()).isArray());
+    assertEquals(2, wire.at(contract.listPointer()).size());
+    assertEquals("上游列<&雪>", wire.at("/fields/field/0/in_stream_name").asText());
+    assertEquals("输出列<&雪>", wire.at("/fields/field/0/out_stream_name").asText());
+    assertEquals("第二上游列", wire.at("/fields/field/1/in_stream_name").asText());
+    assertTrue(wire.at("/fields/field/0/use_regex").isBoolean());
+    assertTrue(wire.at("/fields/field/0/use_regex").booleanValue());
+    assertTrue(wire.at("/fields/field/1/case_sensitive").booleanValue());
+
+    // A targeted native JSON edit must preserve the other ordered rule.
+    var edited = wire.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) edited.at("/fields/field/1"))
+        .put("replace_by_string", "修改后<&雪>");
+    var decoded = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.fromJson(
+        edited, meta.getClass(), provider);
+    var after = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        decoded, provider);
+    assertEquals("上游列<&雪>", after.at("/fields/field/0/in_stream_name").asText());
+    assertEquals("替换值", after.at("/fields/field/0/replace_by_string").asText());
+    assertEquals("修改后<&雪>", after.at("/fields/field/1/replace_by_string").asText());
+    assertTrue(after.at("/fields/field/0/use_regex").booleanValue());
+    assertTrue(after.at("/fields/field/1/case_sensitive").booleanValue());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/fields/field/{index}",
+        published.at("/wireLists/0/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_REPLACESTRING_CANONICAL_RULE_LIST=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
