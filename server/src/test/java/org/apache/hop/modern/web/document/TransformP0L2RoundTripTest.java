@@ -6047,6 +6047,82 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_CHECKSUM_SETVARIABLE_CANONICAL_FIELD_LISTS=PASS");
   }
 
+  @Test
+  void stringCutAndConcatFieldsCanonicalSourceListsMatchNativeHopJson()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    for (String id : List.of("StringCut", "ConcatFields")) {
+      IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
+      assertNotNull(plugin, "missing production " + id + " plugin");
+      ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+      meta.setDefault();
+      boolean cut = id.equals("StringCut");
+      String itemName = cut
+          ? "org.apache.hop.pipeline.transforms.stringcut.StringCutField"
+          : "org.apache.hop.pipeline.transforms.concatfields.ConcatField";
+      Class<?> itemClass = meta.getClass().getClassLoader().loadClass(itemName);
+      String firstName = "上游字段<&甲>";
+      String secondName = "上游字段_乙";
+      Object first;
+      Object second;
+      if (cut) {
+        var ctor = itemClass.getConstructor(
+            String.class, String.class, String.class, String.class);
+        first = ctor.newInstance(firstName, "输出<&甲>", "1", "3");
+        second = ctor.newInstance(secondName, "输出_乙", "0", "2");
+      } else {
+        first = itemClass.getConstructor().newInstance();
+        second = itemClass.getConstructor().newInstance();
+        itemClass.getMethod("setName", String.class).invoke(first, firstName);
+        itemClass.getMethod("setName", String.class).invoke(second, secondName);
+        itemClass.getMethod("setLength", int.class).invoke(first, 12);
+        itemClass.getMethod("setLength", int.class).invoke(second, 24);
+      }
+      metadataField(meta.getClass(), cut ? "fields" : "outputFields")
+          .set(meta, List.of(first, second));
+
+      Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+      assertEquals(1, descriptor.wireLists().size(), id);
+      var contract = descriptor.wireLists().get(0);
+      assertEquals("field", contract.descriptorPath(), id);
+      assertEquals("/fields/field", contract.listPointer(), id);
+      assertEquals("/fields/field/0", contract.itemPointer(0), id);
+      assertEquals("/fields/field/1", contract.itemPointer(1), id);
+      assertEquals(Shape.LIST, property(descriptor, "field").shape(), id);
+      String sourceKey = cut ? "in_stream_name" : "name";
+      assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+          property(descriptor, "field", sourceKey).widgetHint(), id);
+
+      var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          meta, new MemoryMetadataProvider());
+      assertTrue(nativeWire.at(contract.listPointer()).isArray(), id);
+      assertEquals(2, nativeWire.at(contract.listPointer()).size(), id);
+      assertEquals(firstName,
+          nativeWire.at(contract.itemPointer(0) + "/" + sourceKey).asText(), id);
+      assertEquals(secondName,
+          nativeWire.at(contract.itemPointer(1) + "/" + sourceKey).asText(), id);
+      if (cut) {
+        assertEquals("输出<&甲>",
+            nativeWire.at(contract.itemPointer(0) + "/out_stream_name").asText());
+        assertEquals("1",
+            nativeWire.at(contract.itemPointer(0) + "/cut_from").asText());
+      } else {
+        assertTrue(nativeWire.at(contract.itemPointer(0) + "/length").isNumber());
+        assertEquals(12,
+            nativeWire.at(contract.itemPointer(0) + "/length").intValue());
+        assertEquals(24,
+            nativeWire.at(contract.itemPointer(1) + "/length").intValue());
+      }
+      var published = mapper.valueToTree(descriptor);
+      assertEquals("/fields/field",
+          published.at("/wireLists/0/listPointer").asText(), id);
+      assertEquals("/fields/field/{index}",
+          published.at("/wireLists/0/itemPointerTemplate").asText(), id);
+    }
+    System.out.println("PROD_P0_STRINGCUT_CONCATFIELDS_CANONICAL_FIELD_LISTS=PASS");
+  }
+
   private static Object newScriptField(Class<?> type, String name, String rename,
       int valueType, int length, int precision, boolean replace) throws Exception {
     Object field = type.getDeclaredConstructor().newInstance();
