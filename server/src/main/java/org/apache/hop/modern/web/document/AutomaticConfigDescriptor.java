@@ -72,6 +72,11 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" -> List.of(
           new WireListContract("lookup.key", "/lookup/key", "/lookup/key/{index}"),
           new WireListContract("lookup.value", "/lookup/value", "/lookup/value/{index}"));
+      // Native StringCut and ConcatFields also place ordered source-row fields
+      // under the fields container, despite distinct Java member names.
+      case "org.apache.hop.pipeline.transforms.stringcut.StringCutMeta",
+           "org.apache.hop.pipeline.transforms.concatfields.ConcatFieldsMeta" -> List.of(
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       // Both native transforms serialize their incoming-row field list under
       // the fields groupKey, even though the Java members are named differently.
       // Publish the canonical wire path rather than asking consumers to infer it.
