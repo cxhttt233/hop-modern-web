@@ -1122,6 +1122,20 @@ public final class AutomaticConfigDescriptor {
                       + "must not be mistaken for numeric transformation. This is a "
                       + "runtime compatibility diagnostic, not a save-time validator."),
               new RuntimePrecondition(
+                  "SELECT_VALUES_NUMBER_VS_BIGNUMBER_TO_INTEGER_ROUNDING_DIFFERS",
+                  List.of("/fields/meta"),
+                  "When SelectValues changes the target type to Integer, native "
+                      + "SelectValues.metadataValues() delegates conversion to the source "
+                      + "IValueMeta.getInteger(). A Number (Double) source uses Math.round "
+                      + "(1.6 -> 2 and -1.6 -> -2), while a BigNumber (BigDecimal) "
+                      + "source uses longValue() and truncates toward zero "
+                      + "(1.6 -> 1 and -1.6 -> -1). Thus equal decimal magnitudes "
+                      + "can produce different INTEGER rows depending on the incoming "
+                      + "Hop type, even with the same fields.meta[*].type=Integer. "
+                      + "Preserve both source field metadata and ordered fields.meta "
+                      + "conversion entries across JSON editing and HPL disk reopen. "
+                      + "This is a runtime data-accuracy diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
                   "SELECT_VALUES_BIGNUMBER_EXACT_DECIMAL_CONVERSION",
                   List.of("/fields/meta"),
                   "For a post-selection STRING field whose fields.meta[*].type is BigNumber, "
