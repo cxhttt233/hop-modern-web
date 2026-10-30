@@ -1231,4 +1231,143 @@ class SelectValuesFullPipelineP0Test {
     System.out.println("PROD_P0_SELECTVALUES_NUMBER_BIGNUMBER_INTEGER_ROUNDING=PASS");
   }
 
+
+  /**
+   * BigDecimal.longValue() silently wraps values outside signed 64-bit range.
+   * The native SelectValues Integer conversion does not use longValueExact().
+   * Prove the data-loss hazard using real BigNumber rows, JSON config editing,
+   * native Hop execution and a persisted/reopened HPL (no Hop Core changes).
+   */
+  @Test
+  void selectValuesBigNumberOverflowWrapsLongAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String[] spec : new String[][] {
+        {"超界流量<&>", "BigNumber"}, {"测站", "String"}}) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, spec[0]);
+      fieldType.getMethod("setType", String.class).invoke(column, spec[1]);
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("9223372036854775808", "黄河"),
+        List.of("-9223372036854775809", "长江"),
+        List.of("9223372036854775807", "珠江"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SelectValues", "select-node", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-bignumber-overflow");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-bignumber-overflow.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-overflow-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-overflow-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject());
+    fields.putArray("meta").addObject()
+        .put("name", "超界流量<&>")
+        .put("rename", "整数流量")
+        .put("type", "Integer");
+    var write = resource.write("select-overflow-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(2, reopened.nrTransforms());
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertEquals(1, wire.at("/fields/meta").size());
+    assertEquals("超界流量<&>", wire.at("/fields/meta/0/name").asText());
+    assertEquals("整数流量", wire.at("/fields/meta/0/rename").asText());
+    assertEquals("Integer", wire.at("/fields/meta/0/type").asText());
+    var descriptor = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("select-node").getTransform().getClass());
+    assertEquals("/fields/meta", descriptor.wireLists().get(2).listPointer());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("SELECT_VALUES_BIGNUMBER_INTEGER_OVERFLOW_WRAP"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/meta"), contract.keyListPointers());
+    assertTrue(contract.explanation().contains("longValue()"));
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> emittedMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("select-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emittedMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native overflow conversion must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(emittedMeta.get());
+    assertEquals(2, emittedMeta.get().size());
+    assertEquals("整数流量", emittedMeta.get().getValueMeta(0).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, emittedMeta.get().getValueMeta(0).getType());
+    assertEquals(3, emitted.size());
+    java.util.Map<String, Long> expected = java.util.Map.of(
+        "黄河", Long.MIN_VALUE,
+        "长江", Long.MAX_VALUE,
+        "珠江", Long.MAX_VALUE);
+    java.util.Set<String> seen = new java.util.HashSet<>();
+    for (Object[] row : emitted) {
+      assertInstanceOf(Long.class, row[0]);
+      assertInstanceOf(String.class, row[1]);
+      String station = (String) row[1];
+      assertTrue(seen.add(station), "each input station should emit one row");
+      assertEquals(expected.get(station), row[0],
+          "native BigDecimal.longValue() must reveal the overflow rather than clamp");
+    }
+    assertEquals(expected.keySet(), seen);
+    System.out.println("PROD_P0_SELECTVALUES_BIGNUMBER_INTEGER_OVERFLOW_WRAP=PASS");
+  }
 }
