@@ -90,8 +90,12 @@ public final class AutomaticConfigDescriptor {
       // MergeJoin stores two independent ordered STRING key lists with the same
       // native leaf key; expose their groupKey containers to avoid collisions.
       case "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta" -> List.of(
-          new WireListContract("keys_1.key", "/keys_1/key", "/keys_1/key/{index}"),
-          new WireListContract("keys_2.key", "/keys_2/key", "/keys_2/key/{index}"));
+          // Both native key arrays contain primitive STRING values. Each must
+          // pick fields from its own INFO stream, not the merged upstream row.
+          new WireListContract("keys_1.key", "/keys_1/key", "/keys_1/key/{index}",
+              WidgetHint.INFO_STREAM_FIELD_PICKER, "/transform1"),
+          new WireListContract("keys_2.key", "/keys_2/key", "/keys_2/key/{index}",
+              WidgetHint.INFO_STREAM_FIELD_PICKER, "/transform2"));
       // DataGrid publishes two independent ordered lists: declared output columns
       // and literal input rows. Native column properties carry a second "field"
       // container per item; row cells remain nested under each line.item array.
@@ -250,6 +254,13 @@ public final class AutomaticConfigDescriptor {
         if (owner.getName().equals(
                 "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta")
             && key.equals("from")) {
+          yield WidgetHint.INFO_STREAM_TRANSFORM_PICKER;
+        }
+        // MergeJoin's two named inputs are separate INFO streams. They are
+        // transform references, not ordinary text or incoming row fields.
+        if (owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.mergejoin.MergeJoinMeta")
+            && (key.equals("transform1") || key.equals("transform2"))) {
           yield WidgetHint.INFO_STREAM_TRANSFORM_PICKER;
         }
         // The two lookup-side column references are resolved from the INFO stream
@@ -1546,8 +1557,17 @@ public final class AutomaticConfigDescriptor {
       this(className, properties, runtimePreconditions, List.of());
     }
   }
+  /** Primitive LIST items may need a picker and an explicit source transform.
+   * Both fields are null for non-field lists and for object-valued LIST items.
+   * A consumer must not infer a field source from the layout groupKey.
+   */
   public record WireListContract(
-      String descriptorPath, String listPointer, String itemPointerTemplate) {
+      String descriptorPath, String listPointer, String itemPointerTemplate,
+      WidgetHint itemWidgetHint, String sourceTransformPointer) {
+    public WireListContract(String descriptorPath, String listPointer,
+        String itemPointerTemplate) {
+      this(descriptorPath, listPointer, itemPointerTemplate, null, null);
+    }
     public String itemPointer(int index) {
       if (index < 0) throw new IllegalArgumentException("Negative list index: " + index);
       return itemPointerTemplate.replace("{index}", Integer.toString(index));
