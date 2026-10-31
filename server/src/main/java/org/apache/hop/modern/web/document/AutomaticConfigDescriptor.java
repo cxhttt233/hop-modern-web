@@ -463,14 +463,31 @@ public final class AutomaticConfigDescriptor {
     };
   }
 
-  /** Native JsonInput switches between an incoming-row JSON field and VFS file inputs. */
+  /** Producer-owned conditional source selectors for the pinned native HTTP/REST/JSON plugins. */
   private static ActivationContext activationContext(Class<?> owner, String key, Shape shape) {
-    if (!owner.getName().equals("org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta"))
-      return null;
-    if (key.equals("valueField") && shape == Shape.STRING)
-      return new ActivationContext("/IsInFields", true);
-    if (key.equals("file") && shape == Shape.OBJECT)
-      return new ActivationContext("/IsInFields", false);
+    String className = owner.getName();
+    if (className.equals("org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta")) {
+      if (key.equals("valueField") && shape == Shape.STRING)
+        return new ActivationContext("/IsInFields", true);
+      if (key.equals("file") && shape == Shape.OBJECT)
+        return new ActivationContext("/IsInFields", false);
+    }
+    // Both native HTTP and REST select either the literal URL or an incoming-row URL.
+    // The inactive value must remain in the Hop JSON draft when switching modes.
+    if (className.equals("org.apache.hop.pipeline.transforms.http.HttpMeta")
+        || className.equals("org.apache.hop.pipeline.transforms.rest.RestMeta")) {
+      if (key.equals("url") && shape == Shape.STRING)
+        return new ActivationContext("/urlInField", false);
+      if (key.equals("urlField") && shape == Shape.STRING)
+        return new ActivationContext("/urlInField", true);
+    }
+    // REST independently chooses a literal HTTP method or a method from each row.
+    if (className.equals("org.apache.hop.pipeline.transforms.rest.RestMeta")) {
+      if (key.equals("method") && shape == Shape.STRING)
+        return new ActivationContext("/dynamicMethod", false);
+      if (key.equals("methodFieldName") && shape == Shape.STRING)
+        return new ActivationContext("/dynamicMethod", true);
+    }
     return null;
   }
 
