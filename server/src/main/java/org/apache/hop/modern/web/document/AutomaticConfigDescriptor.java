@@ -483,6 +483,16 @@ public final class AutomaticConfigDescriptor {
       if (key.equals("file") && shape == Shape.OBJECT)
         return new ActivationContext("/IsInFields", false);
     }
+    // TableInput can either infer JDBC result metadata or use explicitly
+    // declared output columns. Validation only applies to declared columns.
+    // These are editor activation hints, not save-time deletion or validation:
+    // retain the inactive fields and flag in the native Hop JSON draft.
+    if (className.equals("org.apache.hop.pipeline.transforms.tableinput.TableInputMeta")) {
+      if (key.equals("field") && shape == Shape.LIST)
+        return new ActivationContext("/specify_fields", true);
+      if (key.equals("validate_specified_fields") && shape == Shape.BOOLEAN)
+        return new ActivationContext("/specify_fields", true);
+    }
     // TableOutput has three independent native editor modes. Keep inactive
     // values in the Hop JSON wire draft; only the consumer's editor activation
     // changes. Do not infer the flags from a nested field or the UI layout.
