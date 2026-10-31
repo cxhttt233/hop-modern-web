@@ -399,7 +399,7 @@ class AutomaticConfigDescriptorTest {
     nativeMeta.setLookup("参数来源<&雪>");
     nativeMeta.setUseNamedParameters(true);
     nativeMeta.setExecuteEachInputRow(true);
-    var provider = new org.apache.hop.metadata.memory.MemoryMetadataProvider();
+    var provider = new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider();
     var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
         nativeMeta, provider);
     assertTrue(wire.at("/execute_each_row").booleanValue());
