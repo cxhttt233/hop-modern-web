@@ -46,7 +46,7 @@ public final class AutomaticConfigDescriptor {
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
             hint, metadataClassName(shape, metadata), pickerContext(type, hint),
             fieldSourcePointer(type, key, hint), fieldSourceStage(type, key, hint),
-            sqlSourceContext(type, key, shape)));
+            sqlSourceContext(type, key, shape), activationContext(type, key, shape)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), runtimePreconditions(type), canonicalWireLists(type));
@@ -461,6 +461,17 @@ public final class AutomaticConfigDescriptor {
               SqlSourcePrecedence.FILE_WHEN_NONEMPTY, true);
       default -> null;
     };
+  }
+
+  /** Native JsonInput switches between an incoming-row JSON field and VFS file inputs. */
+  private static ActivationContext activationContext(Class<?> owner, String key, Shape shape) {
+    if (!owner.getName().equals("org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta"))
+      return null;
+    if (key.equals("valueField") && shape == Shape.STRING)
+      return new ActivationContext("/IsInFields", true);
+    if (key.equals("file") && shape == Shape.OBJECT)
+      return new ActivationContext("/IsInFields", false);
+    return null;
   }
 
   private static TextEditorHint textEditorHint(
@@ -1487,6 +1498,8 @@ public final class AutomaticConfigDescriptor {
     INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER, STAGED_FIELD_PICKER
   }
   public enum FieldSourceStage { AFTER_SELECT, AFTER_REMOVE }
+  /** Conditional editor activation, without deleting the inactive source configuration. */
+  public record ActivationContext(String flagPointer, boolean activeWhen) {}
   public enum SqlSourcePrecedence { FILE_WHEN_NONEMPTY }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
@@ -1531,5 +1544,6 @@ public final class AutomaticConfigDescriptor {
       List<Property> elementProperties, List<Option> options, TextEditorHint textEditorHint,
       LayoutHint layout, WidgetHint widgetHint, String metadataClassName,
       PickerContext pickerContext, String sourceTransformPointer,
-      FieldSourceStage fieldSourceStage, SqlSourceContext sqlSourceContext) {}
+      FieldSourceStage fieldSourceStage, SqlSourceContext sqlSourceContext,
+       ActivationContext activationContext) {}
 }
