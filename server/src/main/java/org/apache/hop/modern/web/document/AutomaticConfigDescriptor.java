@@ -494,6 +494,16 @@ public final class AutomaticConfigDescriptor {
       if (key.equals("removeSourceField") && shape == Shape.BOOLEAN)
         return new ActivationContext("/IsInFields", true);
     }
+    // GroupBy appends a per-group line number only while passing every input row.
+    // The field name is meaningful only when both native BOOLEAN switches are on.
+    // Preserve inactive flags and the literal output name in the Hop JSON draft.
+    if (className.equals("org.apache.hop.pipeline.transforms.groupby.GroupByMeta")) {
+      if (key.equals("add_linenr") && shape == Shape.BOOLEAN)
+        return new ActivationContext("/all_rows", true);
+      if (key.equals("linenr_fieldname") && shape == Shape.STRING)
+        return new ActivationContext("/all_rows", true,
+            List.of(new ActivationCondition("/add_linenr", true)));
+    }
     // TableInput can either infer JDBC result metadata or use explicitly
     // declared output columns. Validation only applies to declared columns.
     // These are editor activation hints, not save-time deletion or validation:
