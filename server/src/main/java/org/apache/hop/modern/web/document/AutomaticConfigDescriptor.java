@@ -58,6 +58,10 @@ public final class AutomaticConfigDescriptor {
    */
   private static List<WireListContract> canonicalWireLists(Class<?> type) {
     return switch (type.getName()) {
+      // CheckSum selected input columns are an ordered native LIST inside the
+      // fields groupKey wrapper; the editor must not infer this wire location.
+      case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta" -> List.of(
+          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" -> List.of(
           new WireListContract("file.file", "/file/files/file", "/file/files/file/{index}"),
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"));
