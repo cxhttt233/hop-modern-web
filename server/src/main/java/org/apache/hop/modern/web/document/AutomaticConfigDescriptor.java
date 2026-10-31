@@ -514,6 +514,16 @@ public final class AutomaticConfigDescriptor {
       if (key.equals("partitioning_field") && shape == Shape.STRING)
         return new ActivationContext("/partitioning_enabled", true);
     }
+    // StreamLookup's integer-pair fast path is reachable only in memory-
+    // preserving hash mode. A sorted-list cache or ordinary hash cache does
+    // not use this flag. Keep inactive flags in the native Hop JSON draft.
+    if (className.equals("org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta")) {
+      if (key.equals("sorted_list") && shape == Shape.BOOLEAN)
+        return new ActivationContext("/preserve_memory", true);
+      if (key.equals("integer_pair") && shape == Shape.BOOLEAN)
+        return new ActivationContext("/preserve_memory", true,
+            List.of(new ActivationCondition("/sorted_list", false)));
+    }
     // Both native HTTP and REST select either the literal URL or an incoming-row URL.
     // The inactive value must remain in the Hop JSON draft when switching modes.
     if (className.equals("org.apache.hop.pipeline.transforms.http.HttpMeta")
@@ -1565,8 +1575,22 @@ public final class AutomaticConfigDescriptor {
     INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER, STAGED_FIELD_PICKER
   }
   public enum FieldSourceStage { AFTER_SELECT, AFTER_REMOVE }
-  /** Conditional editor activation, without deleting the inactive source configuration. */
-  public record ActivationContext(String flagPointer, boolean activeWhen) {}
+  /** A second or later flag in a compound activation; all conditions must match. */
+  public record ActivationCondition(String flagPointer, boolean activeWhen) {}
+  /**
+   * Conditional editor activation, without deleting inactive native configuration.
+   * The primary flag and every additional condition are conjunctive (logical AND).
+   * Empty additionalConditions retains the original single-flag contract.
+   */
+  public record ActivationContext(
+      String flagPointer, boolean activeWhen, List<ActivationCondition> additionalConditions) {
+    public ActivationContext(String flagPointer, boolean activeWhen) {
+      this(flagPointer, activeWhen, List.of());
+    }
+    public ActivationContext {
+      additionalConditions = List.copyOf(additionalConditions);
+    }
+  }
   public enum SqlSourcePrecedence { FILE_WHEN_NONEMPTY }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
