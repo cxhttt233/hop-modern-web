@@ -664,8 +664,12 @@ class TransformP0L2RoundTripTest {
     // BETWEEN's second input is also an incoming field but lacks that annotation.
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, keySource.widgetHint());
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, updateSource.widgetHint());
-    assertEquals(WidgetHint.NONE, keyDatabaseColumn.widgetHint());
-    assertEquals(WidgetHint.NONE, updateDatabaseColumn.widgetHint());
+    assertEquals(WidgetHint.DATABASE_COLUMN_PICKER, keyDatabaseColumn.widgetHint());
+    assertEquals(WidgetHint.DATABASE_COLUMN_PICKER, updateDatabaseColumn.widgetHint());
+    var insertColumnContext = new AutomaticConfigDescriptor.PickerContext(
+        "/connection", "/lookup/schema", "/lookup/table");
+    assertEquals(insertColumnContext, keyDatabaseColumn.pickerContext());
+    assertEquals(insertColumnContext, updateDatabaseColumn.pickerContext());
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, betweenSecondSource.widgetHint());
     assertEquals(WidgetHint.NONE, property(insert, "lookup", "key", "condition").widgetHint());
 
@@ -674,7 +678,9 @@ class TransformP0L2RoundTripTest {
     Property databaseColumn = property(output, "field", "column_name");
     Property partitionSource = property(output, "partitioning_field");
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, streamColumn.widgetHint());
-    assertEquals(WidgetHint.NONE, databaseColumn.widgetHint());
+    assertEquals(WidgetHint.DATABASE_COLUMN_PICKER, databaseColumn.widgetHint());
+    assertEquals(new AutomaticConfigDescriptor.PickerContext(
+        "/connection", "/schema", "/table"), databaseColumn.pickerContext());
     // TableOutput's partitioning field is an incoming DATE column even though
     // the native annotation omits STREAM_FIELD.
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, partitionSource.widgetHint());
@@ -689,7 +695,18 @@ class TransformP0L2RoundTripTest {
       assertFalse(json.path("pickerContext").isObject());
       assertTrue(json.path("metadataClassName").isNull());
     }
-    System.out.println("PROD_P0_STREAM_FIELD_NATIVE_ANNOTATION_PICKERS=PASS");
+    for (Property column : List.of(keyDatabaseColumn, updateDatabaseColumn, databaseColumn)) {
+      var json = mapper.valueToTree(column);
+      assertEquals("DATABASE_COLUMN_PICKER", json.path("widgetHint").asText());
+      assertEquals("/connection",
+          json.at("/pickerContext/connectionPointer").asText());
+      assertFalse(json.path("metadataClassName").isTextual());
+    }
+    assertEquals("/lookup/table",
+        mapper.valueToTree(keyDatabaseColumn).at("/pickerContext/tablePointer").asText());
+    assertEquals("/table",
+        mapper.valueToTree(databaseColumn).at("/pickerContext/tablePointer").asText());
+    System.out.println("PROD_P0_DATABASE_COLUMN_PICKER_CANONICAL_CONTEXT=PASS");
   }
 
   @Test
@@ -6646,7 +6663,7 @@ class TransformP0L2RoundTripTest {
     assertEquals("fields", property(descriptor, "field").groupKey());
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
         property(descriptor, "field", "stream_name").widgetHint());
-    assertEquals(WidgetHint.NONE,
+    assertEquals(WidgetHint.DATABASE_COLUMN_PICKER,
         property(descriptor, "field", "column_name").widgetHint());
 
     var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
@@ -6669,6 +6686,124 @@ class TransformP0L2RoundTripTest {
     assertEquals("/fields/field/{index}",
         json.at("/wireLists/0/itemPointerTemplate").asText());
     System.out.println("PROD_P0_TABLEOUTPUT_CANONICAL_STREAM_COLUMN_WIRE_LIST=PASS");
+  }
+
+  @Test
+  void databaseColumnPickerContextsSurviveRealTableOutputAndInsertUpdateHplConfigEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin tablePlugin = plugins.findPluginWithId(TransformPluginType.class, "TableOutput");
+    IPlugin insertPlugin = plugins.findPluginWithId(TransformPluginType.class, "InsertUpdate");
+    assertNotNull(tablePlugin);
+    assertNotNull(insertPlugin);
+    ITransformMeta table = plugins.loadClass(tablePlugin, ITransformMeta.class);
+    table.setDefault();
+    table.getClass().getMethod("setConnection", String.class).invoke(table, "连接_水利");
+    table.getClass().getMethod("setSchemaName", String.class).invoke(table, "业务模式");
+    table.getClass().getMethod("setTableName", String.class).invoke(table, "监测目标表");
+    table.getClass().getMethod("setPartitionDataPer", String.class).invoke(table, "MONTH");
+    table.getClass().getMethod("setSpecifyFields", boolean.class).invoke(table, true);
+    Class<?> tableFieldType = table.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.tableoutput.TableOutputField");
+    table.getClass().getMethod("setFields", List.class).invoke(table, List.of(
+        tableFieldType.getConstructor(String.class, String.class)
+            .newInstance("db_水位", "stream_水位")));
+
+    ITransformMeta insert = plugins.loadClass(insertPlugin, ITransformMeta.class);
+    insert.setDefault();
+    insert.getClass().getMethod("setConnection", String.class).invoke(insert, "连接_水利");
+    Object lookup = insert.getClass().getMethod("getInsertUpdateLookupField").invoke(insert);
+    lookup.getClass().getMethod("setSchemaName", String.class).invoke(lookup, "业务模式");
+    lookup.getClass().getMethod("setTableName", String.class).invoke(lookup, "监测目标表");
+    ClassLoader loader = insert.getClass().getClassLoader();
+    Class<?> keyType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField");
+    Class<?> valueType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateValue");
+    lookup.getClass().getMethod("setLookupKeys", List.class).invoke(lookup, List.of(
+        keyType.getConstructor(String.class, String.class, String.class)
+            .newInstance("stream_站号", "db_站号", "=")));
+    lookup.getClass().getMethod("setValueFields", List.class).invoke(lookup, List.of(
+        valueType.getConstructor(String.class, String.class, boolean.class)
+            .newInstance("db_水位", "stream_水位", true)));
+
+    var provider = new MemoryMetadataProvider();
+    PipelineDocumentStore store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    java.nio.file.Path hpl = tempDir.resolve("database-column-pickers.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("database-column-pickers");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", "table-output-node", table));
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "InsertUpdate", "insert-update-node", insert));
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("column-picker-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    var tableRead = resource.read(
+        "column-picker-doc", new PipelineConfigResource.ReadRequest("table-output-node"));
+    assertEquals(200, tableRead.getStatus());
+    var tableResponse = (PipelineConfigResource.ConfigResponse) tableRead.getEntity();
+    Property tableColumn = property(tableResponse.descriptor(), "field", "column_name");
+    assertEquals(WidgetHint.DATABASE_COLUMN_PICKER, tableColumn.widgetHint());
+    assertEquals(new AutomaticConfigDescriptor.PickerContext(
+        "/connection", "/schema", "/table"), tableColumn.pickerContext());
+    assertEquals("/table",
+        mapper.valueToTree(tableColumn).at("/pickerContext/tablePointer").asText());
+    var tableConfig = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        tableResponse.config()).deepCopy();
+    assertEquals("连接_水利", tableConfig.at("/connection").asText());
+    assertEquals("业务模式", tableConfig.at("/schema").asText());
+    assertEquals("监测目标表", tableConfig.at("/table").asText());
+    ((com.fasterxml.jackson.databind.node.ObjectNode) tableConfig.at("/fields/field/0"))
+        .put("column_name", "db_水位更新<&雪>");
+    assertEquals(200, resource.write("column-picker-doc",
+        new PipelineConfigResource.WriteRequest("table-output-node", tableConfig)).getStatus());
+
+    var insertRead = resource.read(
+        "column-picker-doc", new PipelineConfigResource.ReadRequest("insert-update-node"));
+    assertEquals(200, insertRead.getStatus());
+    var insertResponse = (PipelineConfigResource.ConfigResponse) insertRead.getEntity();
+    var expectedContext = new AutomaticConfigDescriptor.PickerContext(
+        "/connection", "/lookup/schema", "/lookup/table");
+    assertEquals(expectedContext,
+        property(insertResponse.descriptor(), "lookup", "key", "field").pickerContext());
+    assertEquals(expectedContext,
+        property(insertResponse.descriptor(), "lookup", "value", "name").pickerContext());
+    assertEquals("/lookup/table",
+        mapper.valueToTree(property(insertResponse.descriptor(), "lookup", "value", "name"))
+            .at("/pickerContext/tablePointer").asText());
+    var insertConfig = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        insertResponse.config()).deepCopy();
+    assertEquals("连接_水利", insertConfig.at("/connection").asText());
+    assertEquals("业务模式", insertConfig.at("/lookup/schema").asText());
+    assertEquals("监测目标表", insertConfig.at("/lookup/table").asText());
+    ((com.fasterxml.jackson.databind.node.ObjectNode) insertConfig.at("/lookup/key/0"))
+        .put("field", "db_站号更新<&雪>");
+    ((com.fasterxml.jackson.databind.node.ObjectNode) insertConfig.at("/lookup/value/0"))
+        .put("name", "db_水位更新<&雪>");
+    assertEquals(200, resource.write("column-picker-doc",
+        new PipelineConfigResource.WriteRequest("insert-update-node", insertConfig)).getStatus());
+    store.save(hpl, loaded);
+
+    var disk = store.open(hpl);
+    var tableWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        disk.findTransform("table-output-node").getTransform(), provider);
+    var insertWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        disk.findTransform("insert-update-node").getTransform(), provider);
+    assertEquals("db_水位更新<&雪>", tableWire.at("/fields/field/0/column_name").asText());
+    assertEquals("stream_水位", tableWire.at("/fields/field/0/stream_name").asText());
+    assertEquals("db_站号更新<&雪>", insertWire.at("/lookup/key/0/field").asText());
+    assertEquals("stream_站号", insertWire.at("/lookup/key/0/name").asText());
+    assertEquals("db_水位更新<&雪>", insertWire.at("/lookup/value/0/name").asText());
+    assertEquals("stream_水位", insertWire.at("/lookup/value/0/rename").asText());
+    assertEquals("业务模式", insertWire.at("/lookup/schema").asText());
+    assertEquals("监测目标表", insertWire.at("/lookup/table").asText());
+    System.out.println("PROD_P0_DATABASE_COLUMN_PICKER_CONTEXT_REAL_HPL_EDIT=PASS");
   }
 
   @Test
@@ -6776,9 +6911,9 @@ class TransformP0L2RoundTripTest {
         property(descriptor, "lookup", "key", "name2").widgetHint());
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
         property(descriptor, "lookup", "value", "rename").widgetHint());
-    assertEquals(WidgetHint.NONE,
+    assertEquals(WidgetHint.DATABASE_COLUMN_PICKER,
         property(descriptor, "lookup", "key", "field").widgetHint());
-    assertEquals(WidgetHint.NONE,
+    assertEquals(WidgetHint.DATABASE_COLUMN_PICKER,
         property(descriptor, "lookup", "value", "name").widgetHint());
     assertEquals(Shape.BOOLEAN, property(descriptor, "lookup", "value", "update").shape());
 
