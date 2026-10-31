@@ -428,8 +428,9 @@ class TransformP0L2RoundTripTest {
     assertNull(property(initial.descriptor(), "field").activationContext());
     var descriptorJson = new com.fasterxml.jackson.databind.ObjectMapper()
         .valueToTree(initial.descriptor());
-    assertEquals("/IsInFields", descriptorJson.path("properties").findValuesAsText("flagPointer")
-        .get(0));
+    assertEquals("/IsInFields",
+        new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(incomingField)
+            .at("/activationContext/flagPointer").asText());
     assertEquals("UPSTREAM_FIELD_PICKER",
         new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(incomingField)
             .path("widgetHint").asText());
