@@ -7502,6 +7502,107 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_SQL_FILE_OVERRIDE_PRODUCER_CONTEXT_HPL=PASS");
   }
 
+  @Test
+  void httpAndRestSourceModesPublishActivationContextsAndSurviveNativeHplReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    for (String pluginId : List.of("Http", "Rest")) {
+      IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, pluginId);
+      assertNotNull(plugin, "missing native " + pluginId + " plugin");
+      ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+      original.setDefault();
+      Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+      assertEquals(Shape.BOOLEAN, property(descriptor, "urlInField").shape());
+      assertEquals(new AutomaticConfigDescriptor.ActivationContext("/urlInField", false),
+          property(descriptor, "url").activationContext());
+      assertEquals(new AutomaticConfigDescriptor.ActivationContext("/urlInField", true),
+          property(descriptor, "urlField").activationContext());
+      assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+          property(descriptor, "urlField").widgetHint());
+      assertNull(property(descriptor, "urlInField").activationContext());
+      if (pluginId.equals("Rest")) {
+        assertEquals(new AutomaticConfigDescriptor.ActivationContext("/dynamicMethod", false),
+            property(descriptor, "method").activationContext());
+        assertEquals(new AutomaticConfigDescriptor.ActivationContext("/dynamicMethod", true),
+            property(descriptor, "methodFieldName").activationContext());
+        assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+            property(descriptor, "methodFieldName").widgetHint());
+      }
+      var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(
+          property(descriptor, "urlField"));
+      assertEquals("/urlInField",
+          published.at("/activationContext/flagPointer").asText());
+      assertTrue(published.at("/activationContext/activeWhen").booleanValue());
+
+      var provider = new MemoryMetadataProvider();
+      var variables = new org.apache.hop.core.variables.Variables();
+      var store = new PipelineDocumentStore(provider, variables);
+      var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+      pipeline.setName("source-mode-" + pluginId);
+      String node = pluginId + "-source-mode";
+      pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+          pluginId, node, original));
+      java.nio.file.Path hpl = tempDir.resolve(pluginId + "-source-mode.hpl");
+      store.save(hpl, pipeline);
+      var loaded = store.open(hpl);
+      var docs = new PipelineDocumentRegistry();
+      String id = pluginId + "-source-mode-doc";
+      docs.put(new PipelineDocument(id, hpl, loaded));
+      var resource = new PipelineConfigResource(docs, provider);
+      var read = resource.read(id, new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus(), pluginId + " native config/read");
+      var response = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) response.config()).deepCopy();
+      String staticUrl = "https://example.invalid/river?station=雪&mode=static";
+      String dynamicField = "请求地址<&雪>";
+      changed.put("url", staticUrl);
+      changed.put("urlField", dynamicField);
+      changed.put("urlInField", true);
+      if (pluginId.equals("Rest")) {
+        changed.put("method", "POST");
+        changed.put("methodFieldName", "请求方法<&雪>");
+        changed.put("dynamicMethod", true);
+      }
+      assertEquals(200, resource.write(id,
+          new PipelineConfigResource.WriteRequest(node, changed)).getStatus(),
+          pluginId + " source mode edit");
+      store.save(hpl, loaded);
+      var reopened = store.open(hpl);
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          reopened.findTransform(node).getTransform(), provider);
+      assertTrue(wire.at("/urlInField").isBoolean());
+      assertTrue(wire.at("/urlInField").booleanValue());
+      assertEquals(staticUrl, wire.at("/url").asText(), "inactive literal URL must survive");
+      assertEquals(dynamicField, wire.at("/urlField").asText());
+      if (pluginId.equals("Rest")) {
+        assertTrue(wire.at("/dynamicMethod").booleanValue());
+        assertEquals("POST", wire.at("/method").asText());
+        assertEquals("请求方法<&雪>", wire.at("/methodFieldName").asText());
+      }
+      docs.put(new PipelineDocument(id, hpl, reopened));
+      var second = (PipelineConfigResource.ConfigResponse) resource.read(
+          id, new PipelineConfigResource.ReadRequest(node)).getEntity();
+      var literal = ((com.fasterxml.jackson.databind.node.ObjectNode) second.config()).deepCopy();
+      literal.put("urlInField", false);
+      if (pluginId.equals("Rest")) literal.put("dynamicMethod", false);
+      assertEquals(200, resource.write(id,
+          new PipelineConfigResource.WriteRequest(node, literal)).getStatus());
+      store.save(hpl, reopened);
+      var finalWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          store.open(hpl).findTransform(node).getTransform(), provider);
+      assertTrue(finalWire.at("/urlInField").isBoolean());
+      assertFalse(finalWire.at("/urlInField").booleanValue());
+      assertEquals(staticUrl, finalWire.at("/url").asText());
+      assertEquals(dynamicField, finalWire.at("/urlField").asText());
+      if (pluginId.equals("Rest")) {
+        assertFalse(finalWire.at("/dynamicMethod").booleanValue());
+        assertEquals("POST", finalWire.at("/method").asText());
+        assertEquals("请求方法<&雪>", finalWire.at("/methodFieldName").asText());
+      }
+    }
+    System.out.println("PROD_P0_HTTP_REST_SOURCE_MODE_ACTIVATION_HPL=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
