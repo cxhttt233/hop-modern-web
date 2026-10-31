@@ -7306,6 +7306,100 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEINPUT_SPECIFIED_FIELDS_INDEXED_DISK_REOPEN=PASS");
   }
 
+
+  @Test
+  void tableInputAndExecSqlFileOverridesPublishProducerContextAndSurviveRealHplEdits(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    String fileSql = "SELECT '文件<&雪>' AS source\\n";
+    String inlineSql = "SELECT '内联' AS source";
+    String editedSql = "SELECT '编辑<&雪>' AS source";
+    java.nio.file.Path sqlFile = tempDir.resolve("source-雪.sql");
+    java.nio.file.Files.writeString(sqlFile, fileSql, StandardCharsets.UTF_8);
+
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("native-sql-file-precedence");
+    for (String pluginId : List.of("TableInput", "ExecSql")) {
+      IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, pluginId);
+      assertNotNull(plugin, "missing production plugin " + pluginId);
+      ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+      meta.setDefault();
+      metadataField(meta.getClass(), "sql").set(meta, inlineSql);
+      metadataField(meta.getClass(), "sqlFromFile").set(meta, sqlFile.toString());
+
+      Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+      Property sql = property(descriptor, "sql");
+      assertEquals(TextEditorHint.SQL, sql.textEditorHint());
+      assertNotNull(sql.sqlSourceContext());
+      assertEquals("/sql", sql.sqlSourceContext().inlineSqlPointer());
+      assertEquals("/sql_from_file", sql.sqlSourceContext().fileSqlPointer());
+      assertEquals(AutomaticConfigDescriptor.SqlSourcePrecedence.FILE_WHEN_NONEMPTY,
+          sql.sqlSourceContext().precedence());
+      assertTrue(sql.sqlSourceContext().inlineReadOnlyWhenFileSelected());
+      assertNull(property(descriptor, "sql_from_file").sqlSourceContext());
+      var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(sql);
+      assertEquals("FILE_WHEN_NONEMPTY",
+          published.at("/sqlSourceContext/precedence").asText());
+      assertEquals("/sql_from_file",
+          published.at("/sqlSourceContext/fileSqlPointer").asText());
+
+      pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+          pluginId, pluginId + "-node", meta));
+    }
+
+    var store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("native-sql-file-precedence.hpl");
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    var docs = new PipelineDocumentRegistry();
+    docs.put(new PipelineDocument("sql-file-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(docs, provider);
+    var initialResponse = resource.read("sql-file-doc",
+        new PipelineConfigResource.ReadRequest("TableInput-node"));
+    assertEquals(200, initialResponse.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) initialResponse.getEntity();
+    assertEquals("/sql_from_file",
+        property(initial.descriptor(), "sql").sqlSourceContext().fileSqlPointer());
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    changed.put("sql", editedSql);
+    assertEquals(200, resource.write("sql-file-doc",
+        new PipelineConfigResource.WriteRequest("TableInput-node", changed)).getStatus());
+    store.save(hpl, loaded);
+
+    var reopened = store.open(hpl);
+    var table = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+        reopened.findTransform("TableInput-node").getTransform();
+    var exec = (org.apache.hop.pipeline.transforms.sql.ExecSqlMeta)
+        reopened.findTransform("ExecSql-node").getTransform();
+    assertEquals(editedSql, table.getSql(), "inline draft must survive while file overrides");
+    assertEquals(fileSql, table.getEffectiveSql(variables));
+    assertEquals(inlineSql, exec.getSql());
+    assertEquals(fileSql, exec.getEffectiveSql(variables));
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        table, provider);
+    assertEquals(editedSql, wire.at("/sql").asText());
+    assertEquals(sqlFile.toString(), wire.at("/sql_from_file").asText());
+
+    // Clearing the file path changes the native effective SQL source without
+    // discarding the previously edited inline SQL or changing unrelated fields.
+    docs.put(new PipelineDocument("sql-inline-doc", hpl, reopened));
+    var reread = (PipelineConfigResource.ConfigResponse) resource.read("sql-inline-doc",
+        new PipelineConfigResource.ReadRequest("TableInput-node")).getEntity();
+    var inline = ((com.fasterxml.jackson.databind.node.ObjectNode) reread.config()).deepCopy();
+    inline.put("sql_from_file", "");
+    assertEquals(200, resource.write("sql-inline-doc",
+        new PipelineConfigResource.WriteRequest("TableInput-node", inline)).getStatus());
+    store.save(hpl, reopened);
+    var finalMeta = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+        store.open(hpl).findTransform("TableInput-node").getTransform();
+    assertEquals(editedSql, finalMeta.getEffectiveSql(variables));
+    assertEquals("", org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        finalMeta, provider).at("/sql_from_file").asText());
+    System.out.println("PROD_P0_SQL_FILE_OVERRIDE_PRODUCER_CONTEXT_HPL=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
