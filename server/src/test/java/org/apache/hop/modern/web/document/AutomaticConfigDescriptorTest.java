@@ -380,6 +380,50 @@ class AutomaticConfigDescriptorTest {
     }
   }
 
+  @Test
+  void tableInputParameterRowExecutionModeRetainsNamedBindingAndInfoSourceAcrossNativeJsonEdit()
+      throws Exception {
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(TableInputMeta.class);
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("TABLE_INPUT_PARAMETER_ROW_EXECUTION_MODE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/execute_each_row", "/lookup", "/use_named_parameters"),
+        contract.keyListPointers());
+    assertTrue(contract.explanation().contains("one SQL query per incoming parameter row"));
+    assertEquals(Shape.BOOLEAN, property(descriptor.properties(), "execute_each_row").shape());
+    assertEquals(WidgetHint.INFO_STREAM_TRANSFORM_PICKER,
+        property(descriptor.properties(), "lookup").widgetHint());
+
+    var nativeMeta = new TableInputMeta();
+    nativeMeta.setDefault();
+    nativeMeta.setLookup("参数来源<&雪>");
+    nativeMeta.setUseNamedParameters(true);
+    nativeMeta.setExecuteEachInputRow(true);
+    var provider = new org.apache.hop.metadata.memory.MemoryMetadataProvider();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        nativeMeta, provider);
+    assertTrue(wire.at("/execute_each_row").booleanValue());
+    assertTrue(wire.at("/use_named_parameters").booleanValue());
+    assertEquals("参数来源<&雪>", wire.at("/lookup").asText());
+
+    // Changing execution cardinality must not erase the named-binding setting
+    // or the selected INFO-stream transform in the persisted native draft.
+    var edited = ((com.fasterxml.jackson.databind.node.ObjectNode) wire.deepCopy());
+    edited.put("execute_each_row", false);
+    var decoded = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.fromJson(
+        edited, TableInputMeta.class, provider);
+    var after = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        decoded, provider);
+    assertFalse(decoded.isExecuteEachInputRow());
+    assertTrue(decoded.isUseNamedParameters());
+    assertEquals("参数来源<&雪>", decoded.getLookup());
+    assertFalse(after.at("/execute_each_row").booleanValue());
+    assertTrue(after.at("/use_named_parameters").booleanValue());
+    assertEquals("参数来源<&雪>", after.at("/lookup").asText());
+    assertEquals("参数来源<&雪>",
+        decoded.getTransformIOMeta().getInfoStreams().get(0).getSubject());
+  }
+
   private static Property property(List<Property> properties, String key) {
     return properties.stream().filter(p -> p.key().equals(key)).findFirst()
         .orElseThrow(() -> new AssertionError("Missing automatic property: " + key));
