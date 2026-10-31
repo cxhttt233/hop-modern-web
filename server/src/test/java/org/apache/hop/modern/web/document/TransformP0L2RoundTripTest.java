@@ -7914,6 +7914,117 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REST_PAGINATION_LOOP_LIMIT_ACTIVATION_HPL=PASS");
   }
 
+  @Test
+  void restSseEventColumnActivationUsesNativeEnumAndPreservesInactiveHplDraft(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin, "native REST plugin is required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+
+    var streamFlag = property(descriptor, "streamingEnabled");
+    var format = property(descriptor, "streamingFormat");
+    var eventName = property(descriptor, "streamingEventNameField");
+    var eventId = property(descriptor, "streamingEventIdField");
+    assertEquals(Shape.BOOLEAN, streamFlag.shape());
+    assertEquals(Shape.ENUM, format.shape());
+    assertEquals(List.of("NDJSON", "SSE"),
+        format.options().stream().map(AutomaticConfigDescriptor.Option::value).toList());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/streamingEnabled", true),
+        format.activationContext());
+    var sseOnly = new AutomaticConfigDescriptor.ActivationContext(
+        "/streamingEnabled", true, List.of(),
+        List.of(new AutomaticConfigDescriptor.ActivationValueCondition(
+            "/streamingFormat", "SSE")));
+    assertEquals(sseOnly, eventName.activationContext());
+    assertEquals(sseOnly, eventId.activationContext());
+    assertNull(streamFlag.activationContext());
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    var eventJson = mapper.valueToTree(eventName);
+    assertEquals("/streamingEnabled",
+        eventJson.at("/activationContext/flagPointer").asText());
+    assertEquals("/streamingFormat",
+        eventJson.at("/activationContext/valueConditions/0/valuePointer").asText());
+    assertEquals("SSE",
+        eventJson.at("/activationContext/valueConditions/0/equalsValue").asText());
+    assertTrue(mapper.valueToTree(format)
+        .at("/activationContext/valueConditions").isMissingNode(),
+        "single-flag activation must retain its prior JSON shape");
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var hpl = tempDir.resolve("rest-sse-enum-activation.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-sse-enum-activation");
+    String node = "REST-SSE-事件<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", node, original));
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    String id = "rest-sse-enum-activation-doc";
+    documents.put(new PipelineDocument(id, hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read(id, new PipelineConfigResource.ReadRequest(node));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals(descriptor, initial.descriptor());
+    assertFalse(initial.config().at("/streamingEnabled").booleanValue());
+    assertEquals("NDJSON", initial.config().at("/streamingFormat").asText());
+
+    // SSE: both event framing fields are active and remain native STRING output names.
+    var sse = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    sse.put("streamingEnabled", true);
+    sse.put("streamingFormat", "SSE");
+    sse.put("streamingEventNameField", "事件类型<&雪>");
+    sse.put("streamingEventIdField", "事件编号<&雪>");
+    assertEquals(200, resource.write(id,
+        new PipelineConfigResource.WriteRequest(node, sse)).getStatus());
+    store.save(hpl, loaded);
+    var firstReopen = store.open(hpl);
+    var firstWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        firstReopen.findTransform(node).getTransform(), provider);
+    assertTrue(firstWire.at("/streamingEnabled").booleanValue());
+    assertEquals("SSE", firstWire.at("/streamingFormat").asText());
+    assertEquals("事件类型<&雪>", firstWire.at("/streamingEventNameField").asText());
+    assertEquals("事件编号<&雪>", firstWire.at("/streamingEventIdField").asText());
+
+    // NDJSON does not emit SSE event/id framing values, but must not erase the
+    // configured output names. Disabling streaming must preserve them as well.
+    documents.put(new PipelineDocument(id, hpl, firstReopen));
+    var ndjson = ((com.fasterxml.jackson.databind.node.ObjectNode) firstWire).deepCopy();
+    ndjson.put("streamingFormat", "NDJSON");
+    assertEquals(200, resource.write(id,
+        new PipelineConfigResource.WriteRequest(node, ndjson)).getStatus());
+    store.save(hpl, firstReopen);
+    var secondReopen = store.open(hpl);
+    var secondWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        secondReopen.findTransform(node).getTransform(), provider);
+    assertTrue(secondWire.at("/streamingEnabled").booleanValue());
+    assertEquals("NDJSON", secondWire.at("/streamingFormat").asText());
+    assertEquals("事件类型<&雪>", secondWire.at("/streamingEventNameField").asText());
+    assertEquals("事件编号<&雪>", secondWire.at("/streamingEventIdField").asText());
+
+    documents.put(new PipelineDocument(id, hpl, secondReopen));
+    var disabled = ((com.fasterxml.jackson.databind.node.ObjectNode) secondWire).deepCopy();
+    disabled.put("streamingEnabled", false);
+    assertEquals(200, resource.write(id,
+        new PipelineConfigResource.WriteRequest(node, disabled)).getStatus());
+    store.save(hpl, secondReopen);
+    var finalWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        store.open(hpl).findTransform(node).getTransform(), provider);
+    assertFalse(finalWire.at("/streamingEnabled").booleanValue());
+    assertEquals("NDJSON", finalWire.at("/streamingFormat").asText());
+    assertEquals("事件类型<&雪>", finalWire.at("/streamingEventNameField").asText());
+    assertEquals("事件编号<&雪>", finalWire.at("/streamingEventIdField").asText());
+    // This is a native HPL/HTTP config contract, not a live SSE HTTP request test.
+    System.out.println("PROD_P0_REST_SSE_ENUM_ACTIVATION_HPL=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
