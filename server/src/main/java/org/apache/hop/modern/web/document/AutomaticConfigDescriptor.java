@@ -45,7 +45,8 @@ public final class AutomaticConfigDescriptor {
             textEditorHint(key, shape, metadata),
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
             hint, metadataClassName(shape, metadata), pickerContext(type, hint),
-            fieldSourcePointer(type, key, hint), fieldSourceStage(type, key, hint)));
+            fieldSourcePointer(type, key, hint), fieldSourceStage(type, key, hint),
+            sqlSourceContext(type, key, shape)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), runtimePreconditions(type), canonicalWireLists(type));
@@ -446,6 +447,18 @@ public final class AutomaticConfigDescriptor {
     return switch (metadata.hopMetadataPropertyType()) {
       case RDBMS_CONNECTION -> "org.apache.hop.core.database.DatabaseMeta";
       case REST_CONNECTION -> "org.apache.hop.metadata.rest.RestConnection";
+      default -> null;
+    };
+  }
+
+  /** Native TableInput/ExecSql load a VFS SQL file instead of inline SQL when nonempty. */
+  private static SqlSourceContext sqlSourceContext(Class<?> owner, String key, Shape shape) {
+    if (shape != Shape.STRING || !key.equals("sql")) return null;
+    return switch (owner.getName()) {
+      case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta",
+           "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta" ->
+          new SqlSourceContext("/sql", "/sql_from_file",
+              SqlSourcePrecedence.FILE_WHEN_NONEMPTY, true);
       default -> null;
     };
   }
@@ -1474,6 +1487,7 @@ public final class AutomaticConfigDescriptor {
     INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER, STAGED_FIELD_PICKER
   }
   public enum FieldSourceStage { AFTER_SELECT, AFTER_REMOVE }
+  public enum SqlSourcePrecedence { FILE_WHEN_NONEMPTY }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
       String className, List<Property> properties, List<RuntimePrecondition> runtimePreconditions,
@@ -1493,6 +1507,9 @@ public final class AutomaticConfigDescriptor {
   public record RuntimePrecondition(String code, List<String> keyListPointers, String explanation) {}
   public record Option(String label, String value) {}
   public record LayoutHint(int order, String group, Presentation presentation) {}
+  /** File-path override and read-only inline-editor semantics, not a SQL parser. */
+  public record SqlSourceContext(String inlineSqlPointer, String fileSqlPointer,
+      SqlSourcePrecedence precedence, boolean inlineReadOnlyWhenFileSelected) {}
   /**
    * The final two pointers are non-null only for TableOutput, whose target
    * table may come from each incoming row instead of the literal /table.
@@ -1514,5 +1531,5 @@ public final class AutomaticConfigDescriptor {
       List<Property> elementProperties, List<Option> options, TextEditorHint textEditorHint,
       LayoutHint layout, WidgetHint widgetHint, String metadataClassName,
       PickerContext pickerContext, String sourceTransformPointer,
-      FieldSourceStage fieldSourceStage) {}
+      FieldSourceStage fieldSourceStage, SqlSourceContext sqlSourceContext) {}
 }
