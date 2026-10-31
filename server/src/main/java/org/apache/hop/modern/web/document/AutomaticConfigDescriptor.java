@@ -488,6 +488,11 @@ public final class AutomaticConfigDescriptor {
         return new ActivationContext("/include", true);
       if (key.equals("rownum_field") && shape == Shape.STRING)
         return new ActivationContext("/rownum", true);
+      // Native JsonInputMeta.getFields() removes the source row column only
+      // when input comes from a field. In VFS file mode this switch is inert;
+      // retain its draft value so switching back restores the choice.
+      if (key.equals("removeSourceField") && shape == Shape.BOOLEAN)
+        return new ActivationContext("/IsInFields", true);
     }
     // TableInput can either infer JDBC result metadata or use explicitly
     // declared output columns. Validation only applies to declared columns.
