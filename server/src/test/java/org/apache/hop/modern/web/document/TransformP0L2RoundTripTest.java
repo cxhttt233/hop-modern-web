@@ -2147,6 +2147,78 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_REPLACESTRING_SOURCE_STRING_PRECONDITION=PASS");
   }
 
+  @Test
+  void tableInputInfoStreamPickerResolvesGraphSourceAfterRealHplReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "TableInput");
+    Property infoSource = property(descriptor, "lookup");
+    assertEquals(Shape.STRING, infoSource.shape());
+    assertEquals(WidgetHint.INFO_STREAM_TRANSFORM_PICKER, infoSource.widgetHint());
+    assertNull(infoSource.pickerContext());
+    assertNull(infoSource.metadataClassName());
+    assertEquals(WidgetHint.METADATA_PICKER, property(descriptor, "connection").widgetHint());
+    assertEquals(TextEditorHint.SQL, property(descriptor, "sql").textEditorHint());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(infoSource);
+    assertEquals("INFO_STREAM_TRANSFORM_PICKER", published.path("widgetHint").asText());
+
+    IPlugin tablePlugin = plugins.findPluginWithId(TransformPluginType.class, "TableInput");
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    assertNotNull(tablePlugin);
+    assertNotNull(gridPlugin);
+    ITransformMeta table = plugins.loadClass(tablePlugin, ITransformMeta.class);
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    table.setDefault();
+    grid.setDefault();
+
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("table-input-info-stream");
+    String sourceName = "参数源<&>雪";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "DataGrid", sourceName, grid));
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableInput", "sql-node", table));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    java.nio.file.Path hpl = tempDir.resolve("table-input-info-stream.hpl");
+    store.save(hpl, pipeline);
+    var opened = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("table-info-doc", hpl, opened));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("table-info-doc",
+        new PipelineConfigResource.ReadRequest("sql-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals(WidgetHint.INFO_STREAM_TRANSFORM_PICKER,
+        property(initial.descriptor(), "lookup").widgetHint());
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        initial.config()).deepCopy();
+    changed.put("lookup", sourceName);
+    changed.put("sql", "SELECT {站点编号} AS 站点 FROM 监测表");
+    var write = resource.write("table-info-doc",
+        new PipelineConfigResource.WriteRequest("sql-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, opened);
+
+    var reopened = store.open(hpl);
+    var savedTransform = reopened.findTransform("sql-node");
+    assertNotNull(savedTransform);
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        savedTransform.getTransform(), provider);
+    assertEquals(sourceName, wire.at("/lookup").asText());
+    assertEquals("SELECT {站点编号} AS 站点 FROM 监测表", wire.at("/sql").asText());
+    var nativeMeta = savedTransform.getTransform();
+    var info = nativeMeta.getTransformIOMeta().getInfoStreams().get(0);
+    assertEquals(sourceName, info.getTransformName());
+    nativeMeta.searchInfoAndTargetTransforms(reopened.getTransforms());
+    assertNotNull(info.getTransformMeta());
+    assertEquals(sourceName, info.getTransformMeta().getName());
+    System.out.println("PROD_P0_TABLEINPUT_INFO_STREAM_PICKER_GRAPH_HPL=PASS");
+  }
+
   @Test void tableInputEditedSqlSurvivesRealXmlReopenWithoutChangingOtherFields() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "TableInput");
