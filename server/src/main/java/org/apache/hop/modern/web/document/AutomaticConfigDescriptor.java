@@ -482,6 +482,12 @@ public final class AutomaticConfigDescriptor {
         return new ActivationContext("/IsInFields", true);
       if (key.equals("file") && shape == Shape.OBJECT)
         return new ActivationContext("/IsInFields", false);
+      // Auxiliary output column names are meaningful only while their native
+      // output switches are enabled. Never erase the inactive draft names.
+      if (key.equals("include_field") && shape == Shape.STRING)
+        return new ActivationContext("/include", true);
+      if (key.equals("rownum_field") && shape == Shape.STRING)
+        return new ActivationContext("/rownum", true);
     }
     // TableInput can either infer JDBC result metadata or use explicitly
     // declared output columns. Validation only applies to declared columns.
