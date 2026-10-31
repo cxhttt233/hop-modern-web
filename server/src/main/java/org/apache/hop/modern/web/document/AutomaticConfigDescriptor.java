@@ -58,10 +58,6 @@ public final class AutomaticConfigDescriptor {
    */
   private static List<WireListContract> canonicalWireLists(Class<?> type) {
     return switch (type.getName()) {
-      // CheckSum selected input columns are an ordered native LIST inside the
-      // fields groupKey wrapper; the editor must not infer this wire location.
-      case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta" -> List.of(
-          new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.jsoninput.JsonInputMeta" -> List.of(
           new WireListContract("file.file", "/file/files/file", "/file/files/file/{index}"),
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"));
@@ -115,6 +111,12 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.checksum.CheckSumMeta",
            "org.apache.hop.pipeline.transforms.setvariable.SetVariableMeta" -> List.of(
           new WireListContract("field", "/fields/field", "/fields/field/{index}"));
+      // GroupBy has two independent native ordered LISTs with the same leaf key.
+      // The producer must distinguish grouping inputs from aggregate outputs
+      // using their groupKey containers rather than the ambiguous key "field".
+      case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" -> List.of(
+          new WireListContract("group.field", "/group/field", "/group/field/{index}"),
+          new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"));
       // ExecSql binds an ordered list of incoming-row argument names; Hop wraps
       // the native argument key inside the arguments groupKey container.
       case "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta" -> List.of(
