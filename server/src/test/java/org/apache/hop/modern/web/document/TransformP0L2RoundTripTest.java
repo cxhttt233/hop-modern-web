@@ -4293,6 +4293,79 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void jsonInputAuxiliaryOutputNamesActivateIndependentlyWithoutDiscardingInactiveValues()
+      throws Exception {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(plugin, "production JsonInput plugin missing");
+    ITransformMeta meta = registry.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    Property filename = property(descriptor, "include_field");
+    Property rowNumber = property(descriptor, "rownum_field");
+    assertEquals(Shape.STRING, filename.shape());
+    assertEquals(Shape.STRING, rowNumber.shape());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/include", true),
+        filename.activationContext());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/rownum", true),
+        rowNumber.activationContext());
+    assertNull(property(descriptor, "include").activationContext());
+    assertNull(property(descriptor, "rownum").activationContext());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("/include", published.at(
+        "/properties/" + descriptor.properties().indexOf(filename)
+            + "/activationContext/flagPointer").asText());
+    assertEquals("/rownum", published.at(
+        "/properties/" + descriptor.properties().indexOf(rowNumber)
+            + "/activationContext/flagPointer").asText());
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        meta, provider);
+    var enabled = ((com.fasterxml.jackson.databind.node.ObjectNode) nativeWire.deepCopy());
+    enabled.put("include", true);
+    enabled.put("include_field", "源文件<&>雪");
+    enabled.put("rownum", true);
+    enabled.put("rownum_field", "行号<&>雪");
+    ITransformMeta decoded =
+        org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.fromJson(
+            enabled, meta.getClass(), provider);
+    var output = new org.apache.hop.core.row.RowMeta();
+    decoded.getFields(output, "json-aux-activation", null, null, variables, provider);
+    assertEquals(2, output.size());
+    assertEquals("源文件<&>雪", output.getValueMeta(0).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_STRING,
+        output.getValueMeta(0).getType());
+    assertEquals(250, output.getValueMeta(0).getLength());
+    assertEquals("行号<&>雪", output.getValueMeta(1).getName());
+    assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+        output.getValueMeta(1).getType());
+
+    // Switching both optional columns off must preserve their names for later
+    // reactivation, while the native downstream row schema omits both columns.
+    var disabled = (com.fasterxml.jackson.databind.node.ObjectNode)
+        org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+            decoded, provider).deepCopy();
+    disabled.put("include", false);
+    disabled.put("rownum", false);
+    ITransformMeta inactive =
+        org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.fromJson(
+            disabled, meta.getClass(), provider);
+    var roundTrip = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        inactive, provider);
+    assertFalse(roundTrip.at("/include").booleanValue());
+    assertFalse(roundTrip.at("/rownum").booleanValue());
+    assertEquals("源文件<&>雪", roundTrip.at("/include_field").asText());
+    assertEquals("行号<&>雪", roundTrip.at("/rownum_field").asText());
+    var inactiveOutput = new org.apache.hop.core.row.RowMeta();
+    inactive.getFields(inactiveOutput, "json-aux-activation", null, null, variables, provider);
+    assertEquals(0, inactiveOutput.size());
+    System.out.println("PROD_P0_JSONINPUT_AUX_OUTPUT_ACTIVATION_NATIVE_JSON=PASS");
+  }
+
+  @Test
   void jsonInputOrderedJsonPathFieldsSurviveRealHplDiskReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
