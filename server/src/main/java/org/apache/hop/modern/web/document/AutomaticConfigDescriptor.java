@@ -44,7 +44,8 @@ public final class AutomaticConfigDescriptor {
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
             textEditorHint(key, shape, metadata),
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
-            hint, metadataClassName(shape, metadata), pickerContext(type, hint)));
+            hint, metadataClassName(shape, metadata), pickerContext(type, hint),
+            fieldSourcePointer(type, key, hint)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), runtimePreconditions(type), canonicalWireLists(type));
@@ -235,6 +236,17 @@ public final class AutomaticConfigDescriptor {
             && key.equals("from")) {
           yield WidgetHint.INFO_STREAM_TRANSFORM_PICKER;
         }
+        // The two lookup-side column references are resolved from the INFO stream
+        // selected by /from, not from the main incoming row. Publish both the
+        // picker type and its canonical source pointer for the consumer.
+        if ((owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$MatchKey")
+                && key.equals("field"))
+            || (owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$ReturnValue")
+                && key.equals("name"))) {
+          yield WidgetHint.INFO_STREAM_FIELD_PICKER;
+        }
         // These pinned Hop plugins consume incoming row columns but omit STREAM_FIELD
         // annotations. Match both the declaring class and the wire key so that
         // response/output names and HTTP parameter names are not misclassified.
@@ -346,6 +358,18 @@ public final class AutomaticConfigDescriptor {
            "org.apache.hop.pipeline.transforms.http.HttpMeta$HeaderParameter" ->
           key.equals("name");
       default -> false;
+    };
+  }
+
+  /** The lookup-side field picker resolves columns from the INFO node named at /from. */
+  private static String fieldSourcePointer(Class<?> owner, String key, WidgetHint hint) {
+    if (hint != WidgetHint.INFO_STREAM_FIELD_PICKER) return null;
+    return switch (owner.getName()) {
+      case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$MatchKey" ->
+          key.equals("field") ? "/from" : null;
+      case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$ReturnValue" ->
+          key.equals("name") ? "/from" : null;
+      default -> null;
     };
   }
 
@@ -1400,7 +1424,7 @@ public final class AutomaticConfigDescriptor {
   public enum WidgetHint {
     NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER, LOCAL_DIRECTORY_PICKER,
     DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, UPSTREAM_FIELD_PICKER,
-    INFO_STREAM_TRANSFORM_PICKER
+    INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER
   }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
@@ -1427,5 +1451,5 @@ public final class AutomaticConfigDescriptor {
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
       List<Property> elementProperties, List<Option> options, TextEditorHint textEditorHint,
       LayoutHint layout, WidgetHint widgetHint, String metadataClassName,
-      PickerContext pickerContext) {}
+      PickerContext pickerContext, String sourceTransformPointer) {}
 }
