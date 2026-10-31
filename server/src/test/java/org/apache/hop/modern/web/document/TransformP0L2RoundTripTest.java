@@ -381,6 +381,106 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void jsonInputFieldAndVfsFileSourceModeActivationSurvivesRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(plugin, "production JsonInput plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> fieldType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField");
+    Object output = fieldType.getConstructor(String.class).newInstance("水位");
+    fieldType.getMethod("setPath", String.class).invoke(output, "$.level");
+    fieldType.getMethod("setType", int.class).invoke(output,
+        org.apache.hop.core.row.IValueMeta.TYPE_INTEGER);
+    meta.getClass().getMethod("setInputFields", List.class).invoke(meta, List.of(output));
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("jsoninput-source-mode.hpl");
+    java.nio.file.Path jsonFile = tempDir.resolve("水位&01.json");
+    java.nio.file.Files.writeString(jsonFile, "{\"level\":12}\n", StandardCharsets.UTF_8);
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("jsoninput-source-mode");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "JsonInput", "json-source-node", meta));
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("json-source-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("json-source-doc",
+        new PipelineConfigResource.ReadRequest("json-source-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    Property incomingField = property(initial.descriptor(), "valueField");
+    Property fileSource = property(initial.descriptor(), "file");
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, incomingField.widgetHint());
+    assertEquals(Shape.OBJECT, fileSource.shape());
+    assertNotNull(incomingField.activationContext());
+    assertNotNull(fileSource.activationContext());
+    assertEquals("/IsInFields", incomingField.activationContext().flagPointer());
+    assertEquals("/IsInFields", fileSource.activationContext().flagPointer());
+    assertTrue(incomingField.activationContext().activeWhen());
+    assertFalse(fileSource.activationContext().activeWhen());
+    assertNull(property(initial.descriptor(), "fields").activationContext());
+    var descriptorJson = new com.fasterxml.jackson.databind.ObjectMapper()
+        .valueToTree(initial.descriptor());
+    assertEquals("/IsInFields", descriptorJson.path("properties").findValuesAsText("flagPointer")
+        .get(0));
+    assertEquals("UPSTREAM_FIELD_PICKER",
+        new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(incomingField)
+            .path("widgetHint").asText());
+
+    // File mode: retain the inactive incoming-field name while configuring a VFS file.
+    var fileMode = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    fileMode.put("IsInFields", false);
+    fileMode.put("valueField", "输入&水位");
+    var files = ((com.fasterxml.jackson.databind.node.ObjectNode) fileMode.path("file"))
+        .putObject("files").putArray("file");
+    files.addObject()
+        .put("name", jsonFile.toAbsolutePath().toString())
+        .put("filemask", "")
+        .put("exclude_filemask", "")
+        .put("file_required", true)
+        .put("include_subfolders", false);
+    assertEquals(200, resource.write("json-source-doc",
+        new PipelineConfigResource.WriteRequest("json-source-node", fileMode)).getStatus());
+    store.save(hpl, loaded);
+    var reopened = store.open(hpl);
+    var diskFileMode = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        reopened.findTransform("json-source-node").getTransform(), provider);
+    assertFalse(diskFileMode.path("IsInFields").asBoolean());
+    assertEquals("输入&水位", diskFileMode.path("valueField").asText());
+    assertEquals(jsonFile.toAbsolutePath().toString(),
+        diskFileMode.at("/file/files/file/0/name").asText());
+
+    // Field mode: the same canonical flag flips active sources without erasing the VFS draft.
+    PipelineDocumentRegistry nextDocuments = new PipelineDocumentRegistry();
+    nextDocuments.put(new PipelineDocument("json-source-doc2", hpl, reopened));
+    PipelineConfigResource nextResource = new PipelineConfigResource(nextDocuments, provider);
+    var nextRead = nextResource.read("json-source-doc2",
+        new PipelineConfigResource.ReadRequest("json-source-node"));
+    assertEquals(200, nextRead.getStatus());
+    var fieldMode = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) nextRead.getEntity()).config()).deepCopy();
+    fieldMode.put("IsInFields", true);
+    assertEquals(200, nextResource.write("json-source-doc2",
+        new PipelineConfigResource.WriteRequest("json-source-node", fieldMode)).getStatus());
+    store.save(hpl, reopened);
+    var fieldReopened = store.open(hpl);
+    var diskFieldMode = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        fieldReopened.findTransform("json-source-node").getTransform(), provider);
+    assertTrue(diskFieldMode.path("IsInFields").asBoolean());
+    assertEquals("输入&水位", diskFieldMode.path("valueField").asText());
+    assertEquals(jsonFile.toAbsolutePath().toString(),
+        diskFieldMode.at("/file/files/file/0/name").asText());
+    System.out.println("PROD_P0_JSONINPUT_SOURCE_MODE_ACTIVATION_HPL=PASS");
+  }
+
+  @Test
   void jsonInputFileListExposesNativeHopVfsPickerAndResolvesUtf8LocalPath(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
