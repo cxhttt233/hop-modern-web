@@ -2148,6 +2148,82 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void streamLookupInfoSourcePickerResolvesNativeGraphAfterRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    Descriptor descriptor = descriptorFor(plugins, "StreamLookup");
+    Property source = property(descriptor, "from");
+    assertEquals(Shape.STRING, source.shape());
+    assertEquals(WidgetHint.INFO_STREAM_TRANSFORM_PICKER, source.widgetHint());
+    assertNull(source.pickerContext());
+    assertNull(source.metadataClassName());
+    assertEquals(Shape.OBJECT, property(descriptor, "lookup").shape());
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
+        property(descriptor, "lookup", "key", "name").widgetHint());
+    assertEquals(WidgetHint.NONE,
+        property(descriptor, "lookup", "key", "field").widgetHint());
+    assertEquals("INFO_STREAM_TRANSFORM_PICKER",
+        new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(source)
+            .path("widgetHint").asText());
+
+    IPlugin lookupPlugin = plugins.findPluginWithId(TransformPluginType.class, "StreamLookup");
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    assertNotNull(lookupPlugin);
+    assertNotNull(gridPlugin);
+    ITransformMeta lookupMeta = plugins.loadClass(lookupPlugin, ITransformMeta.class);
+    ITransformMeta gridMeta = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    lookupMeta.setDefault();
+    gridMeta.setDefault();
+    String sourceName = "查找源<&>雪";
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("streamlookup-info-source");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "DataGrid", sourceName, gridMeta));
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "StreamLookup", "lookup-node", lookupMeta));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    java.nio.file.Path hpl = tempDir.resolve("streamlookup-info-source.hpl");
+    store.save(hpl, pipeline);
+    var opened = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("stream-info-doc", hpl, opened));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("stream-info-doc",
+        new PipelineConfigResource.ReadRequest("lookup-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals(WidgetHint.INFO_STREAM_TRANSFORM_PICKER,
+        property(initial.descriptor(), "from").widgetHint());
+    var changed = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        initial.config()).deepCopy();
+    changed.put("from", sourceName);
+    changed.put("input_sorted", true);
+    var write = resource.write("stream-info-doc",
+        new PipelineConfigResource.WriteRequest("lookup-node", changed));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, opened);
+
+    var reopened = store.open(hpl);
+    var saved = reopened.findTransform("lookup-node");
+    assertNotNull(saved);
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        saved.getTransform(), provider);
+    assertEquals(sourceName, wire.at("/from").asText());
+    assertTrue(wire.at("/input_sorted").isBoolean());
+    assertTrue(wire.at("/input_sorted").booleanValue());
+    assertTrue(wire.at("/lookup").isObject());
+    var nativeMeta = saved.getTransform();
+    nativeMeta.searchInfoAndTargetTransforms(reopened.getTransforms());
+    var info = nativeMeta.getTransformIOMeta().getInfoStreams().get(0);
+    assertNotNull(info.getTransformMeta());
+    assertEquals(sourceName, info.getTransformMeta().getName());
+    System.out.println("PROD_P0_STREAMLOOKUP_INFO_SOURCE_PICKER_GRAPH_HPL=PASS");
+  }
+
+  @Test
   void tableInputInfoStreamPickerResolvesGraphSourceAfterRealHplReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
