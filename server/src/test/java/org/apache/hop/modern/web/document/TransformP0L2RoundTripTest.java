@@ -7371,12 +7371,14 @@ class TransformP0L2RoundTripTest {
     var reopened = store.open(hpl);
     var table = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
         reopened.findTransform("TableInput-node").getTransform();
-    var exec = (org.apache.hop.pipeline.transforms.sql.ExecSqlMeta)
-        reopened.findTransform("ExecSql-node").getTransform();
+    ITransformMeta exec = reopened.findTransform("ExecSql-node").getTransform();
     assertEquals(editedSql, table.getSql(), "inline draft must survive while file overrides");
     assertEquals(fileSql, table.getEffectiveSql(variables));
-    assertEquals(inlineSql, exec.getSql());
-    assertEquals(fileSql, exec.getEffectiveSql(variables));
+    // ExecSql is loaded only by the source-derived P0 plugin classpath; the
+    // ordinary server test compiler must not require its concrete class.
+    assertEquals(inlineSql, metadataField(exec.getClass(), "sql").get(exec));
+    assertEquals(fileSql, exec.getClass().getMethod("getEffectiveSql",
+        org.apache.hop.core.variables.IVariables.class).invoke(exec, variables));
     var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
         table, provider);
     assertEquals(editedSql, wire.at("/sql").asText());
