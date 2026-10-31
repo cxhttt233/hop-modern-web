@@ -482,6 +482,126 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void jsonInputRemoveSourceFieldActivationPreservesInactiveChoiceAcrossRealHplReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(plugin, "production JsonInput plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Class<?> fieldType = meta.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField");
+    Object output = fieldType.getConstructor(String.class).newInstance("输出<&>雪");
+    fieldType.getMethod("setPath", String.class).invoke(output, "$.value");
+    meta.getClass().getMethod("setInputFields", List.class).invoke(meta, List.of(output));
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("jsoninput-remove-source-mode.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("jsoninput-remove-source-mode");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "JsonInput", "json-remove-node", meta));
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("json-remove-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var response = resource.read("json-remove-doc",
+        new PipelineConfigResource.ReadRequest("json-remove-node"));
+    assertEquals(200, response.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) response.getEntity();
+    Property removal = property(initial.descriptor(), "removeSourceField");
+    assertEquals(Shape.BOOLEAN, removal.shape());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/IsInFields", true),
+        removal.activationContext());
+    assertNull(property(initial.descriptor(), "IsInFields").activationContext());
+    var descriptorJson = new com.fasterxml.jackson.databind.ObjectMapper()
+        .valueToTree(initial.descriptor());
+    int index = initial.descriptor().properties().indexOf(removal);
+    assertEquals("/IsInFields", descriptorJson.at(
+        "/properties/" + index + "/activationContext/flagPointer").asText());
+    assertTrue(descriptorJson.at(
+        "/properties/" + index + "/activationContext/activeWhen").booleanValue());
+
+    // Field mode removes only the incoming JSON source column.
+    var fieldDraft = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        initial.config()).deepCopy();
+    fieldDraft.put("IsInFields", true);
+    fieldDraft.put("valueField", "输入<&>雪");
+    fieldDraft.put("removeSourceField", true);
+    assertEquals(200, resource.write("json-remove-doc",
+        new PipelineConfigResource.WriteRequest("json-remove-node", fieldDraft)).getStatus());
+    store.save(hpl, loaded);
+    var fieldReopened = store.open(hpl);
+    var fieldMeta = fieldReopened.findTransform("json-remove-node").getTransform();
+    var fieldWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        fieldMeta, provider);
+    assertTrue(fieldWire.at("/IsInFields").booleanValue());
+    assertTrue(fieldWire.at("/removeSourceField").booleanValue());
+    assertEquals("输入<&>雪", fieldWire.at("/valueField").asText());
+    var fieldRow = new org.apache.hop.core.row.RowMeta();
+    fieldRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入<&>雪"));
+    fieldRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("保留"));
+    fieldMeta.getFields(fieldRow, "json-remove-node", null, null, variables, provider);
+    assertEquals(2, fieldRow.size());
+    assertEquals("保留", fieldRow.getValueMeta(0).getName());
+    assertEquals("输出<&>雪", fieldRow.getValueMeta(1).getName());
+
+    // File mode makes removal inert, without clearing the user's stored choice.
+    PipelineDocumentRegistry fileDocuments = new PipelineDocumentRegistry();
+    fileDocuments.put(new PipelineDocument("json-remove-file", hpl, fieldReopened));
+    PipelineConfigResource fileResource = new PipelineConfigResource(fileDocuments, provider);
+    var fileRead = fileResource.read("json-remove-file",
+        new PipelineConfigResource.ReadRequest("json-remove-node"));
+    assertEquals(200, fileRead.getStatus());
+    var fileDraft = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) fileRead.getEntity()).config()).deepCopy();
+    fileDraft.put("IsInFields", false);
+    assertEquals(200, fileResource.write("json-remove-file",
+        new PipelineConfigResource.WriteRequest("json-remove-node", fileDraft)).getStatus());
+    store.save(hpl, fieldReopened);
+    var fileReopened = store.open(hpl);
+    var fileMeta = fileReopened.findTransform("json-remove-node").getTransform();
+    var fileWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        fileMeta, provider);
+    assertFalse(fileWire.at("/IsInFields").booleanValue());
+    assertTrue(fileWire.at("/removeSourceField").booleanValue());
+    assertEquals("输入<&>雪", fileWire.at("/valueField").asText());
+    var fileRow = new org.apache.hop.core.row.RowMeta();
+    fileRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入<&>雪"));
+    fileRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("保留"));
+    fileMeta.getFields(fileRow, "json-remove-node", null, null, variables, provider);
+    assertEquals(3, fileRow.size());
+    assertEquals("输入<&>雪", fileRow.getValueMeta(0).getName());
+    assertEquals("保留", fileRow.getValueMeta(1).getName());
+    assertEquals("输出<&>雪", fileRow.getValueMeta(2).getName());
+
+    // Re-enable field mode: persisted removal is still active after another reopen.
+    PipelineDocumentRegistry againDocuments = new PipelineDocumentRegistry();
+    againDocuments.put(new PipelineDocument("json-remove-again", hpl, fileReopened));
+    PipelineConfigResource againResource = new PipelineConfigResource(againDocuments, provider);
+    var againRead = againResource.read("json-remove-again",
+        new PipelineConfigResource.ReadRequest("json-remove-node"));
+    assertEquals(200, againRead.getStatus());
+    var againDraft = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) againRead.getEntity()).config()).deepCopy();
+    againDraft.put("IsInFields", true);
+    assertEquals(200, againResource.write("json-remove-again",
+        new PipelineConfigResource.WriteRequest("json-remove-node", againDraft)).getStatus());
+    store.save(hpl, fileReopened);
+    var againMeta = store.open(hpl).findTransform("json-remove-node").getTransform();
+    var againRow = new org.apache.hop.core.row.RowMeta();
+    againRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入<&>雪"));
+    againRow.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("保留"));
+    againMeta.getFields(againRow, "json-remove-node", null, null, variables, provider);
+    assertEquals(2, againRow.size());
+    assertEquals("保留", againRow.getValueMeta(0).getName());
+    System.out.println("PROD_P0_JSONINPUT_REMOVE_SOURCE_ACTIVATION_HPL=PASS");
+  }
+
+  @Test
   void jsonInputFileListExposesNativeHopVfsPickerAndResolvesUtf8LocalPath(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
