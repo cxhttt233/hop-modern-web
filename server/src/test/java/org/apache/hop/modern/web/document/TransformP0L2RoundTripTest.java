@@ -8448,5 +8448,92 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEINPUT_OUTPUT_FIELDS_ACTIVATION_HPL=PASS");
   }
 
+  @Test
+  void groupByLineNumberActivationRetainsInactiveDraftAcrossNativeHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(plugin, "production GroupBy plugin is required");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/all_rows", true),
+        property(descriptor, "add_linenr").activationContext());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/all_rows", true,
+            List.of(new AutomaticConfigDescriptor.ActivationCondition("/add_linenr", true))),
+        property(descriptor, "linenr_fieldname").activationContext());
+    assertNull(property(descriptor, "all_rows").activationContext());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper()
+        .valueToTree(property(descriptor, "linenr_fieldname"));
+    assertEquals("/all_rows", published.at("/activationContext/flagPointer").asText());
+    assertEquals("/add_linenr",
+        published.at("/activationContext/additionalConditions/0/flagPointer").asText());
+    assertTrue(published.at("/activationContext/additionalConditions/0/activeWhen")
+        .booleanValue());
+
+    meta.getClass().getMethod("setPassAllRows", boolean.class).invoke(meta, false);
+    meta.getClass().getMethod("setAddingLineNrInGroup", boolean.class).invoke(meta, true);
+    meta.getClass().getMethod("setLineNrInGroupField", String.class)
+        .invoke(meta, "保留<&雪>");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("groupby-line-number-activation.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("groupby-line-number-activation");
+    String node = "分组序号-<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "GroupBy", node, meta));
+    store.save(hpl, pipeline);
+
+    boolean[] allRows = {false, true, true, false};
+    boolean[] addLine = {true, false, true, true};
+    String[] names = {"保留<&雪>", "保留<&雪>", "更新<&雪>", "更新<&雪>"};
+    for (int i = 0; i < allRows.length; i++) {
+      var loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("group-line-activation-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("group-line-activation-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, initial.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          initial.config()).deepCopy();
+      edited.put("all_rows", allRows[i]);
+      edited.put("add_linenr", addLine[i]);
+      edited.put("linenr_fieldname", names[i]);
+      var write = resource.write("group-line-activation-doc",
+          new PipelineConfigResource.WriteRequest(node, edited));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      var diskMeta = store.open(hpl).findTransform(node).getTransform();
+      var disk = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertTrue(disk.at("/all_rows").isBoolean());
+      assertTrue(disk.at("/add_linenr").isBoolean());
+      assertEquals(allRows[i], disk.at("/all_rows").booleanValue());
+      assertEquals(addLine[i], disk.at("/add_linenr").booleanValue());
+      assertEquals(names[i], disk.at("/linenr_fieldname").asText(),
+          "inactive output names must survive native Hop XML persistence");
+
+      var incoming = new org.apache.hop.core.row.RowMeta();
+      incoming.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("测站<&雪>"));
+      diskMeta.getFields(incoming, node, null, null, variables, provider);
+      boolean enabled = allRows[i] && addLine[i];
+      assertEquals(enabled, incoming.indexOfValue(names[i]) >= 0,
+          "native output metadata must follow both switches");
+      if (enabled) {
+        assertEquals(org.apache.hop.core.row.IValueMeta.TYPE_INTEGER,
+            incoming.searchValueMeta(names[i]).getType());
+      }
+    }
+    System.out.println("PROD_P0_GROUPBY_LINE_NUMBER_ACTIVATION_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 }
