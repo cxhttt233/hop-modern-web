@@ -218,6 +218,14 @@ public final class AutomaticConfigDescriptor {
       }
       case FILE_PATH, FILE_REFERENCE -> WidgetHint.VFS_PICKER;
       default -> {
+        // TableInput.lookup names an INFO-stream transform, not a row field or
+        // database metadata reference. Its selected source supplies SQL parameters.
+        // Hop's native ITransformIOMeta resolves this name against the pipeline graph.
+        if (owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta")
+            && key.equals("lookup")) {
+          yield WidgetHint.INFO_STREAM_TRANSFORM_PICKER;
+        }
         // These pinned Hop plugins consume incoming row columns but omit STREAM_FIELD
         // annotations. Match both the declaring class and the wire key so that
         // response/output names and HTTP parameter names are not misclassified.
@@ -1382,7 +1390,8 @@ public final class AutomaticConfigDescriptor {
   public enum TextEditorHint { NONE, SQL, SCRIPT, TEMPLATE }
   public enum WidgetHint {
     NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER, LOCAL_DIRECTORY_PICKER,
-    DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, UPSTREAM_FIELD_PICKER
+    DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, UPSTREAM_FIELD_PICKER,
+    INFO_STREAM_TRANSFORM_PICKER
   }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
