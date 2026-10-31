@@ -196,6 +196,21 @@ public final class AutomaticConfigDescriptor {
     if (shape != Shape.STRING) return WidgetHint.NONE;
     return switch (metadata.hopMetadataPropertyType()) {
       case RDBMS_CONNECTION, REST_CONNECTION -> WidgetHint.METADATA_PICKER;
+      // These pinned annotations identify target database columns, not input row fields.
+      // Restrict the picker to the three verified P0 mapping structures; other
+      // RDBMS_COLUMN annotations remain free text until their context is known.
+      case RDBMS_COLUMN -> {
+        if (owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.tableoutput.TableOutputField")
+            && key.equals("column_name")) yield WidgetHint.DATABASE_COLUMN_PICKER;
+        if (owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField")
+            && key.equals("field")) yield WidgetHint.DATABASE_COLUMN_PICKER;
+        if (owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateValue")
+            && key.equals("name")) yield WidgetHint.DATABASE_COLUMN_PICKER;
+        yield WidgetHint.NONE;
+      }
       // Hop marks incoming row references explicitly; do not mistake database columns for stream fields.
       case STREAM_FIELD -> WidgetHint.UPSTREAM_FIELD_PICKER;
       // RDBMS_TABLE is also used for TableOutput's dynamic incoming field name.
@@ -412,6 +427,13 @@ public final class AutomaticConfigDescriptor {
             case DATABASE_TABLE_PICKER -> new PickerContext("/connection", "/lookup/schema");
             default -> null;
           };
+      case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputField" ->
+          hint == WidgetHint.DATABASE_COLUMN_PICKER
+              ? new PickerContext("/connection", "/schema", "/table") : null;
+      case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField",
+           "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateValue" ->
+          hint == WidgetHint.DATABASE_COLUMN_PICKER
+              ? new PickerContext("/connection", "/lookup/schema", "/lookup/table") : null;
       default -> null;
     };
   }
@@ -1446,7 +1468,7 @@ public final class AutomaticConfigDescriptor {
   public enum TextEditorHint { NONE, SQL, SCRIPT, TEMPLATE }
   public enum WidgetHint {
     NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER, LOCAL_DIRECTORY_PICKER,
-    DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, UPSTREAM_FIELD_PICKER,
+    DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, DATABASE_COLUMN_PICKER, UPSTREAM_FIELD_PICKER,
     INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER, STAGED_FIELD_PICKER
   }
   public enum FieldSourceStage { AFTER_SELECT, AFTER_REMOVE }
@@ -1469,7 +1491,12 @@ public final class AutomaticConfigDescriptor {
   public record RuntimePrecondition(String code, List<String> keyListPointers, String explanation) {}
   public record Option(String label, String value) {}
   public record LayoutHint(int order, String group, Presentation presentation) {}
-  public record PickerContext(String connectionPointer, String schemaPointer) {}
+  public record PickerContext(
+      String connectionPointer, String schemaPointer, String tablePointer) {
+    public PickerContext(String connectionPointer, String schemaPointer) {
+      this(connectionPointer, schemaPointer, null);
+    }
+  }
   public record Property(String key, String javaField, Shape shape, String javaType, String groupKey,
       boolean sensitive, boolean storeWithName, boolean storeWithCode, boolean defaultBoolean,
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
