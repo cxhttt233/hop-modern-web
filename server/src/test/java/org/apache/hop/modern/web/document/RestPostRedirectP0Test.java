@@ -16,6 +16,7 @@ import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
 import org.apache.hop.core.row.RowMeta;
+import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.serializer.json.ConfigJsonSerializer;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
@@ -45,7 +46,7 @@ class RestPostRedirectP0Test {
   private record Seen(String path, String method, byte[] body) {}
 
   @Test
-  void restPost302ChangesToGetBut307PreservesPostAfterRealHplEdit(
+  void restPost302DropsBodyAnd307ReplaysUnicodeBodyAfterRealHplEdit(
       @TempDir Path tempDir) throws Exception {
     List<Seen> seen = new CopyOnWriteArrayList<>();
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -100,7 +101,7 @@ class RestPostRedirectP0Test {
       draft.put("url", base + "/post-redirect-302");
       draft.put("method", "POST");
       draft.put("applicationType", "JSON");
-      draft.put("bodyField", "");
+      draft.put("bodyField", "payload");
       ObjectNode result = (ObjectNode) draft.path("result");
       result.put("name", "响应正文");
       result.put("code", "最终状态");
@@ -115,7 +116,7 @@ class RestPostRedirectP0Test {
       JsonNode wire = ConfigJsonSerializer.toJson(diskMeta, provider);
       assertEquals("POST", wire.at("/method").asText());
       assertEquals("JSON", wire.at("/applicationType").asText());
-      assertEquals("", wire.at("/bodyField").asText());
+      assertEquals("payload", wire.at("/bodyField").asText());
       assertEquals("响应正文", wire.at("/result/name").asText());
 
       var contract = AutomaticConfigDescriptor.describe(diskMeta.getClass())
@@ -136,16 +137,20 @@ class RestPostRedirectP0Test {
       restType.getMethod("setMetadataProvider",
           org.apache.hop.metadata.api.IHopMetadataProvider.class).invoke(rest, provider);
       assertTrue((Boolean) restType.getMethod("init").invoke(rest));
-      dataType.getField("inputRowMeta").set(data, new RowMeta());
+      RowMeta inputMeta = new RowMeta();
+      inputMeta.addValueMeta(new ValueMetaString("payload"));
+      dataType.getField("inputRowMeta").set(data, inputMeta);
       dataType.getField("method").set(data, "POST");
-      dataType.getField("useBody").setBoolean(data, false);
+      dataType.getField("indexOfBodyField").setInt(data, 0);
+      dataType.getField("useBody").setBoolean(data, true);
+      String payload = "{\"station\":\"黄河<&>雪\",\"level\":7.5}";
       var invoke = restType.getDeclaredMethod("invokeRestExchange", Object[].class,
           String.class, LinkedHashMap.class, LinkedHashMap.class, LinkedHashMap.class);
       invoke.setAccessible(true);
       try {
         for (int code : new int[] {302, 307}) {
           dataType.getField("realUrl").set(data, base + "/post-redirect-" + code);
-          Object exchange = invoke.invoke(rest, new Object[0], null,
+          Object exchange = invoke.invoke(rest, new Object[] {payload}, null,
               new LinkedHashMap<String, String>(), new LinkedHashMap<String, String>(),
               new LinkedHashMap<String, String>());
           var status = exchange.getClass().getDeclaredField("status");
@@ -161,14 +166,18 @@ class RestPostRedirectP0Test {
       }
       assertEquals(4, seen.size(), "each redirect must reach exactly one final endpoint");
       assertEquals("POST", seen.get(0).method());
+      assertEquals(payload, new String(seen.get(0).body(), StandardCharsets.UTF_8),
+          "the original POST must carry the Unicode JSON body");
       assertEquals("GET", seen.get(1).method(),
           "302 redirects a POST as a GET, without replaying its request body");
       assertEquals(0, seen.get(1).body().length);
       assertEquals("POST", seen.get(2).method());
+      assertEquals(payload, new String(seen.get(2).body(), StandardCharsets.UTF_8));
       assertEquals("POST", seen.get(3).method(),
           "307 preserves POST when following a same-origin relative redirect");
-      assertEquals(0, seen.get(3).body().length);
-      System.out.println("PROD_P0_REST_POST_302_GET_307_POST_REDIRECT_DISK_REOPEN=PASS");
+      assertEquals(payload, new String(seen.get(3).body(), StandardCharsets.UTF_8),
+          "307 must replay the exact Unicode POST entity to the final endpoint");
+      System.out.println("PROD_P0_REST_POST_REDIRECT_BODY_302_DROP_307_PRESERVE_DISK_REOPEN=PASS");
     } finally {
       server.stop(0);
     }
