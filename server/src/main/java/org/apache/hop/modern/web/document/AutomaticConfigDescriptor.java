@@ -1508,6 +1508,10 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta" ->
           List.of(
               new RuntimePrecondition(
+                  "TABLE_INPUT_PARAMETER_ROW_EXECUTION_MODE",
+                  List.of("/execute_each_row", "/lookup", "/use_named_parameters"),
+                  "Native TableInput executes one SQL query per incoming parameter row when execute_each_row is true; with no input parameter row it stops without querying. When false it drains all incoming parameter rows into one flattened parameter list and executes one query, even if there are no incoming hops. A configured lookup INFO stream with no parameter rows fails in the once-only mode. use_named_parameters changes SQL placeholder binding, not the number of queries. Preserve both flags and the INFO-stream reference when editing; diagnose input cardinality and topology before execution without rejecting draft saves."),
+              new RuntimePrecondition(
                   "TABLE_INPUT_SPECIFY_FIELDS_REQUIRES_NAMED_OUTPUT_FIELD",
                   List.of("/fields/field"),
                   "When specify_fields is true, fields.field must contain at least one output field with a non-empty name; Hop skips unnamed entries. validate_specified_fields controls JDBC result column/type checks and does not waive this requirement."),
