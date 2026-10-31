@@ -472,6 +472,21 @@ public final class AutomaticConfigDescriptor {
       if (key.equals("file") && shape == Shape.OBJECT)
         return new ActivationContext("/IsInFields", false);
     }
+    // TableOutput has three independent native editor modes. Keep inactive
+    // values in the Hop JSON wire draft; only the consumer's editor activation
+    // changes. Do not infer the flags from a nested field or the UI layout.
+    if (className.equals("org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")) {
+      if (key.equals("table") && shape == Shape.STRING)
+        return new ActivationContext("/tablename_in_field", false);
+      if (key.equals("tablename_field") && shape == Shape.STRING)
+        return new ActivationContext("/tablename_in_field", true);
+      if (key.equals("field") && shape == Shape.LIST)
+        return new ActivationContext("/specify_fields", true);
+      if (key.equals("return_field") && shape == Shape.STRING)
+        return new ActivationContext("/return_keys", true);
+      if (key.equals("partitioning_field") && shape == Shape.STRING)
+        return new ActivationContext("/partitioning_enabled", true);
+    }
     // Both native HTTP and REST select either the literal URL or an incoming-row URL.
     // The inactive value must remain in the Hop JSON draft when switching modes.
     if (className.equals("org.apache.hop.pipeline.transforms.http.HttpMeta")
