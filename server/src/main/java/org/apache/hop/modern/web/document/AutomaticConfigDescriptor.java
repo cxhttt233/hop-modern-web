@@ -504,6 +504,15 @@ public final class AutomaticConfigDescriptor {
       if (key.equals("validate_specified_fields") && shape == Shape.BOOLEAN)
         return new ActivationContext("/specify_fields", true);
     }
+    // ExecSql.quoteString only affects per-row SQL placeholder substitution.
+    // With JDBC bind parameters enabled, native ExecSql.processRow() passes
+    // values to the driver instead of quoting string literals; in one-shot
+    // mode processRow() does not substitute incoming row arguments at all.
+    // Keep the inactive BOOLEAN value when switching either execution mode.
+    if (className.equals("org.apache.hop.pipeline.transforms.sql.ExecSqlMeta")
+        && key.equals("quoteString") && shape == Shape.BOOLEAN)
+      return new ActivationContext("/execute_each_row", true,
+          List.of(new ActivationCondition("/set_params", false)));
     // TableOutput has three independent native editor modes. Keep inactive
     // values in the Hop JSON wire draft; only the consumer's editor activation
     // changes. Do not infer the flags from a nested field or the UI layout.
