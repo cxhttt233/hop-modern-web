@@ -46,6 +46,42 @@ class GroupByFullPipelineP0Test {
   }
 
   @Test
+  void groupByProducerDistinguishesGroupingAndAggregationIndexedWireLists()
+      throws Exception {
+    IPlugin plugin = PluginRegistry.getInstance()
+        .findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(plugin, "pinned GroupBy plugin required");
+    ITransformMeta nativeMeta = PluginRegistry.getInstance()
+        .loadClass(plugin, ITransformMeta.class);
+    var descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+    assertEquals(2, descriptor.wireLists().size());
+    var grouping = descriptor.wireLists().get(0);
+    var aggregation = descriptor.wireLists().get(1);
+    assertEquals("group.field", grouping.descriptorPath());
+    assertEquals("/group/field", grouping.listPointer());
+    assertEquals("/group/field/{index}", grouping.itemPointerTemplate());
+    assertEquals("fields.field", aggregation.descriptorPath());
+    assertEquals("/fields/field", aggregation.listPointer());
+    assertEquals("/fields/field/{index}", aggregation.itemPointerTemplate());
+    assertEquals("/group/field/0", grouping.itemPointer(0));
+    assertEquals("/fields/field/1", aggregation.itemPointer(1));
+    var fieldLists = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field")
+            && (p.groupKey().equals("group") || p.groupKey().equals("fields")))
+        .toList();
+    assertEquals(2, fieldLists.size());
+    assertTrue(fieldLists.stream().allMatch(
+        p -> p.shape() == AutomaticConfigDescriptor.Shape.LIST));
+    var published = new com.fasterxml.jackson.databind.ObjectMapper()
+        .valueToTree(descriptor);
+    assertEquals("/group/field",
+        published.at("/wireLists/0/listPointer").asText());
+    assertEquals("/fields/field",
+        published.at("/wireLists/1/listPointer").asText());
+    System.out.println("PROD_P0_GROUPBY_DUAL_CANONICAL_INDEXED_WIRE_LISTS=PASS");
+  }
+
+  @Test
   void groupByCountAndConcatenationExecuteFullPipelineAfterHplReopen(
       @TempDir Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
@@ -138,6 +174,14 @@ class GroupByFullPipelineP0Test {
     assertEquals("COUNT_ANY", wire.at("/fields/field/0/type").asText());
     assertEquals("样本列表", wire.at("/fields/field/1/aggregate").asText());
     assertEquals("样本", wire.at("/fields/field/1/subject").asText());
+    // Producer-owned canonical pointers must address two distinct native lists
+    // after real config editing and XML disk reopen.
+    var wireLists = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("group-node").getTransform().getClass())
+        .wireLists();
+    assertEquals("分组<&>", wire.at(wireLists.get(0).itemPointer(0) + "/name").asText());
+    assertEquals("记录数", wire.at(wireLists.get(1).itemPointer(0) + "/aggregate").asText());
+    assertEquals("样本", wire.at(wireLists.get(1).itemPointer(1) + "/subject").asText());
     assertEquals("CONCAT_COMMA", wire.at("/fields/field/1/type").asText());
 
     List<Object[]> emitted = new CopyOnWriteArrayList<>();
