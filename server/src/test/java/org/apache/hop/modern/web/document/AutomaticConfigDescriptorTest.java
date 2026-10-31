@@ -38,7 +38,7 @@ class AutomaticConfigDescriptorTest {
   }
 
   @Test
-  void marksSelectValuesSelectedInputFieldButNotOutputRenameOrLaterStageNames() {
+  void marksSelectValuesFieldNamesByNativeExecutionStageWithoutConfusingOutputAliases() {
     Descriptor descriptor = AutomaticConfigDescriptor.describe(SelectValuesMeta.class);
     Property fields = property(descriptor.properties(), "fields");
     Property selected = property(fields.children(), "field");
@@ -53,12 +53,27 @@ class AutomaticConfigDescriptorTest {
     assertEquals(Shape.NUMBER,
         property(selected.elementProperties(), "length").shape());
 
-    // Remove and Meta consume the Select tab's output, not necessarily the raw input.
-    // A raw upstream picker for these names would hide newly renamed columns.
+    // Remove sees Select's renamed columns. Meta sees the result after Remove.
+    // Neither stage may reuse the raw upstream picker or offer removed columns.
+    Property removeName = property(
+        property(fields.children(), "remove").elementProperties(), "name");
+    Property metaName = property(
+        property(fields.children(), "meta").elementProperties(), "name");
+    assertEquals(WidgetHint.STAGED_FIELD_PICKER, removeName.widgetHint());
+    assertEquals(AutomaticConfigDescriptor.FieldSourceStage.AFTER_SELECT,
+        removeName.fieldSourceStage());
+    assertEquals(WidgetHint.STAGED_FIELD_PICKER, metaName.widgetHint());
+    assertEquals(AutomaticConfigDescriptor.FieldSourceStage.AFTER_REMOVE,
+        metaName.fieldSourceStage());
+    assertNull(property(selected.elementProperties(), "name").fieldSourceStage());
+    assertNull(property(selected.elementProperties(), "rename").fieldSourceStage());
     assertEquals(WidgetHint.NONE,
-        property(property(fields.children(), "remove").elementProperties(), "name").widgetHint());
-    assertEquals(WidgetHint.NONE,
-        property(property(fields.children(), "meta").elementProperties(), "name").widgetHint());
+        property(property(fields.children(), "meta").elementProperties(), "rename").widgetHint());
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    assertEquals("AFTER_SELECT", mapper.valueToTree(removeName)
+        .path("fieldSourceStage").asText());
+    assertEquals("AFTER_REMOVE", mapper.valueToTree(metaName)
+        .path("fieldSourceStage").asText());
   }
 
   @Test
