@@ -45,7 +45,7 @@ public final class AutomaticConfigDescriptor {
             textEditorHint(key, shape, metadata),
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
             hint, metadataClassName(shape, metadata), pickerContext(type, hint),
-            fieldSourcePointer(type, key, hint)));
+            fieldSourcePointer(type, key, hint), fieldSourceStage(type, key, hint)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), runtimePreconditions(type), canonicalWireLists(type));
@@ -247,6 +247,17 @@ public final class AutomaticConfigDescriptor {
                 && key.equals("name"))) {
           yield WidgetHint.INFO_STREAM_FIELD_PICKER;
         }
+        // SelectValues Remove and Meta consume successive intermediate row schemas.
+        // A raw input picker would hide Select-tab renames and show deleted fields.
+        // Expose a staged picker instead; the consumer must not silently fall back
+        // to the original upstream field list for these two native stages.
+        if ((owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.selectvalues.DeleteField")
+                || owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange"))
+            && key.equals("name")) {
+          yield WidgetHint.STAGED_FIELD_PICKER;
+        }
         // These pinned Hop plugins consume incoming row columns but omit STREAM_FIELD
         // annotations. Match both the declaring class and the wire key so that
         // response/output names and HTTP parameter names are not misclassified.
@@ -369,6 +380,18 @@ public final class AutomaticConfigDescriptor {
           key.equals("field") ? "/from" : null;
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$ReturnValue" ->
           key.equals("name") ? "/from" : null;
+      default -> null;
+    };
+  }
+
+  /** SelectValues stage names are resolved after earlier tabs mutate the row schema. */
+  private static FieldSourceStage fieldSourceStage(Class<?> owner, String key, WidgetHint hint) {
+    if (hint != WidgetHint.STAGED_FIELD_PICKER || !key.equals("name")) return null;
+    return switch (owner.getName()) {
+      case "org.apache.hop.pipeline.transforms.selectvalues.DeleteField" ->
+          FieldSourceStage.AFTER_SELECT;
+      case "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange" ->
+          FieldSourceStage.AFTER_REMOVE;
       default -> null;
     };
   }
@@ -1424,8 +1447,9 @@ public final class AutomaticConfigDescriptor {
   public enum WidgetHint {
     NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER, LOCAL_DIRECTORY_PICKER,
     DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, UPSTREAM_FIELD_PICKER,
-    INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER
+    INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER, STAGED_FIELD_PICKER
   }
+  public enum FieldSourceStage { AFTER_SELECT, AFTER_REMOVE }
   public enum Presentation { FIELD, TABLE }
   public record Descriptor(
       String className, List<Property> properties, List<RuntimePrecondition> runtimePreconditions,
@@ -1451,5 +1475,6 @@ public final class AutomaticConfigDescriptor {
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
       List<Property> elementProperties, List<Option> options, TextEditorHint textEditorHint,
       LayoutHint layout, WidgetHint widgetHint, String metadataClassName,
-      PickerContext pickerContext, String sourceTransformPointer) {}
+      PickerContext pickerContext, String sourceTransformPointer,
+      FieldSourceStage fieldSourceStage) {}
 }
