@@ -226,6 +226,15 @@ public final class AutomaticConfigDescriptor {
             && key.equals("lookup")) {
           yield WidgetHint.INFO_STREAM_TRANSFORM_PICKER;
         }
+        // StreamLookup.from is a named INFO stream transform, not a row field.
+        // Native StreamLookupMeta.searchInfoAndTargetTransforms resolves this
+        // name against the pipeline graph and its ITransformIOMeta INFO stream.
+        // Keep the picker contract producer-owned, as for TableInput.lookup.
+        if (owner.getName().equals(
+                "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta")
+            && key.equals("from")) {
+          yield WidgetHint.INFO_STREAM_TRANSFORM_PICKER;
+        }
         // These pinned Hop plugins consume incoming row columns but omit STREAM_FIELD
         // annotations. Match both the declaring class and the wire key so that
         // response/output names and HTTP parameter names are not misclassified.
