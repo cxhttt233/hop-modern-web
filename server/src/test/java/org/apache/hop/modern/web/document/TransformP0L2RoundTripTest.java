@@ -620,7 +620,8 @@ class TransformP0L2RoundTripTest {
     Property table = property(descriptor, "table");
     assertEquals(Shape.STRING, table.shape());
     assertEquals(WidgetHint.DATABASE_TABLE_PICKER, table.widgetHint());
-    assertEquals(new AutomaticConfigDescriptor.PickerContext("/connection", "/schema"),
+    assertEquals(new AutomaticConfigDescriptor.PickerContext("/connection", "/schema", null,
+            "/tablename_in_field", "/tablename_field"),
         table.pickerContext());
     assertNull(table.metadataClassName());
 
@@ -680,7 +681,8 @@ class TransformP0L2RoundTripTest {
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, streamColumn.widgetHint());
     assertEquals(WidgetHint.DATABASE_COLUMN_PICKER, databaseColumn.widgetHint());
     assertEquals(new AutomaticConfigDescriptor.PickerContext(
-        "/connection", "/schema", "/table"), databaseColumn.pickerContext());
+        "/connection", "/schema", "/table",
+            "/tablename_in_field", "/tablename_field"), databaseColumn.pickerContext());
     // TableOutput's partitioning field is an incoming DATE column even though
     // the native annotation omits STREAM_FIELD.
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, partitionSource.widgetHint());
@@ -5105,6 +5107,85 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEOUTPUT_DYNAMIC_TABLE_NAME_DISK_METADATA=PASS");
   }
 
+
+  @Test
+  void tableOutputDynamicTargetPickerPointersResolveAfterRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.getClass().getMethod("setConnection", String.class).invoke(meta, "warehouse");
+    meta.getClass().getMethod("setSchemaName", String.class).invoke(meta, "业务模式");
+    meta.getClass().getMethod("setTableName", String.class).invoke(meta, "静态目标表");
+    meta.getClass().getMethod("setTableNameInField", boolean.class).invoke(meta, true);
+    meta.getClass().getMethod("setTableNameField", String.class)
+        .invoke(meta, "每行目标表<&>雪");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("dynamic-target-picker.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("dynamic-target-picker");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", "table-target", meta));
+    store.save(hpl, pipeline);
+
+    for (boolean dynamic : List.of(true, false)) {
+      var reopened = store.open(hpl);
+      var diskMeta = reopened.findTransform("table-target").getTransform();
+      if (!dynamic) {
+        diskMeta.getClass().getMethod("setTableNameInField", boolean.class)
+            .invoke(diskMeta, false);
+        store.save(hpl, reopened);
+        reopened = store.open(hpl);
+      }
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("dynamic-target-doc", hpl, reopened));
+      var resource = new PipelineConfigResource(documents, provider);
+      var response = resource.read("dynamic-target-doc",
+          new PipelineConfigResource.ReadRequest("table-target"));
+      assertEquals(200, response.getStatus());
+      var body = (PipelineConfigResource.ConfigResponse) response.getEntity();
+      var wire = body.config();
+      var descriptor = body.descriptor();
+      var tablePicker = property(descriptor, "table");
+      var columnPicker = property(descriptor, "field", "column_name");
+      assertEquals(WidgetHint.DATABASE_TABLE_PICKER, tablePicker.widgetHint());
+      assertEquals(WidgetHint.DATABASE_COLUMN_PICKER, columnPicker.widgetHint());
+      var context = columnPicker.pickerContext();
+      assertEquals("/connection", context.connectionPointer());
+      assertEquals("/schema", context.schemaPointer());
+      assertEquals("/table", context.tablePointer());
+      assertEquals("/tablename_in_field", context.dynamicTableFlagPointer());
+      assertEquals("/tablename_field", context.dynamicTableFieldPointer());
+      assertEquals(context.dynamicTableFlagPointer(),
+          tablePicker.pickerContext().dynamicTableFlagPointer());
+      assertEquals(context.dynamicTableFieldPointer(),
+          tablePicker.pickerContext().dynamicTableFieldPointer());
+      assertEquals(dynamic, wire.at(context.dynamicTableFlagPointer()).booleanValue());
+      assertEquals("每行目标表<&>雪", wire.at(context.dynamicTableFieldPointer()).asText());
+      assertEquals("静态目标表", wire.at(context.tablePointer()).asText());
+      assertEquals("业务模式", wire.at(context.schemaPointer()).asText());
+      assertEquals("warehouse", wire.at(context.connectionPointer()).asText());
+      var published = new com.fasterxml.jackson.databind.ObjectMapper()
+          .valueToTree(columnPicker);
+      assertEquals("/tablename_in_field",
+          published.at("/pickerContext/dynamicTableFlagPointer").asText());
+      assertEquals("/tablename_field",
+          published.at("/pickerContext/dynamicTableFieldPointer").asText());
+    }
+
+    // The dynamic table name is an incoming-row value, not a static DB table.
+    // Do not use /table to fetch column metadata while /tablename_in_field=true.
+    var insert = descriptorFor(plugins, "InsertUpdate");
+    assertNull(property(insert, "lookup", "key", "field")
+        .pickerContext().dynamicTableFlagPointer());
+    System.out.println("PROD_P0_TABLEOUTPUT_DYNAMIC_TABLE_PICKER_CONTEXT_DISK_REOPEN=PASS");
+  }
+
   @Test
   void restCustomMethodTokensAndBodyRulesSurviveRealHplConfigEdit(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
@@ -6751,7 +6832,8 @@ class TransformP0L2RoundTripTest {
     Property tableColumn = property(tableResponse.descriptor(), "field", "column_name");
     assertEquals(WidgetHint.DATABASE_COLUMN_PICKER, tableColumn.widgetHint());
     assertEquals(new AutomaticConfigDescriptor.PickerContext(
-        "/connection", "/schema", "/table"), tableColumn.pickerContext());
+        "/connection", "/schema", "/table",
+            "/tablename_in_field", "/tablename_field"), tableColumn.pickerContext());
     assertEquals("/table",
         mapper.valueToTree(tableColumn).at("/pickerContext/tablePointer").asText());
     var tableConfig = ((com.fasterxml.jackson.databind.node.ObjectNode)

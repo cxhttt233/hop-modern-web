@@ -417,7 +417,8 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
           switch (hint) {
             case DATABASE_SCHEMA_PICKER -> new PickerContext("/connection", null);
-            case DATABASE_TABLE_PICKER -> new PickerContext("/connection", "/schema");
+            case DATABASE_TABLE_PICKER -> new PickerContext("/connection", "/schema", null,
+                "/tablename_in_field", "/tablename_field");
             default -> null;
           };
       case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateLookupField" ->
@@ -429,7 +430,8 @@ public final class AutomaticConfigDescriptor {
           };
       case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputField" ->
           hint == WidgetHint.DATABASE_COLUMN_PICKER
-              ? new PickerContext("/connection", "/schema", "/table") : null;
+              ? new PickerContext("/connection", "/schema", "/table",
+                  "/tablename_in_field", "/tablename_field") : null;
       case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateKeyField",
            "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateValue" ->
           hint == WidgetHint.DATABASE_COLUMN_PICKER
@@ -1491,10 +1493,19 @@ public final class AutomaticConfigDescriptor {
   public record RuntimePrecondition(String code, List<String> keyListPointers, String explanation) {}
   public record Option(String label, String value) {}
   public record LayoutHint(int order, String group, Presentation presentation) {}
+  /**
+   * The final two pointers are non-null only for TableOutput, whose target
+   * table may come from each incoming row instead of the literal /table.
+   * Consumers must check /tablename_in_field before querying static columns.
+   */
   public record PickerContext(
-      String connectionPointer, String schemaPointer, String tablePointer) {
+      String connectionPointer, String schemaPointer, String tablePointer,
+      String dynamicTableFlagPointer, String dynamicTableFieldPointer) {
     public PickerContext(String connectionPointer, String schemaPointer) {
-      this(connectionPointer, schemaPointer, null);
+      this(connectionPointer, schemaPointer, null, null, null);
+    }
+    public PickerContext(String connectionPointer, String schemaPointer, String tablePointer) {
+      this(connectionPointer, schemaPointer, tablePointer, null, null);
     }
   }
   public record Property(String key, String javaField, Shape shape, String javaType, String groupKey,
