@@ -7051,6 +7051,73 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void mergeJoinPrimitiveKeyPickersPublishSeparateInfoStreamSourcesWithoutGuessing()
+      throws Exception {
+    // The existing native wire test proves the two ordered STRING lists.
+    // This test verifies their *editor* source contract, without duplicating
+    // the previously blocked two-upstream graph/HPL scenario.
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "MergeJoin");
+    assertNotNull(plugin, "production MergeJoin plugin is required");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.getClass().getMethod("setLeftTransformName", String.class)
+        .invoke(meta, "左流<&雪>");
+    meta.getClass().getMethod("setRightTransformName", String.class)
+        .invoke(meta, "右流<&雪>");
+    meta.getClass().getMethod("setKeyFields1", List.class)
+        .invoke(meta, List.of("左键<&雪>", "左键二"));
+    meta.getClass().getMethod("setKeyFields2", List.class)
+        .invoke(meta, List.of("右键<&雪>", "右键二"));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    assertEquals(WidgetHint.INFO_STREAM_TRANSFORM_PICKER,
+        property(descriptor, "transform1").widgetHint());
+    assertEquals(WidgetHint.INFO_STREAM_TRANSFORM_PICKER,
+        property(descriptor, "transform2").widgetHint());
+    assertEquals(List.of("/keys_1/key", "/keys_2/key"),
+        descriptor.wireLists().stream()
+            .map(AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertEquals(List.of("/transform1", "/transform2"),
+        descriptor.wireLists().stream()
+            .map(AutomaticConfigDescriptor.WireListContract::sourceTransformPointer).toList());
+    assertTrue(descriptor.wireLists().stream()
+        .allMatch(c -> c.itemWidgetHint() == WidgetHint.INFO_STREAM_FIELD_PICKER));
+    assertEquals("/keys_1/key/1", descriptor.wireLists().get(0).itemPointer(1));
+    assertEquals("/keys_2/key/1", descriptor.wireLists().get(1).itemPointer(1));
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("INFO_STREAM_FIELD_PICKER",
+        published.at("/wireLists/0/itemWidgetHint").asText());
+    assertEquals("/transform1",
+        published.at("/wireLists/0/sourceTransformPointer").asText());
+    assertEquals("/transform2",
+        published.at("/wireLists/1/sourceTransformPointer").asText());
+
+    var provider = new MemoryMetadataProvider();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(meta, provider);
+    assertEquals("左流<&雪>", wire.at("/transform1").asText());
+    assertEquals("右流<&雪>", wire.at("/transform2").asText());
+    assertEquals("左键<&雪>", wire.at("/keys_1/key/0").asText());
+    assertEquals("右键<&雪>", wire.at("/keys_2/key/0").asText());
+
+    // Editing the right source/key must not alter the independent left source/key.
+    var edited = ((com.fasterxml.jackson.databind.node.ObjectNode) wire).deepCopy();
+    edited.put("transform2", "新右流<&雪>");
+    ((com.fasterxml.jackson.databind.node.ArrayNode) edited.at("/keys_2/key"))
+        .set(0, com.fasterxml.jackson.databind.node.TextNode.valueOf("新右键<&雪>"));
+    var decoded = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.fromJson(
+        edited, meta.getClass(), provider);
+    var roundTrip = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        decoded, provider);
+    assertEquals("左流<&雪>", roundTrip.at("/transform1").asText());
+    assertEquals("左键<&雪>", roundTrip.at("/keys_1/key/0").asText());
+    assertEquals("新右流<&雪>", roundTrip.at("/transform2").asText());
+    assertEquals("新右键<&雪>", roundTrip.at("/keys_2/key/0").asText());
+    System.out.println("PROD_P0_MERGEJOIN_PRIMITIVE_INFO_STREAM_PICKER_CONTEXT=PASS");
+  }
+
+  @Test
   void insertUpdateKeyAndValueListsPublishDistinctIndexedNativeWireContracts()
       throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
