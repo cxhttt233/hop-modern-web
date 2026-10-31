@@ -265,6 +265,78 @@ class TransformP0L2RoundTripTest {
     }
     System.out.println("PROD_P0_EXECSQL_NATIVE_ARGUMENT_AND_VFS_PICKERS=PASS");
   }
+  @Test
+  void execSqlLiteralQuoteActivationPreservesInactiveChoiceAcrossRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "ExecSql");
+    assertNotNull(plugin, "production ExecSql plugin missing");
+    ITransformMeta nativeMeta = plugins.loadClass(plugin, ITransformMeta.class);
+    nativeMeta.setDefault();
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("execsql-literal-quote-modes.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("execsql-literal-quote-modes");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "ExecSql", "execsql-quote-node", nativeMeta));
+    store.save(hpl, pipeline);
+
+    // The native ExecSql.processRow() quotes STRING arguments only when
+    // execute_each_row=true and set_params=false. The arguments list itself
+    // remains relevant in both parameter-binding and literal-substitution modes.
+    boolean[] eachRow = {true, true, false, true};
+    boolean[] bindParams = {false, true, false, false};
+    for (int phase = 0; phase < eachRow.length; phase++) {
+      var opened = store.open(hpl);
+      PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("execsql-quote-doc", hpl, opened));
+      PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("execsql-quote-doc",
+          new PipelineConfigResource.ReadRequest("execsql-quote-node"));
+      assertEquals(200, read.getStatus());
+      var config = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      if (phase == 0) {
+        Property quote = property(config.descriptor(), "quoteString");
+        assertEquals(Shape.BOOLEAN, quote.shape());
+        assertEquals(new AutomaticConfigDescriptor.ActivationContext(
+            "/execute_each_row", true, List.of(
+                new AutomaticConfigDescriptor.ActivationCondition("/set_params", false))),
+            quote.activationContext());
+        assertNull(property(config.descriptor(), "argument").activationContext());
+        var descriptorJson = new com.fasterxml.jackson.databind.ObjectMapper()
+            .valueToTree(config.descriptor());
+        int index = config.descriptor().properties().indexOf(quote);
+        String pointer = "/properties/" + index + "/activationContext";
+        assertEquals("/execute_each_row",
+            descriptorJson.at(pointer + "/flagPointer").asText());
+        assertTrue(descriptorJson.at(pointer + "/activeWhen").booleanValue());
+        assertEquals("/set_params", descriptorJson.at(
+            pointer + "/additionalConditions/0/flagPointer").asText());
+        assertFalse(descriptorJson.at(
+            pointer + "/additionalConditions/0/activeWhen").booleanValue());
+      }
+      var draft = ((com.fasterxml.jackson.databind.node.ObjectNode) config.config()).deepCopy();
+      draft.put("execute_each_row", eachRow[phase]);
+      draft.put("set_params", bindParams[phase]);
+      if (phase == 0) draft.put("quoteString", true);
+      assertEquals(200, resource.write("execsql-quote-doc",
+          new PipelineConfigResource.WriteRequest("execsql-quote-node", draft)).getStatus());
+      store.save(hpl, opened);
+
+      var reopened = store.open(hpl);
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          reopened.findTransform("execsql-quote-node").getTransform(), provider);
+      assertEquals(eachRow[phase], wire.at("/execute_each_row").booleanValue());
+      assertEquals(bindParams[phase], wire.at("/set_params").booleanValue());
+      assertTrue(wire.at("/quoteString").booleanValue(),
+          "inactive quote choice must survive every real HPL disk reopen");
+    }
+    System.out.println("PROD_P0_EXECSQL_LITERAL_QUOTE_ACTIVATION_HPL=PASS");
+  }
+
   @Test void roundTrips() throws Exception {
     PluginRegistry r=PluginRegistry.getInstance(); int pass=0;
     for(String id:IDS){
