@@ -4089,6 +4089,89 @@ class TransformP0L2RoundTripTest {
 
 
   @Test
+  void streamLookupIntegerPairCompoundActivationRetainsInactiveNativeFlagsAcrossHplReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "StreamLookup");
+    assertNotNull(plugin, "production StreamLookup plugin missing");
+    ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+
+    Property sorted = property(descriptor, "sorted_list");
+    Property pair = property(descriptor, "integer_pair");
+    assertEquals(Shape.BOOLEAN, sorted.shape());
+    assertEquals(Shape.BOOLEAN, pair.shape());
+    assertEquals("/preserve_memory", sorted.activationContext().flagPointer());
+    assertTrue(sorted.activationContext().activeWhen());
+    assertTrue(sorted.activationContext().additionalConditions().isEmpty());
+    assertEquals("/preserve_memory", pair.activationContext().flagPointer());
+    assertTrue(pair.activationContext().activeWhen());
+    assertEquals(List.of(new AutomaticConfigDescriptor.ActivationCondition(
+        "/sorted_list", false)), pair.activationContext().additionalConditions());
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    int pairIndex = descriptor.properties().indexOf(pair);
+    assertEquals("/preserve_memory", published.at(
+        "/properties/" + pairIndex + "/activationContext/flagPointer").asText());
+    assertEquals("/sorted_list", published.at(
+        "/properties/" + pairIndex + "/activationContext/additionalConditions/0/flagPointer")
+        .asText());
+    assertFalse(published.at(
+        "/properties/" + pairIndex + "/activationContext/additionalConditions/0/activeWhen")
+        .booleanValue());
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("streamlookup-cache-mode-雪.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("streamlookup-cache-mode");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "StreamLookup", "cache-node", meta));
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("cache-mode-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("cache-mode-doc",
+        new PipelineConfigResource.ReadRequest("cache-node"));
+    assertEquals(200, read.getStatus());
+    var config = ((PipelineConfigResource.ConfigResponse) read.getEntity()).config();
+    var active = ((com.fasterxml.jackson.databind.node.ObjectNode) config).deepCopy();
+    active.put("preserve_memory", true);
+    active.put("sorted_list", false);
+    active.put("integer_pair", true);
+    assertEquals(200, resource.write("cache-mode-doc",
+        new PipelineConfigResource.WriteRequest("cache-node", active)).getStatus());
+    store.save(hpl, loaded);
+
+    var reopened = store.open(hpl);
+    var nativeActive = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        reopened.findTransform("cache-node").getTransform(), provider);
+    assertTrue(nativeActive.at("/preserve_memory").booleanValue());
+    assertFalse(nativeActive.at("/sorted_list").booleanValue());
+    assertTrue(nativeActive.at("/integer_pair").booleanValue());
+
+    // Disabling the fast path must not silently erase the user's saved choice.
+    var nextDocuments = new PipelineDocumentRegistry();
+    nextDocuments.put(new PipelineDocument("cache-mode-next", hpl, reopened));
+    var nextResource = new PipelineConfigResource(nextDocuments, provider);
+    var inactive = ((com.fasterxml.jackson.databind.node.ObjectNode) nativeActive).deepCopy();
+    inactive.put("preserve_memory", false);
+    inactive.put("sorted_list", true);
+    assertEquals(200, nextResource.write("cache-mode-next",
+        new PipelineConfigResource.WriteRequest("cache-node", inactive)).getStatus());
+    store.save(hpl, reopened);
+    var disk = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        store.open(hpl).findTransform("cache-node").getTransform(), provider);
+    assertFalse(disk.at("/preserve_memory").booleanValue());
+    assertTrue(disk.at("/sorted_list").booleanValue());
+    assertTrue(disk.at("/integer_pair").booleanValue());
+    System.out.println("PROD_P0_STREAMLOOKUP_COMPOUND_CACHE_ACTIVATION_HPL=PASS");
+  }
+
+  @Test
   void streamLookupTwoNestedListsAndDuplicateLeafNamesSurviveRealHplDiskReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
