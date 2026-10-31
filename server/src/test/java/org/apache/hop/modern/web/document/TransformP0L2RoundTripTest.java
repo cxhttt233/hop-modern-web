@@ -7603,6 +7603,93 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_HTTP_REST_SOURCE_MODE_ACTIVATION_HPL=PASS");
   }
 
+  @Test
+  void restPaginationLoopLimitActivationSurvivesNativeHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin, "native REST plugin is required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/river?station=雪&mode=page");
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    Property limit = property(descriptor, "maxPagesLoops");
+    assertEquals(Shape.NUMBER, limit.shape());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/paginationEnabled", true),
+        limit.activationContext());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(limit);
+    assertEquals("/paginationEnabled",
+        published.at("/activationContext/flagPointer").asText());
+    assertTrue(published.at("/activationContext/activeWhen").booleanValue());
+    assertNull(property(descriptor, "paginationEnabled").activationContext());
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-pagination-loop-雪");
+    String node = "rest-pagination-限制<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta("Rest", node, original));
+    java.nio.file.Path hpl = tempDir.resolve("rest-pagination-loop-limit.hpl");
+    store.save(hpl, pipeline);
+
+    var loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    String id = "rest-pagination-loop-limit-doc";
+    documents.put(new PipelineDocument(id, hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read(id, new PipelineConfigResource.ReadRequest(node));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertTrue(initial.config().at("/paginationEnabled").isBoolean());
+    assertTrue(initial.config().at("/maxPagesLoops").isIntegralNumber());
+
+    // The disabled setting remains editable data, rather than being deleted.
+    var disabled = ((com.fasterxml.jackson.databind.node.ObjectNode) initial.config()).deepCopy();
+    disabled.put("paginationEnabled", false);
+    disabled.put("maxPagesLoops", 17);
+    assertEquals(200, resource.write(id,
+        new PipelineConfigResource.WriteRequest(node, disabled)).getStatus());
+    store.save(hpl, loaded);
+    var firstReopen = store.open(hpl);
+    var firstWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        firstReopen.findTransform(node).getTransform(), provider);
+    assertFalse(firstWire.at("/paginationEnabled").booleanValue());
+    assertEquals(17, firstWire.at("/maxPagesLoops").intValue());
+
+    documents.put(new PipelineDocument(id, hpl, firstReopen));
+    var active = ((com.fasterxml.jackson.databind.node.ObjectNode) firstWire).deepCopy();
+    active.put("paginationEnabled", true);
+    active.put("maxPagesLoops", 29);
+    assertEquals(200, resource.write(id,
+        new PipelineConfigResource.WriteRequest(node, active)).getStatus());
+    store.save(hpl, firstReopen);
+    var secondReopen = store.open(hpl);
+    var secondWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        secondReopen.findTransform(node).getTransform(), provider);
+    assertTrue(secondWire.at("/paginationEnabled").booleanValue());
+    assertEquals(29, secondWire.at("/maxPagesLoops").intValue());
+    assertEquals(29, ((Number) secondReopen.findTransform(node).getTransform().getClass()
+        .getMethod("getMaxPagesLoops").invoke(secondReopen.findTransform(node).getTransform()))
+        .intValue());
+
+    // Turning pagination off must not silently reset the previously chosen limit.
+    documents.put(new PipelineDocument(id, hpl, secondReopen));
+    var offAgain = ((com.fasterxml.jackson.databind.node.ObjectNode) secondWire).deepCopy();
+    offAgain.put("paginationEnabled", false);
+    assertEquals(200, resource.write(id,
+        new PipelineConfigResource.WriteRequest(node, offAgain)).getStatus());
+    store.save(hpl, secondReopen);
+    var finalWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        store.open(hpl).findTransform(node).getTransform(), provider);
+    assertFalse(finalWire.at("/paginationEnabled").booleanValue());
+    assertEquals(29, finalWire.at("/maxPagesLoops").intValue());
+    // A true flag only exposes the setting; actual paging still needs a paging REST connection.
+    System.out.println("PROD_P0_REST_PAGINATION_LOOP_LIMIT_ACTIVATION_HPL=PASS");
+  }
+
   private static Descriptor descriptorFor(PluginRegistry registry, String id) throws Exception {
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, id);
     assertNotNull(plugin, "missing production plugin " + id);
