@@ -543,6 +543,15 @@ public final class AutomaticConfigDescriptor {
       // Native execution additionally requires a REST connection with a paging strategy.
       if (key.equals("maxPagesLoops") && shape == Shape.NUMBER)
         return new ActivationContext("/paginationEnabled", true);
+      // Native REST only consumes streamingFormat while streaming is enabled.
+      // SSE event/id column names are meaningful only for SSE framing; retain
+      // their values in the Hop JSON draft when switching to NDJSON or non-streaming.
+      if (key.equals("streamingFormat") && shape == Shape.ENUM)
+        return new ActivationContext("/streamingEnabled", true);
+      if ((key.equals("streamingEventNameField") || key.equals("streamingEventIdField"))
+          && shape == Shape.STRING)
+        return new ActivationContext("/streamingEnabled", true, List.of(),
+            List.of(new ActivationValueCondition("/streamingFormat", "SSE")));
     }
     return null;
   }
@@ -1577,18 +1586,28 @@ public final class AutomaticConfigDescriptor {
   public enum FieldSourceStage { AFTER_SELECT, AFTER_REMOVE }
   /** A second or later flag in a compound activation; all conditions must match. */
   public record ActivationCondition(String flagPointer, boolean activeWhen) {}
+  /** Match a native ENUM wire value, not its human-readable label or Java field name. */
+  public record ActivationValueCondition(String valuePointer, String equalsValue) {}
   /**
    * Conditional editor activation, without deleting inactive native configuration.
-   * The primary flag and every additional condition are conjunctive (logical AND).
-   * Empty additionalConditions retains the original single-flag contract.
+   * The primary flag, additional BOOLEAN flags, and native ENUM values are ANDed.
+   * Empty valueConditions is omitted from JSON to preserve the prior wire contract.
    */
   public record ActivationContext(
-      String flagPointer, boolean activeWhen, List<ActivationCondition> additionalConditions) {
+      String flagPointer, boolean activeWhen, List<ActivationCondition> additionalConditions,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+          com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+      List<ActivationValueCondition> valueConditions) {
     public ActivationContext(String flagPointer, boolean activeWhen) {
-      this(flagPointer, activeWhen, List.of());
+      this(flagPointer, activeWhen, List.of(), List.of());
+    }
+    public ActivationContext(String flagPointer, boolean activeWhen,
+        List<ActivationCondition> additionalConditions) {
+      this(flagPointer, activeWhen, additionalConditions, List.of());
     }
     public ActivationContext {
       additionalConditions = List.copyOf(additionalConditions);
+      valueConditions = List.copyOf(valueConditions);
     }
   }
   public enum SqlSourcePrecedence { FILE_WHEN_NONEMPTY }
