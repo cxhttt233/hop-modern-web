@@ -1720,7 +1720,7 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
-  void streamLookupMainInputKeyHasPickerButInfoRowFieldsDoNot() throws Exception {
+  void streamLookupMainAndInfoFieldsPublishDistinctSourceScopedPickers() throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
     IPlugin plugin = registry.findPluginWithId(TransformPluginType.class, "StreamLookup");
     assertNotNull(plugin, "production StreamLookup plugin missing");
@@ -1751,18 +1751,26 @@ class TransformP0L2RoundTripTest {
     Property alias = property(descriptor, "lookup", "value", "rename");
     assertEquals(Shape.STRING, main.shape());
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, main.widgetHint());
-    // Info-row fields are not drawn from the main input stream. A main-stream
-    // picker here would offer incorrect columns for the selected lookup source.
-    for (Property other : List.of(info, returned, alias)) {
+    // The lookup key and return value must resolve from the INFO source named
+    // at /from, never from the main incoming row. Rename remains free text.
+    assertNull(main.sourceTransformPointer());
+    for (Property other : List.of(info, returned)) {
       assertEquals(Shape.STRING, other.shape());
-      assertEquals(WidgetHint.NONE, other.widgetHint(), other.key());
+      assertEquals(WidgetHint.INFO_STREAM_FIELD_PICKER, other.widgetHint(), other.key());
+      assertEquals("/from", other.sourceTransformPointer());
     }
+    assertEquals(Shape.STRING, alias.shape());
+    assertEquals(WidgetHint.NONE, alias.widgetHint());
+    assertNull(alias.sourceTransformPointer());
 
     var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
     assertEquals("UPSTREAM_FIELD_PICKER",
         mapper.valueToTree(main).path("widgetHint").asText());
-    assertEquals("NONE", mapper.valueToTree(info).path("widgetHint").asText());
-    assertEquals("NONE", mapper.valueToTree(returned).path("widgetHint").asText());
+    for (Property other : List.of(info, returned)) {
+      var json = mapper.valueToTree(other);
+      assertEquals("INFO_STREAM_FIELD_PICKER", json.path("widgetHint").asText());
+      assertEquals("/from", json.path("sourceTransformPointer").asText());
+    }
     assertTrue(mapper.valueToTree(main).path("pickerContext").isNull());
     System.out.println("PROD_P0_STREAMLOOKUP_MAIN_VS_INFO_FIELD_PICKER=PASS");
   }
@@ -2160,8 +2168,14 @@ class TransformP0L2RoundTripTest {
     assertEquals(Shape.OBJECT, property(descriptor, "lookup").shape());
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER,
         property(descriptor, "lookup", "key", "name").widgetHint());
-    assertEquals(WidgetHint.NONE,
+    assertEquals(WidgetHint.INFO_STREAM_FIELD_PICKER,
         property(descriptor, "lookup", "key", "field").widgetHint());
+    assertEquals("/from",
+        property(descriptor, "lookup", "key", "field").sourceTransformPointer());
+    assertEquals(WidgetHint.INFO_STREAM_FIELD_PICKER,
+        property(descriptor, "lookup", "value", "name").widgetHint());
+    assertEquals("/from",
+        property(descriptor, "lookup", "value", "name").sourceTransformPointer());
     assertEquals("INFO_STREAM_TRANSFORM_PICKER",
         new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(source)
             .path("widgetHint").asText());
@@ -2174,6 +2188,24 @@ class TransformP0L2RoundTripTest {
     ITransformMeta gridMeta = plugins.loadClass(gridPlugin, ITransformMeta.class);
     lookupMeta.setDefault();
     gridMeta.setDefault();
+    // Construct genuine pinned Hop nested metadata before the first HPL save.
+    // Editing these serialized fields then tests the exact lookup-side wire lists.
+    ClassLoader loader = lookupMeta.getClass().getClassLoader();
+    Class<?> matchType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$MatchKey");
+    Object match = matchType.getConstructor().newInstance();
+    matchType.getMethod("setKeyStream", String.class).invoke(match, "原主键");
+    matchType.getMethod("setKeyLookup", String.class).invoke(match, "原查找键");
+    Class<?> returnType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta$ReturnValue");
+    Object returned = returnType.getConstructor().newInstance();
+    returnType.getMethod("setValue", String.class).invoke(returned, "原返回值");
+    returnType.getMethod("setValueName", String.class).invoke(returned, "原别名");
+    Object nativeLookup = lookupMeta.getClass().getMethod("getLookup").invoke(lookupMeta);
+    nativeLookup.getClass().getMethod("setMatchKeys", List.class)
+        .invoke(nativeLookup, List.of(match));
+    nativeLookup.getClass().getMethod("setReturnValues", List.class)
+        .invoke(nativeLookup, List.of(returned));
     String sourceName = "查找源<&>雪";
     var pipeline = new org.apache.hop.pipeline.PipelineMeta();
     pipeline.setName("streamlookup-info-source");
@@ -2197,10 +2229,22 @@ class TransformP0L2RoundTripTest {
     var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
     assertEquals(WidgetHint.INFO_STREAM_TRANSFORM_PICKER,
         property(initial.descriptor(), "from").widgetHint());
+    for (Property field : List.of(
+        property(initial.descriptor(), "lookup", "key", "field"),
+        property(initial.descriptor(), "lookup", "value", "name"))) {
+      assertEquals(WidgetHint.INFO_STREAM_FIELD_PICKER, field.widgetHint());
+      assertEquals("/from", field.sourceTransformPointer());
+    }
     var changed = ((com.fasterxml.jackson.databind.node.ObjectNode)
         initial.config()).deepCopy();
+    assertEquals("原查找键", changed.at("/lookup/key/0/field").asText());
+    assertEquals("原返回值", changed.at("/lookup/value/0/name").asText());
     changed.put("from", sourceName);
     changed.put("input_sorted", true);
+    ((com.fasterxml.jackson.databind.node.ObjectNode) changed.at("/lookup/key/0"))
+        .put("name", "主流编号").put("field", "关联编号<&>雪");
+    ((com.fasterxml.jackson.databind.node.ObjectNode) changed.at("/lookup/value/0"))
+        .put("name", "站点名称<&>雪").put("rename", "站点显示名");
     var write = resource.write("stream-info-doc",
         new PipelineConfigResource.WriteRequest("lookup-node", changed));
     assertEquals(200, write.getStatus());
@@ -2215,6 +2259,12 @@ class TransformP0L2RoundTripTest {
     assertTrue(wire.at("/input_sorted").isBoolean());
     assertTrue(wire.at("/input_sorted").booleanValue());
     assertTrue(wire.at("/lookup").isObject());
+    assertEquals("主流编号", wire.at("/lookup/key/0/name").asText());
+    assertEquals("关联编号<&>雪", wire.at("/lookup/key/0/field").asText());
+    assertEquals("站点名称<&>雪", wire.at("/lookup/value/0/name").asText());
+    assertEquals("站点显示名", wire.at("/lookup/value/0/rename").asText());
+    assertEquals(1, wire.at("/lookup/key").size());
+    assertEquals(1, wire.at("/lookup/value").size());
     var nativeMeta = saved.getTransform();
     nativeMeta.searchInfoAndTargetTransforms(reopened.getTransforms());
     var info = nativeMeta.getTransformIOMeta().getInfoStreams().get(0);
