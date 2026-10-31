@@ -7725,5 +7725,104 @@ class TransformP0L2RoundTripTest {
       collectProperties(p.elementProperties(), output);
     }
   }
+
+  @Test
+  void tableOutputModeDependentEditorFieldsRetainInactiveNativeValuesAfterHplReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin is required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+
+    // All paths are native root JSON pointers, not layout group names.
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/tablename_in_field", false),
+        property(descriptor, "table").activationContext());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/tablename_in_field", true),
+        property(descriptor, "tablename_field").activationContext());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/specify_fields", true),
+        property(descriptor, "field").activationContext());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/return_keys", true),
+        property(descriptor, "return_field").activationContext());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/partitioning_enabled", true),
+        property(descriptor, "partitioning_field").activationContext());
+    assertNull(property(descriptor, "connection").activationContext());
+    assertEquals("/fields/field", descriptor.wireLists().stream()
+        .filter(c -> c.descriptorPath().equals("field")).findFirst().orElseThrow().listPointer());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper()
+        .valueToTree(property(descriptor, "field"));
+    assertEquals("/specify_fields", published.at("/activationContext/flagPointer").asText());
+    assertTrue(published.at("/activationContext/activeWhen").booleanValue());
+
+    original.getClass().getMethod("setTableName", String.class)
+        .invoke(original, "静态表<&雪>");
+    original.getClass().getMethod("setTableNameInField", boolean.class)
+        .invoke(original, true);
+    original.getClass().getMethod("setTableNameField", String.class)
+        .invoke(original, "每行表名<&雪>");
+    original.getClass().getMethod("setSpecifyFields", boolean.class)
+        .invoke(original, false);
+    original.getClass().getMethod("setReturningGeneratedKeys", boolean.class)
+        .invoke(original, true);
+    original.getClass().getMethod("setGeneratedKeyField", String.class)
+        .invoke(original, "生成主键<&雪>");
+    original.getClass().getMethod("setPartitioningEnabled", boolean.class)
+        .invoke(original, true);
+    original.getClass().getMethod("setPartitioningField", String.class)
+        .invoke(original, "分区日期<&雪>");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("table-output-conditional-fields.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("table-output-conditional-fields");
+    String node = "table-output-条件<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", node, original));
+    store.save(hpl, pipeline);
+
+    for (boolean dynamic : List.of(true, false)) {
+      var reopened = store.open(hpl);
+      var nativeMeta = reopened.findTransform(node).getTransform();
+      if (!dynamic) {
+        // Simulate switching editor modes without clearing inactive configuration.
+        nativeMeta.getClass().getMethod("setTableNameInField", boolean.class)
+            .invoke(nativeMeta, false);
+        nativeMeta.getClass().getMethod("setSpecifyFields", boolean.class)
+            .invoke(nativeMeta, true);
+        nativeMeta.getClass().getMethod("setReturningGeneratedKeys", boolean.class)
+            .invoke(nativeMeta, false);
+        nativeMeta.getClass().getMethod("setPartitioningEnabled", boolean.class)
+            .invoke(nativeMeta, false);
+        store.save(hpl, reopened);
+        reopened = store.open(hpl);
+      }
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("table-output-conditional-doc", hpl, reopened));
+      var resource = new PipelineConfigResource(documents, provider);
+      var response = resource.read("table-output-conditional-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, response.getStatus());
+      var config = ((PipelineConfigResource.ConfigResponse) response.getEntity()).config();
+      assertEquals(dynamic, config.at("/tablename_in_field").booleanValue());
+      assertEquals(!dynamic, config.at("/specify_fields").booleanValue());
+      assertEquals(dynamic, config.at("/return_keys").booleanValue());
+      assertEquals(dynamic, config.at("/partitioning_enabled").booleanValue());
+      assertEquals("静态表<&雪>", config.at("/table").asText());
+      assertEquals("每行表名<&雪>", config.at("/tablename_field").asText());
+      assertEquals("生成主键<&雪>", config.at("/return_field").asText());
+      assertEquals("分区日期<&雪>", config.at("/partitioning_field").asText());
+      assertEquals(descriptor, ((PipelineConfigResource.ConfigResponse) response.getEntity())
+          .descriptor());
+    }
+
+    // This tests the native HPL/HTTP-read producer contract, not the known
+    // connection-less TableOutput HTTP config/write 422 path or a live DB insert.
+    System.out.println("PROD_P0_TABLEOUTPUT_MODE_ACTIVATION_NATIVE_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 }
