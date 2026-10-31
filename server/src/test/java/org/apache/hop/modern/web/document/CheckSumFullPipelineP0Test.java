@@ -49,6 +49,35 @@ class CheckSumFullPipelineP0Test {
   }
 
   @Test
+  void checkSumProducerPublishesCanonicalIndexedNativeFieldList() throws Exception {
+    IPlugin plugin = PluginRegistry.getInstance()
+        .findPluginWithId(TransformPluginType.class, "CheckSum");
+    assertNotNull(plugin, "pinned CheckSum plugin required");
+    ITransformMeta nativeMeta = PluginRegistry.getInstance()
+        .loadClass(plugin, ITransformMeta.class);
+    var descriptor = AutomaticConfigDescriptor.describe(nativeMeta.getClass());
+    assertEquals(1, descriptor.wireLists().size());
+    var list = descriptor.wireLists().get(0);
+    assertEquals("field", list.descriptorPath());
+    assertEquals("/fields/field", list.listPointer());
+    assertEquals("/fields/field/{index}", list.itemPointerTemplate());
+    assertEquals("/fields/field/0", list.itemPointer(0));
+    assertEquals("/fields/field/1", list.itemPointer(1));
+    var property = descriptor.properties().stream()
+        .filter(p -> p.key().equals("field") && p.groupKey().equals("fields"))
+        .findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.Shape.LIST, property.shape());
+    assertEquals("fields", property.groupKey());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper()
+        .valueToTree(descriptor);
+    assertEquals("/fields/field",
+        published.at("/wireLists/0/listPointer").asText());
+    assertEquals("/fields/field/{index}",
+        published.at("/wireLists/0/itemPointerTemplate").asText());
+    System.out.println("PROD_P0_CHECKSUM_CANONICAL_INDEXED_FIELD_POINTERS=PASS");
+  }
+
+  @Test
   void checkSumOrderedFieldsAndBinarySha256ExecuteFullPipelineAfterHplReopen(
       @TempDir Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
@@ -132,6 +161,13 @@ class CheckSumFullPipelineP0Test {
     assertEquals("摘要<&>值", wire.at("/resultfieldName").asText());
     assertEquals("河流<&>甲", wire.at("/fields/field/0/name").asText());
     assertEquals("工程_乙", wire.at("/fields/field/1/name").asText());
+    // The descriptor's producer-owned path must address the real Hop JSON
+    // emitted after the XML -> config/write -> XML disk-reopen cycle.
+    var listContract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("checksum-node").getTransform().getClass())
+        .wireLists().get(0);
+    assertEquals("河流<&>甲", wire.at(listContract.itemPointer(0) + "/name").asText());
+    assertEquals("工程_乙", wire.at(listContract.itemPointer(1) + "/name").asText());
     assertEquals("|", wire.at("/separator").asText());
     assertEquals("前缀：", wire.at("/prefix").asText());
     assertEquals("<尾>", wire.at("/suffix").asText());
