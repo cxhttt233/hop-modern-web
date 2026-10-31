@@ -7891,5 +7891,102 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEOUTPUT_MODE_ACTIVATION_NATIVE_HPL=PASS");
   }
 
+
+  @Test
+  void tableInputDeclaredOutputFieldsAndValidationActivateTogetherWithoutDroppingInactiveHplValues(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableInput");
+    assertNotNull(plugin, "production TableInput plugin is required");
+    var meta = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+        plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+    meta.setSpecifyFields(true);
+    meta.setValidateSpecifiedFields(true);
+
+    var station = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    station.setName("测站<&雪>");
+    station.setType(org.apache.hop.core.row.IValueMeta.TYPE_STRING);
+    station.setLength(48);
+    var level = new org.apache.hop.pipeline.transforms.tableinput.TableInputField();
+    level.setName("水位");
+    level.setType(org.apache.hop.core.row.IValueMeta.TYPE_NUMBER);
+    level.setLength(18);
+    level.setPrecision(3);
+    meta.setFields(List.of(station, level));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    var activation = new AutomaticConfigDescriptor.ActivationContext("/specify_fields", true);
+    assertEquals(activation, property(descriptor, "field").activationContext());
+    assertEquals(activation,
+        property(descriptor, "validate_specified_fields").activationContext());
+    assertNull(property(descriptor, "specify_fields").activationContext());
+    assertNull(property(descriptor, "sql").activationContext());
+    assertEquals(Shape.LIST, property(descriptor, "field").shape());
+    assertEquals("/fields/field", descriptor.wireLists().get(0).listPointer());
+    assertEquals("/specify_fields",
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .valueToTree(property(descriptor, "field"))
+            .at("/activationContext/flagPointer").asText());
+    assertTrue(new com.fasterxml.jackson.databind.ObjectMapper()
+        .valueToTree(property(descriptor, "validate_specified_fields"))
+        .at("/activationContext/activeWhen").booleanValue());
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var hpl = tempDir.resolve("tableinput-declared-output-activation.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("tableinput-declared-output-activation");
+    String node = "table-input-字段<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableInput", node, meta));
+    store.save(hpl, pipeline);
+
+    // An inactive validation flag and declared fields are still native metadata.
+    // Turning off the mode must not delete either value from the HPL on disk.
+    for (boolean explicit : List.of(false, true)) {
+      var loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("tableinput-activation-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("tableinput-activation-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var original = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, original.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          original.config()).deepCopy();
+      edited.put("specify_fields", explicit);
+      edited.put("validate_specified_fields", !explicit);
+      if (explicit) {
+        ((com.fasterxml.jackson.databind.node.ObjectNode)
+            edited.at("/fields/field/1")).put("name", "水位_更新<&雪>");
+      }
+      var write = resource.write("tableinput-activation-doc",
+          new PipelineConfigResource.WriteRequest(node, edited));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      var diskMeta = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+          store.open(hpl).findTransform(node).getTransform();
+      var disk = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertEquals(explicit, disk.at("/specify_fields").booleanValue());
+      assertEquals(!explicit, disk.at("/validate_specified_fields").booleanValue());
+      assertEquals(2, disk.at("/fields/field").size());
+      assertEquals("测站<&雪>", disk.at("/fields/field/0/name").asText());
+      assertEquals(explicit ? "水位_更新<&雪>" : "水位",
+          disk.at("/fields/field/1/name").asText());
+      assertTrue(disk.at("/fields/field/1/precision").isNumber());
+      assertEquals(3, disk.at("/fields/field/1/precision").intValue());
+      var nativeOutput = diskMeta.createSpecifiedRowMeta(node, null);
+      assertEquals(2, nativeOutput.size());
+      assertEquals(explicit ? "水位_更新<&雪>" : "水位",
+          nativeOutput.getValueMeta(1).getName());
+    }
+    System.out.println("PROD_P0_TABLEINPUT_OUTPUT_FIELDS_ACTIVATION_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 }
