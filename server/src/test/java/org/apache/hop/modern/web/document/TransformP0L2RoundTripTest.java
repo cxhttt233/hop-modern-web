@@ -3067,6 +3067,113 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void selectValuesPostSelectAndPostRemovePickerStagesSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(plugin, "production SelectValues plugin missing");
+    var meta = (org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta)
+        plugins.loadClass(plugin, ITransformMeta.class);
+    meta.setDefault();
+
+    var first = new org.apache.hop.pipeline.transforms.selectvalues.SelectField();
+    first.setName("输入甲");
+    first.setRename("阶段甲");
+    var second = new org.apache.hop.pipeline.transforms.selectvalues.SelectField();
+    second.setName("输入乙");
+    second.setRename("阶段乙");
+    meta.getSelectOption().setSelectFields(List.of(first, second));
+    var remove = new org.apache.hop.pipeline.transforms.selectvalues.DeleteField();
+    remove.setName("阶段乙");
+    meta.getSelectOption().setDeleteName(List.of(remove));
+    var change = new org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange();
+    change.setName("阶段甲");
+    change.setRename("最终甲");
+    change.setStorageType(null);
+    meta.getSelectOption().setMeta(List.of(change));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+    Property inputName = property(descriptor, "fields", "field", "name");
+    Property removeName = property(descriptor, "fields", "remove", "name");
+    Property metaName = property(descriptor, "fields", "meta", "name");
+    assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, inputName.widgetHint());
+    assertNull(inputName.fieldSourceStage());
+    assertEquals(WidgetHint.STAGED_FIELD_PICKER, removeName.widgetHint());
+    assertEquals(AutomaticConfigDescriptor.FieldSourceStage.AFTER_SELECT,
+        removeName.fieldSourceStage());
+    assertEquals(WidgetHint.STAGED_FIELD_PICKER, metaName.widgetHint());
+    assertEquals(AutomaticConfigDescriptor.FieldSourceStage.AFTER_REMOVE,
+        metaName.fieldSourceStage());
+    assertEquals(List.of("/fields/field", "/fields/remove", "/fields/meta"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    assertEquals("AFTER_SELECT", published.at(
+        "/properties/0/children/2/elementProperties/0/fieldSourceStage").asText());
+    assertEquals("AFTER_REMOVE", published.at(
+        "/properties/0/children/3/elementProperties/0/fieldSourceStage").asText());
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    java.nio.file.Path hpl = tempDir.resolve("selectvalues-staged-picker.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("selectvalues-staged-picker");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "SelectValues", "select-node", meta));
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-stage-doc", hpl, loaded));
+    PipelineConfigResource resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read(
+        "select-stage-doc", new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    var original = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    var edited = ((com.fasterxml.jackson.databind.node.ObjectNode) original.config()).deepCopy();
+    assertEquals("输入甲", edited.at("/fields/field/0/name").asText());
+    assertEquals("阶段乙", edited.at("/fields/remove/0/name").asText());
+    assertEquals("阶段甲", edited.at("/fields/meta/0/name").asText());
+    ((com.fasterxml.jackson.databind.node.ObjectNode) edited.at("/fields/field/0"))
+        .put("rename", "阶段<&>甲");
+    ((com.fasterxml.jackson.databind.node.ObjectNode) edited.at("/fields/meta/0"))
+        .put("name", "阶段<&>甲")
+        .put("rename", "最终<&>甲");
+    var write = resource.write(
+        "select-stage-doc", new PipelineConfigResource.WriteRequest("select-node", edited));
+    assertEquals(200, write.getStatus(), "native SelectValues JSON edit must succeed");
+    store.save(hpl, loaded);
+
+    var reopened = store.open(hpl);
+    var diskTransform = reopened.findTransform("select-node");
+    assertNotNull(diskTransform);
+    var diskMeta = (org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta)
+        diskTransform.getTransform();
+    var disk = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        diskMeta, provider);
+    assertEquals(2, disk.at("/fields/field").size());
+    assertEquals("输入甲", disk.at("/fields/field/0/name").asText());
+    assertEquals("阶段<&>甲", disk.at("/fields/field/0/rename").asText());
+    assertEquals("输入乙", disk.at("/fields/field/1/name").asText());
+    assertEquals("阶段乙", disk.at("/fields/remove/0/name").asText());
+    assertEquals("阶段<&>甲", disk.at("/fields/meta/0/name").asText());
+    assertEquals("最终<&>甲", disk.at("/fields/meta/0/rename").asText());
+
+    org.apache.hop.core.row.IRowMeta row = new org.apache.hop.core.row.RowMeta();
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入甲"));
+    row.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("输入乙"));
+    diskMeta.getSelectFields(row, "SelectValues");
+    assertEquals(List.of("阶段<&>甲", "阶段乙"), row.getValueMetaList().stream()
+        .map(org.apache.hop.core.row.IValueMeta::getName).toList());
+    diskMeta.getDeleteFields(row);
+    assertEquals(1, row.size());
+    assertEquals("阶段<&>甲", row.getValueMeta(0).getName());
+    diskMeta.getMetadataFields(row, "SelectValues", null);
+    assertEquals("最终<&>甲", row.getValueMeta(0).getName());
+    System.out.println("PROD_P0_SELECTVALUES_STAGED_FIELD_PICKERS_HPL=PASS");
+  }
+
+  @Test
   void selectValuesStageSpecificFieldResolutionMatchesRealPluginAndCanonicalPaths()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
