@@ -487,6 +487,10 @@ public final class AutomaticConfigDescriptor {
         return new ActivationContext("/dynamicMethod", false);
       if (key.equals("methodFieldName") && shape == Shape.STRING)
         return new ActivationContext("/dynamicMethod", true);
+      // The loop safeguard is meaningful only when paging is requested.
+      // Native execution additionally requires a REST connection with a paging strategy.
+      if (key.equals("maxPagesLoops") && shape == Shape.NUMBER)
+        return new ActivationContext("/paginationEnabled", true);
     }
     return null;
   }
