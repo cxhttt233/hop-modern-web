@@ -769,6 +769,19 @@ public final class AutomaticConfigDescriptor {
                       + "reopen; this is a native runtime compatibility diagnostic, "
                       + "not a save-time validator."),
               new RuntimePrecondition(
+                  "REST_POST_302_VS_307_REDIRECT_METHOD_SEMANTICS",
+                  List.of("/url", "/method", "/bodyField", "/result/name", "/result/code"),
+                  "With native REST POST and HttpClient5 default redirects, a same-origin "
+                      + "relative 302 response is followed using GET, without replaying the "
+                      + "POST request body; a 307 redirect preserves the POST method and "
+                      + "its request entity. The REST result body and status describe the "
+                      + "final response, not the intermediate redirect. This distinction "
+                      + "matters for write endpoints: neither a 302 nor a 307 proves that "
+                      + "the original POST was not processed. Preserve the POST method, "
+                      + "body-field configuration and output names through JSON edits and "
+                      + "HPL disk reopen. Diagnose redirect behavior; do not change native "
+                      + "HTTP handling or reject draft saves."),
+              new RuntimePrecondition(
                   "REST_NONSTREAMING_204_AND_HTTP_ERRORS_EMIT_TYPED_RESULT_ROWS",
                   List.of("/url", "/method", "/streamingEnabled", "/result/name",
                       "/result/code", "/result/response_header", "/result/binary",
