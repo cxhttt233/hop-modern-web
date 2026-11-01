@@ -743,6 +743,19 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" ->
           List.of(
               new RuntimePrecondition(
+                  "HTTP_IGNORE_SSL_DISABLES_CERTIFICATE_AND_HOSTNAME_CHECKS",
+                  List.of("/ignoreSsl", "/url", "/urlInField", "/urlField"),
+                  "When ignoreSsl=true, native Http.createClientBuilder() calls "
+                      + "HttpClientManager.HttpClientBuilderFacade.ignoreSsl(true). "
+                      + "That builder installs an accepting TLS trust strategy and "
+                      + "NoopHostnameVerifier, disabling server certificate trust and "
+                      + "hostname checks for HTTPS requests. The option also applies "
+                      + "when urlInField selects a per-row destination; a saved true "
+                      + "value can expose later endpoints when reused. Preserve the "
+                      + "BOOLEAN in native JSON/HPL but flag this security risk before "
+                      + "execution. This is a runtime diagnostic, not a draft-save "
+                      + "validator; no network connection is made by the editor."),
+              new RuntimePrecondition(
                   "HTTP_DYNAMIC_URL_NATIVE_CHECK_FALSE_POSITIVE",
                   List.of("/urlInField", "/urlField", "/url"),
                   "When urlInField is true, urlField must be non-empty and resolve to an incoming row field. Native HttpMeta.check() reports ERROR with UrlfieldOk even when the URL field name is present; this is a native-check false positive, not grounds to reject an otherwise valid dynamic URL configuration. At runtime Http.firstProcessRow resolves the URL field index once, and Http.constructUrlBuilder reads the URL from each incoming row, overriding the configured literal url. Different rows can therefore call different endpoints; the URL field must exist in upstream row metadata. When urlInField is false, url must be non-empty and the configured URL is used."),
