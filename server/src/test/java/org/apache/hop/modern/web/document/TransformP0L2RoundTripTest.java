@@ -9385,6 +9385,122 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_SORTROWS_SPILL_THRESHOLD_NATIVE_INIT_HPL=PASS");
   }
 
+
+  @Test
+  void execSqlFilePathResolutionAndSqlBodyVariableFlagSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "ExecSql");
+    assertNotNull(plugin, "production ExecSql plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    assertEquals(Shape.STRING, property(descriptor, "sql").shape());
+    assertEquals(Shape.STRING, property(descriptor, "sql_from_file").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "replace_variables").shape());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "EXEC_SQL_FILE_PATH_ALWAYS_RESOLVES_SQL_BODY_VARIABLES_REQUIRE_FLAG"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/sql", "/sql_from_file", "/replace_variables",
+        "/execute_each_row"), diagnostic.keyListPointers());
+    assertTrue(diagnostic.explanation().contains("UTF-8"));
+    assertTrue(diagnostic.explanation().contains("ExecSql.init()"));
+
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("EXEC_SQL_SQL_DIR", tempDir.toString());
+    variables.setVariable("EXEC_SQL_STATION", "YELLOW_2026");
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("exec-sql-source-variables.hpl");
+    String node = "执行SQL<&雪>";
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("exec-sql-source-variables");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "ExecSql", node, original));
+    store.save(hpl, pipeline);
+
+    String inlineSql = "select '${EXEC_SQL_STATION}' as station, '雪<&>' as label";
+    String fileSql = "select '${EXEC_SQL_STATION}' as file_station, '河<&>' as label";
+    var sqlFile = tempDir.resolve("query-雪&.sql");
+    java.nio.file.Files.writeString(sqlFile, fileSql, StandardCharsets.UTF_8);
+    String filePathExpression = "${EXEC_SQL_SQL_DIR}/query-雪&.sql";
+    String[] sourcePaths = {"", "", filePathExpression, filePathExpression};
+    boolean[] replacementFlags = {false, true, false, true};
+
+    for (int i = 0; i < sourcePaths.length; i++) {
+      var loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("exec-sql-source-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("exec-sql-source-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, current.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          current.config()).deepCopy();
+      edited.put("sql", inlineSql);
+      edited.put("sql_from_file", sourcePaths[i]);
+      edited.put("replace_variables", replacementFlags[i]);
+      assertEquals(200, resource.write("exec-sql-source-doc",
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, loaded);
+
+      var reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform(node).getTransform();
+      var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertEquals(inlineSql, diskWire.at("/sql").asText(),
+          "inactive inline SQL must be retained in file mode");
+      assertTrue(diskWire.at("/replace_variables").isBoolean());
+      assertEquals(replacementFlags[i],
+          diskWire.at("/replace_variables").booleanValue());
+      if (sourcePaths[i].isEmpty()) {
+        assertTrue(diskWire.at("/sql_from_file").isMissingNode()
+            || diskWire.at("/sql_from_file").isNull()
+            || diskWire.at("/sql_from_file").asText().isEmpty());
+      } else {
+        assertEquals(filePathExpression, diskWire.at("/sql_from_file").asText());
+      }
+
+      String effective = (String) diskMeta.getClass()
+          .getMethod("getEffectiveSql", org.apache.hop.core.variables.IVariables.class)
+          .invoke(diskMeta, variables);
+      String expected = sourcePaths[i].isEmpty() ? inlineSql : fileSql;
+      assertEquals(expected, effective,
+          "native getEffectiveSql must choose source but not expand SQL text");
+      assertTrue(effective.contains("${EXEC_SQL_STATION}"));
+      assertEquals(expected.replace("${EXEC_SQL_STATION}", "YELLOW_2026"),
+          variables.resolve(effective),
+          "the runtime SQL-text expansion is a separate opt-in init stage");
+    }
+
+    // A missing configured SQL file fails instead of falling back to inline SQL.
+    var loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("exec-sql-missing-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("exec-sql-missing-doc",
+        new PipelineConfigResource.ReadRequest(node));
+    assertEquals(200, read.getStatus());
+    var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    edited.put("sql_from_file", "${EXEC_SQL_SQL_DIR}/missing-雪.sql");
+    edited.put("replace_variables", true);
+    assertEquals(200, resource.write("exec-sql-missing-doc",
+        new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+    store.save(hpl, loaded);
+    ITransformMeta diskMeta = store.open(hpl).findTransform(node).getTransform();
+    var failure = assertThrows(java.lang.reflect.InvocationTargetException.class,
+        () -> diskMeta.getClass()
+            .getMethod("getEffectiveSql", org.apache.hop.core.variables.IVariables.class)
+            .invoke(diskMeta, variables));
+    assertTrue(failure.getCause() instanceof org.apache.hop.core.exception.HopException);
+    // No JDBC connection or SQL execution is performed.
+    System.out.println("PROD_P0_EXECSQL_SOURCE_VARIABLE_STAGES_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 
   @Test
