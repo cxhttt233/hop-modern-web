@@ -3096,6 +3096,7 @@ class TransformP0L2RoundTripTest {
             "GROUPBY_AGGREGATE_OUTPUT_TYPES_FOLLOW_OPERATION_AND_SUBJECT",
             "GROUPBY_EMPTY_INPUT_GIVE_BACK_ROW_EMITS_ZERO_COUNT",
             "GROUPBY_DISTINCT_ALL_ANY_NULL_COUNTS_DIFFER",
+            "GROUPBY_IGNORED_ROWS_STILL_DEFINE_GROUPS_AND_PASS_THROUGH",
             "GROUPBY_FIRST_LAST_NULL_INCLUSION_CHANGES_VALUES"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     var precondition = descriptor.runtimePreconditions().get(2);
