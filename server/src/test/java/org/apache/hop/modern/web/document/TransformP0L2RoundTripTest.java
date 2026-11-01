@@ -9525,4 +9525,91 @@ class TransformP0L2RoundTripTest {
     // No network request, credential disclosure or Hop Core modification.
     System.out.println("PROD_P0_REST_CONNECTION_TRANSPORT_PRECEDENCE_NATIVE_INIT_HPL=PASS");
   }
+  @Test
+  void execSqlLiteralQuestionMarkRiskContractSurvivesNativeHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "ExecSql");
+    assertNotNull(plugin, "production ExecSql plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    var warning = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "EXEC_SQL_LITERAL_MARKERS_SCAN_QUOTED_SQL_AND_REQUIRE_ARGUMENT_ARITY"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/execute_each_row", "/set_params", "/quoteString",
+        "/sql", "/sql_from_file", "/arguments/argument"), warning.keyListPointers());
+    assertTrue(warning.explanation().contains("quoted SQL text"));
+    assertTrue(warning.explanation().contains("JDBC parameter binding"));
+    assertEquals(Shape.BOOLEAN, property(descriptor, "execute_each_row").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "set_params").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "quoteString").shape());
+    assertEquals(Shape.STRING, property(descriptor, "sql").shape());
+    assertEquals(TextEditorHint.SQL, property(descriptor, "sql").textEditorHint());
+    assertEquals("/arguments/argument",
+        descriptor.wireLists().stream()
+            .filter(c -> c.descriptorPath().equals("argument"))
+            .findFirst().orElseThrow().listPointer());
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, variables);
+    java.nio.file.Path hpl = tempDir.resolve("execsql-literal-marker-risk.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("execsql-literal-marker-risk");
+    String node = "SQL问号<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "ExecSql", node, original));
+    store.save(hpl, pipeline);
+
+    // The pinned ExecSql.processRow() scans every '?' without SQL lexing.
+    // These are intentionally non-executed drafts: no database connection or
+    // statement is opened, and the editor must preserve risky SQL literally.
+    String[] sqls = {
+        "select '?' as literal, ? as value -- 站点<&雪>\\n",
+        "select ? as value -- '?' in comment\\n",
+        "select '?' as literal, ? as value",
+        "select ? as value"
+    };
+    boolean[] eachRow = {true, true, true, false};
+    boolean[] bind = {false, false, true, false};
+    boolean[] quote = {false, true, false, true};
+    for (int i = 0; i < sqls.length; i++) {
+      var opened = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("execsql-marker-doc", hpl, opened));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("execsql-marker-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, current.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          current.config()).deepCopy();
+      edited.put("sql", sqls[i]);
+      edited.put("execute_each_row", eachRow[i]);
+      edited.put("set_params", bind[i]);
+      edited.put("quoteString", quote[i]);
+      assertEquals(200, resource.write("execsql-marker-doc",
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, opened);
+
+      var reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform(node).getTransform();
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertEquals(sqls[i], wire.at("/sql").asText());
+      assertEquals(eachRow[i], wire.at("/execute_each_row").booleanValue());
+      assertEquals(bind[i], wire.at("/set_params").booleanValue());
+      assertEquals(quote[i], wire.at("/quoteString").booleanValue());
+      assertEquals(sqls[i], diskMeta.getClass().getMethod(
+          "getEffectiveSql", org.apache.hop.core.variables.IVariables.class)
+          .invoke(diskMeta, variables),
+          "native ExecSqlMeta must return unmodified inline SQL including quoted markers");
+    }
+    System.out.println("PROD_P0_EXECSQL_LITERAL_MARKER_RISK_HPL=PASS");
+  }
+
 }
