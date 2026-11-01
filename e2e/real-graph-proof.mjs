@@ -542,10 +542,10 @@ try {
   const mixedMoveResponse = await mixedMovePending;
   if (!mixedMoveResponse.ok()) throw new Error("Mixed Hop branch semantic move failed");
   const movedMixed = await mixedMoveResponse.json();
-  const movedSource = movedMixed.nodes?.find((node) => node.id === "source");
-  const originalSource = mixedGraph.nodes.find((node) => node.id === "source");
-  if (!movedSource || !originalSource ||
-      (movedSource.x === originalSource.x && movedSource.y === originalSource.y) ||
+  const movedMixedSource = movedMixed.nodes?.find((node) => node.id === "source");
+  const originalMixedSource = mixedGraph.nodes.find((node) => node.id === "source");
+  if (!movedMixedSource || !originalMixedSource ||
+      (movedMixedSource.x === originalMixedSource.x && movedMixedSource.y === originalMixedSource.y) ||
       !movedMixed.edges?.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
       !movedMixed.edges?.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
     throw new Error("Mixed Hop move changed link identity or enabled flags");
@@ -571,8 +571,8 @@ try {
   const mixedReopenResponse = await mixedReopenPending;
   if (!mixedReopenResponse.ok()) throw new Error("Mixed Hop disk reopen failed");
   const mixedReopened = await mixedReopenResponse.json();
-  const diskSource = mixedReopened.nodes?.find((node) => node.id === "source");
-  if (!diskSource || diskSource.x !== movedSource.x || diskSource.y !== movedSource.y ||
+  const diskMixedSource = mixedReopened.nodes?.find((node) => node.id === "source");
+  if (!diskMixedSource || diskMixedSource.x !== movedMixedSource.x || diskMixedSource.y !== movedMixedSource.y ||
       mixedReopened.edges?.length !== 2 ||
       !mixedReopened.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
       !mixedReopened.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
