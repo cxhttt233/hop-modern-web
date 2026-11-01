@@ -479,6 +479,115 @@ try {
   }, disabledEdge.id, { timeout: 8000 });
   console.log("Disabled-Hop edit/save proof passed: real semantic move -> native XML disk save -> reopen preserves disabled Hop and Chinese dashed link.");
 
+
+  // A real pipeline can contain both executable and disabled Hop links.
+  // Verify per-edge isolation: a disabled branch must not gray out an active
+  // sibling, and a semantic move/save/reopen must preserve both wire flags.
+  const nativeSink = enabledXml.match(/<transform><name>sink<\/name>[\s\S]*?<\/transform>/)?.[0];
+  if (!nativeSink) throw new Error("Native sink transform fixture not found");
+  const branchSink = nativeSink.replace("<name>sink</name>", "<name>旁路输出</name>")
+    .replace("<yloc>160</yloc>", "<yloc>320</yloc>");
+  if (branchSink === nativeSink || !branchSink.includes("<name>旁路输出</name>")) {
+    throw new Error("Could not construct second native Hop transform");
+  }
+  const mixedXml = enabledXml
+    .replace("</order>", "<hop><from>source</from><to>旁路输出</to><enabled>N</enabled></hop></order>")
+    .replace("<transform_error_handling/>", branchSink + "<transform_error_handling/>");
+  if (mixedXml === enabledXml || !mixedXml.includes(branchSink)) {
+    throw new Error("Could not construct mixed enabled/disabled native Hop fixture");
+  }
+  const mixedPath = join(unicodeDirectory, "双分支 Hop 状态.hpl");
+  await writeFile(mixedPath, mixedXml);
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(mixedPath);
+  const mixedOpenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const mixedOpenResponse = await mixedOpenPending;
+  if (!mixedOpenResponse.ok()) throw new Error("Mixed native Hop pipeline open failed");
+  const mixedGraph = await mixedOpenResponse.json();
+  const activeLink = mixedGraph.edges?.find((edge) => edge.source === "source" && edge.target === "sink");
+  const inactiveLink = mixedGraph.edges?.find((edge) => edge.source === "source" && edge.target === "旁路输出");
+  if (mixedGraph.nodes?.length !== 3 || mixedGraph.edges?.length !== 2 ||
+      !activeLink || activeLink.enabled === false || !inactiveLink || inactiveLink.enabled !== false) {
+    throw new Error("Authoritative graph lost independent enabled/disabled Hop semantics");
+  }
+  await page.waitForFunction(([activeId, inactiveId]) => {
+    const edges = [...document.querySelectorAll(".react-flow__edge")];
+    const active = edges.find((element) => element.getAttribute("data-id") === activeId);
+    const inactive = edges.find((element) => element.getAttribute("data-id") === inactiveId);
+    const activePath = active?.querySelector(".react-flow__edge-path");
+    const inactivePath = inactive?.querySelector(".react-flow__edge-path");
+    return Boolean(active && inactive && activePath && inactivePath &&
+      !active.classList.contains("hop-edge-disabled") &&
+      !active.textContent?.includes("已停用") &&
+      !getComputedStyle(activePath).strokeDasharray.includes("8") &&
+      inactive.classList.contains("hop-edge-disabled") &&
+      inactive.textContent?.includes("已停用") &&
+      getComputedStyle(inactivePath).strokeDasharray.includes("8"));
+  }, [activeLink.id, inactiveLink.id], { timeout: 8000 });
+
+  const branchNode = page.locator('.react-flow__node[data-id="旁路输出"]');
+  await branchNode.waitFor({ state: "visible" });
+  const branchIcon = await branchNode.locator(".transform-node-icon").boundingBox();
+  if (!branchIcon) throw new Error("Native branch transform is not draggable");
+  const mixedMovePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/move$").test(new URL(response.url()).pathname));
+  await page.mouse.move(branchIcon.x + branchIcon.width / 2, branchIcon.y + branchIcon.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(branchIcon.x + branchIcon.width / 2 + 40, branchIcon.y + branchIcon.height / 2 + 24, { steps: 12 });
+  await page.mouse.up();
+  const mixedMoveResponse = await mixedMovePending;
+  if (!mixedMoveResponse.ok()) throw new Error("Mixed Hop branch semantic move failed");
+  const movedMixed = await mixedMoveResponse.json();
+  const movedBranch = movedMixed.nodes?.find((node) => node.id === "旁路输出");
+  const originalBranch = mixedGraph.nodes.find((node) => node.id === "旁路输出");
+  if (!movedBranch || !originalBranch ||
+      (movedBranch.x === originalBranch.x && movedBranch.y === originalBranch.y) ||
+      !movedMixed.edges?.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
+      !movedMixed.edges?.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
+    throw new Error("Mixed Hop move changed link identity or enabled flags");
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const mixedSavePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/save$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+  const mixedSaveResponse = await mixedSavePending;
+  if (!mixedSaveResponse.ok()) throw new Error("Mixed Hop native disk save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const savedMixedXml = await readFile(mixedPath, "utf8");
+  if ((savedMixedXml.match(/<enabled>Y<\/enabled>/g) ?? []).length !== 1 ||
+      (savedMixedXml.match(/<enabled>N<\/enabled>/g) ?? []).length !== 1) {
+    throw new Error("Mixed native Hop XML lost independent Y/N flags on disk");
+  }
+  const mixedReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const mixedReopenResponse = await mixedReopenPending;
+  if (!mixedReopenResponse.ok()) throw new Error("Mixed Hop disk reopen failed");
+  const mixedReopened = await mixedReopenResponse.json();
+  const diskBranch = mixedReopened.nodes?.find((node) => node.id === "旁路输出");
+  if (!diskBranch || diskBranch.x !== movedBranch.x || diskBranch.y !== movedBranch.y ||
+      mixedReopened.edges?.length !== 2 ||
+      !mixedReopened.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
+      !mixedReopened.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
+    throw new Error("Mixed Hop disk reopen lost branch position or Y/N edge identity");
+  }
+  await page.waitForFunction(([activeId, inactiveId]) => {
+    const edges = [...document.querySelectorAll(".react-flow__edge")];
+    const active = edges.find((element) => element.getAttribute("data-id") === activeId);
+    const inactive = edges.find((element) => element.getAttribute("data-id") === inactiveId);
+    return Boolean(active && inactive && !active.classList.contains("hop-edge-disabled") &&
+      !active.textContent?.includes("已停用") &&
+      inactive.classList.contains("hop-edge-disabled") && inactive.textContent?.includes("已停用"));
+  }, [activeLink.id, inactiveLink.id], { timeout: 8000 });
+  console.log("Mixed-Hop native proof passed: one active Y and one disabled N branch -> React Flow isolation -> semantic move -> XML save -> disk reopen.");
+
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
     return path === "/ui" || path.startsWith("/ui/");
