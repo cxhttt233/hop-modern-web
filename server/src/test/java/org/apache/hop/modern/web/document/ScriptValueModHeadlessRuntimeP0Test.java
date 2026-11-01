@@ -32,13 +32,13 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Native engine acceptance for the producer-owned JavaScript scope lifetime contract.
- * An output never assigned is null, but one conditionally assigned on a prior row
- * remains in the reused Rhino scope. Also proves replace-by-rename fallback.
+ * Negative native-engine acceptance for the pinned headless ScriptValueMod classpath.
+ * JSON/HPL editing succeeds, but Rhino function registration cannot link HopGui.
+ * This test does not claim JavaScript row output or scope semantics were executed.
  * No Hop Core or consumer React code is modified.
  */
 @EnabledIfSystemProperty(named = "prodP0Expected", matches = "true")
-class ScriptValueModPersistentScopeFullPipelineP0Test {
+class ScriptValueModHeadlessRuntimeP0Test {
   @BeforeAll
   static void init() throws Exception {
     HopClientEnvironment.init();
@@ -78,7 +78,7 @@ class ScriptValueModPersistentScopeFullPipelineP0Test {
   }
 
   @Test
-  void conditionalScriptResultRetainsPreviousRowWhileNeverAssignedResultIsNull(
+  void headlessScriptValueModFailsAtNativeRhinoRegistrationAfterHplEdit(
       @TempDir Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
     IPlugin scriptPlugin = plugins.findPluginWithId(TransformPluginType.class, "ScriptValueMod");
@@ -111,11 +111,11 @@ class ScriptValueModPersistentScopeFullPipelineP0Test {
     var payload = (PipelineConfigResource.ConfigResponse) response.getEntity();
     var diagnostic = payload.descriptor().runtimePreconditions().stream()
         .filter(p -> p.code().equals(
-            "SCRIPT_VALUE_MOD_CONDITIONAL_OUTPUT_RETAINS_PRIOR_ROW_VALUE"))
+            "SCRIPT_VALUE_MOD_HEADLESS_GUI_LINKAGE_BLOCKS_ENGINE"))
         .findFirst().orElseThrow();
     assertEquals(List.of("/jsScripts/jsScript", "/fields/field"),
         diagnostic.keyListPointers());
-    assertTrue(diagnostic.explanation().contains("scope"));
+    assertTrue(diagnostic.explanation().contains("HopGui"));
 
     ObjectNode draft = ((ObjectNode) payload.config()).deepCopy();
     JsonNode scriptNodes = draft.at("/jsScripts/jsScript");
@@ -158,6 +158,16 @@ class ScriptValueModPersistentScopeFullPipelineP0Test {
     assertTrue(wire.at("/jsScripts/jsScript/0/jsScript_script").asText()
         .contains("if (flow > 5)"));
 
+    // Native runtime classpath gate: the pinned JavaScript helper has a synthetic
+    // lambda method whose signature requires the absent desktop HopGui class.
+    assertThrows(ClassNotFoundException.class,
+        () -> Class.forName("org.apache.hop.ui.hopgui.HopGui"));
+    Class<?> nativeFunctions = Class.forName(
+        "org.apache.hop.pipeline.transforms.javascript.ScriptValuesAddedFunctions");
+    NoClassDefFoundError linkage = assertThrows(
+        NoClassDefFoundError.class, () -> nativeFunctions.getDeclaredMethods());
+    assertTrue(linkage.getMessage().contains("org/apache/hop/ui/hopgui/HopGui"));
+
     List<Object[]> emitted = new CopyOnWriteArrayList<>();
     List<IRowMeta> outputMetas = new CopyOnWriteArrayList<>();
     LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
@@ -175,31 +185,16 @@ class ScriptValueModPersistentScopeFullPipelineP0Test {
       });
       engine.startThreads();
       engine.waitUntilFinished();
-      assertEquals(0, engine.getErrors(), "native ScriptValueMod must complete");
+      assertTrue(engine.getErrors() > 0, "headless native engine must report the GUI linkage blocker");
     } finally {
       if (!engine.isFinishedOrStopped()) engine.stopAll();
       engine.cleanup();
     }
 
-    assertEquals(3, emitted.size());
-    assertFalse(outputMetas.isEmpty());
-    IRowMeta resultMeta = outputMetas.get(0);
-    assertEquals(3, resultMeta.size());
-    assertEquals(List.of("station", "flow", "状态<&雪>"),
-        resultMeta.getValueMetaList().stream().map(v -> v.getName()).toList());
-    assertEquals(IValueMeta.TYPE_INTEGER, resultMeta.getValueMeta(1).getType());
-    assertEquals(IValueMeta.TYPE_STRING, resultMeta.getValueMeta(2).getType());
-    assertEquals("黄河<&雪>", emitted.get(0)[0]);
-    assertEquals(6L, ((Number) emitted.get(0)[1]).longValue());
-    assertNull(emitted.get(0)[2], "never-assigned script result must be null");
-    assertEquals("长江<&雪>", emitted.get(1)[0]);
-    assertEquals(14L, ((Number) emitted.get(1)[1]).longValue());
-    assertEquals("长江<&雪>:14", emitted.get(1)[2]);
-    assertEquals("珠江", emitted.get(2)[0]);
-    assertEquals(4L, ((Number) emitted.get(2)[1]).longValue());
-    assertEquals("长江<&雪>:14", emitted.get(2)[2],
-        "Rhino scope persists; skipped assignment reuses the previous row's value");
+    assertTrue(emitted.isEmpty(),
+        "ScriptValueMod must not claim native output rows when GUI linkage fails");
+    assertTrue(outputMetas.isEmpty());
     System.out.println(
-        "PROD_P0_SCRIPTVALUE_PERSISTENT_SCOPE_CONDITIONAL_OUTPUT_JSON_HPL_ROWS=PASS");
+        "PROD_P0_SCRIPTVALUE_HEADLESS_GUI_LINKAGE_NEGATIVE_ENGINE_GATE=PASS");
   }
 }

@@ -955,7 +955,23 @@ public final class AutomaticConfigDescriptor {
                        + "should assign every declared output on every row, explicitly "
                        + "using null where appropriate. Preserve the script body and ordered "
                        + "fields.field declarations through JSON/HPL editing; diagnose "
-                       + "conditional output assignments without rejecting draft saves."));
+                       + "conditional output assignments without rejecting draft saves."),
+               new RuntimePrecondition(
+                   "SCRIPT_VALUE_MOD_HEADLESS_GUI_LINKAGE_BLOCKS_ENGINE",
+                   List.of("/jsScripts/jsScript", "/fields/field"),
+                   "Pinned ScriptValues.addFunctionsToScope() registers "
+                       + "ScriptValuesAddedFunctions through Rhino reflection before "
+                       + "evaluating the first row's JavaScript. That helper's Alert "
+                       + "lambda references org.apache.hop.ui.hopgui.HopGui, and "
+                       + "reflection fails with NoClassDefFoundError when the "
+                       + "headless runtime has the JavaScript plugin but not hop-ui. "
+                       + "The source-derived P0 server test classpath has this "
+                       + "limitation: metadata descriptors and JSON/HPL roundtrips "
+                       + "can pass even though LocalPipelineEngine cannot execute "
+                       + "ScriptValueMod. Treat this as an explicit runtime "
+                       + "classpath/admission blocker, not a draft-save error; "
+                       + "do not claim successful script execution from descriptor "
+                       + "or persistence tests."));
       case "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta" ->
           List.of(new RuntimePrecondition(
               "EXEC_SQL_INPUT_MODE_REQUIRES_MATCHING_HOP_TOPOLOGY",
