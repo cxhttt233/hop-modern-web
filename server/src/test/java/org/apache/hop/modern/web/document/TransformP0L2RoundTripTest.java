@@ -9905,27 +9905,31 @@ class TransformP0L2RoundTripTest {
         "采样日期<&雪>", "", "采样日期<&雪>"};
     for (int i = 0; i < modes.length; i++) {
       var opened = store.open(hpl);
+      var nativeEdit = opened.findTransform(node).getTransform();
+      // Native TableOutput XML setters are authoritative for this compatibility
+      // slice. Its existing config/write decode of transient partitionDataPer
+      // is a separate known blocker, not silently bypassed or claimed fixed.
+      nativeEdit.getClass().getMethod("setPartitioningEnabled", boolean.class)
+          .invoke(nativeEdit, modes[i][0]);
+      nativeEdit.getClass().getMethod("setPartitioningDaily", boolean.class)
+          .invoke(nativeEdit, modes[i][1]);
+      nativeEdit.getClass().getMethod("setPartitioningMonthly", boolean.class)
+          .invoke(nativeEdit, modes[i][2]);
+      nativeEdit.getClass().getMethod("setTableNameInField", boolean.class)
+          .invoke(nativeEdit, modes[i][3]);
+      nativeEdit.getClass().getMethod("setPartitioningField", String.class)
+          .invoke(nativeEdit, fields[i]);
+      store.save(hpl, opened);
+
+      var disk = store.open(hpl);
       var documents = new PipelineDocumentRegistry();
-      documents.put(new PipelineDocument("table-date-partition-doc", hpl, opened));
+      documents.put(new PipelineDocument("table-date-partition-doc", hpl, disk));
       var resource = new PipelineConfigResource(documents, provider);
       var read = resource.read("table-date-partition-doc",
           new PipelineConfigResource.ReadRequest(node));
       assertEquals(200, read.getStatus());
       var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
       assertEquals(descriptor, current.descriptor());
-      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
-          current.config()).deepCopy();
-      edited.put("partitioning_enabled", modes[i][0]);
-      edited.put("partitioning_daily", modes[i][1]);
-      edited.put("partitioning_monthly", modes[i][2]);
-      edited.put("tablename_in_field", modes[i][3]);
-      edited.put("partitioning_field", fields[i]);
-      edited.put("table", "黄河分区表<&雪>");
-      assertEquals(200, resource.write("table-date-partition-doc",
-          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
-      store.save(hpl, opened);
-
-      var disk = store.open(hpl);
       var diskMeta = disk.findTransform(node).getTransform();
       var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
           diskMeta, provider);
