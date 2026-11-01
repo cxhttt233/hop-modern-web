@@ -998,7 +998,20 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "FILTER_ROWS_TWO_NULL_FIELDS_COMPARE_EQUAL_UNLIKE_SQL",
                   List.of("/compare/condition"),
-                  "When a native FilterRows Condition compares two incoming fields using EQUAL, Hop ValueMetaBase.compare() returns zero when both row values are null. Thus two missing measurements pass an equality filter; a single null versus a non-null value does not, and equal non-null values still pass. This differs from SQL three-valued NULL equality. Preserve both field references and the EQUAL function through JSON editing and HPL disk reopen; diagnose missing measurements rather than silently assuming SQL NULL semantics. This is a native execution compatibility diagnostic, not a draft-save validator."));
+                  "When a native FilterRows Condition compares two incoming fields using EQUAL, Hop ValueMetaBase.compare() returns zero when both row values are null. Thus two missing measurements pass an equality filter; a single null versus a non-null value does not, and equal non-null values still pass. This differs from SQL three-valued NULL equality. Preserve both field references and the EQUAL function through JSON editing and HPL disk reopen; diagnose missing measurements rather than silently assuming SQL NULL semantics. This is a native execution compatibility diagnostic, not a draft-save validator."),
+              new RuntimePrecondition(
+                  "FILTER_ROWS_COMPOSITE_OPERATOR_ORDER_IS_LEFT_TO_RIGHT",
+                  List.of("/compare/condition"),
+                  "Native Condition.evaluate() processes composite children in stored order, "
+                      + "applying each child's OR, AND, OR NOT, AND NOT or XOR operator "
+                      + "to the accumulated result. There is no SQL-style AND-before-OR "
+                      + "precedence: A OR B AND C means (A OR B) AND C unless the "
+                      + "Condition tree explicitly nests B AND C. OR/AND and their NOT "
+                      + "variants short-circuit; XOR evaluates both sides. Preserve child "
+                      + "order, operator codes, and explicit nested groups across Hop "
+                      + "JSON/XML editing. Warn before execution when a SQL-like predicate "
+                      + "would change meaning; do not rewrite the saved condition tree "
+                      + "or reject drafts."));
       case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
           List.of(
               new RuntimePrecondition(
