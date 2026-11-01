@@ -743,6 +743,20 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" ->
           List.of(
               new RuntimePrecondition(
+                  "HTTP_PROXY_PORT_INVALID_TEXT_FALLS_BACK_TO_8080",
+                  List.of("/proxyHost", "/proxyPort"),
+                  "Native Http.init() resolves proxyHost and proxyPort once per transform "
+                      + "instance, then parses the proxy port with Const.toInt(value, 8080). "
+                      + "A blank or non-numeric proxyPort therefore silently falls back to "
+                      + "8080, rather than rejecting the saved configuration. Numeric zero "
+                      + "and negative ports remain unchanged at init; this is not port-range "
+                      + "validation. Http.createClientBuilder() configures the proxy only "
+                      + "when the resolved proxyHost is nonblank, so a saved proxyPort "
+                      + "without a host does not route requests through a proxy. Preserve "
+                      + "the original STRING values and variable expressions through "
+                      + "JSON/HPL editing, and diagnose this runtime fallback before "
+                      + "execution. This is not a save-time validator."),
+              new RuntimePrecondition(
                   "HTTP_IGNORE_SSL_DISABLES_CERTIFICATE_AND_HOSTNAME_CHECKS",
                   List.of("/ignoreSsl", "/url", "/urlInField", "/urlField"),
                   "When ignoreSsl=true, native Http.createClientBuilder() calls "
