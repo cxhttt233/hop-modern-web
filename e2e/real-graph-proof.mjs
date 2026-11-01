@@ -591,20 +591,26 @@ try {
   // Reopen responses can arrive before React commits its server-mode state.
   // Wait for the authoritative editor actions before attempting a mutation.
   await page.getByRole("button", { name: "保存（Save）", exact: true }).waitFor({ state: "visible" });
-  await page.locator('.react-flow__node[data-id="' + disabledTarget.id + '"]').click();
+  // Click the non-interactive icon to select the node. Its centered title
+  // is itself a Configure button; clicking the node center opens an overlay
+  // which can intercept the contextual Delete button in real Chromium.
+  await page.locator('.react-flow__node[data-id="' + disabledTarget.id + '"] .transform-node-icon').click();
+  const deleteAction = page.getByRole("button", { name: `删除转换：${disabledTarget.name || disabledTarget.id}（Delete）` });
+  await deleteAction.waitFor({ state: "visible" });
   const requestsBeforeDelete = requests.length;
-  const mixedDeletePending = page.waitForResponse((response) =>
-    response.request().method() === "POST" &&
-    new RegExp("/api/pipelines/[^/]+/edit/delete$").test(new URL(response.url()).pathname),
-    { timeout: 8000 });
-  await page.getByRole("button", { name: `删除转换：${disabledTarget.name || disabledTarget.id}（Delete）` }).click();
   let mixedDeleteResponse;
   try {
-    mixedDeleteResponse = await mixedDeletePending;
+    [mixedDeleteResponse] = await Promise.all([
+      page.waitForResponse((response) =>
+        response.request().method() === "POST" &&
+        new RegExp("/api/pipelines/[^/]+/edit/delete$").test(new URL(response.url()).pathname),
+        { timeout: 12000 }),
+      deleteAction.click({ timeout: 12000 }),
+    ]);
   } catch (error) {
     const paths = requests.slice(requestsBeforeDelete).map((url) => new URL(url).pathname);
     const uiError = await page.locator(".error-note").textContent().catch(() => "");
-    throw new Error(`Disabled-Hop delete issued no matching response; request paths=${JSON.stringify(paths)}, UI=${uiError || "(none)"}; ${String(error)}`);
+    throw new Error(`Disabled-Hop delete action failed; request paths=${JSON.stringify(paths)}, UI=${uiError || "(none)"}; ${String(error)}`);
   }
   if (!mixedDeleteResponse.ok()) throw new Error("Disabled-branch semantic delete failed");
   const mixedDeleted = await mixedDeleteResponse.json();
