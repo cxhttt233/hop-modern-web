@@ -549,7 +549,8 @@ public final class AutomaticConfigDescriptor {
       // The per-row table-name column is included in INSERT data only in
       // dynamic target mode (and only without an explicit field mapping).
       if (key.equals("tablename_in_table") && shape == Shape.BOOLEAN)
-        return new ActivationContext("/tablename_in_field", true);
+        return new ActivationContext("/tablename_in_field", true,
+            List.of(new ActivationCondition("/specify_fields", false)));
       // Native TableOutput invokes DDL only when the master schema-update
       // switch is enabled. Preserve the individual (potentially destructive)
       // options when the master switch is off; the editor only disables them.
