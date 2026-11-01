@@ -537,6 +537,13 @@ public final class AutomaticConfigDescriptor {
         return new ActivationContext("/return_keys", true);
       if (key.equals("partitioning_field") && shape == Shape.STRING)
         return new ActivationContext("/partitioning_enabled", true);
+      // Native TableOutput invokes DDL only when the master schema-update
+      // switch is enabled. Preserve the individual (potentially destructive)
+      // options when the master switch is off; the editor only disables them.
+      if (shape == Shape.BOOLEAN
+          && Set.of("always_drop_and_recreate", "add_columns", "drop_columns",
+              "change_column_types").contains(key))
+        return new ActivationContext("/auto_update_table_structure", true);
     }
     // StreamLookup's integer-pair fast path is reachable only in memory-
     // preserving hash mode. A sorted-list cache or ordinary hash cache does
@@ -1590,7 +1597,22 @@ public final class AutomaticConfigDescriptor {
                   "TABLE_OUTPUT_DYNAMIC_TABLE_NAME_FIELD_CONTROLS_INSERT_PROJECTION",
                   List.of("/tablename_in_field", "/tablename_field", "/tablename_in_table",
                       "/specify_fields"),
-                  "When tablename_in_field is true, TableOutput resolves tablename_field as a Hop variable expression and requires that field in each incoming row to choose the destination table; a missing field fails at runtime and an empty row value cannot identify a table. When tablename_in_table is false and specify_fields is false, the runtime excludes the table-name field from its internal INSERT row and column list. With specify_fields true, the explicit fields.field mapping determines inserted columns instead; the table-name field is not automatically removed. This does not remove the field from TableOutputMeta.getFields() downstream row metadata. Diagnose source-field existence and insert projection separately; do not reject draft saves."));
+                  "When tablename_in_field is true, TableOutput resolves tablename_field as a Hop variable expression and requires that field in each incoming row to choose the destination table; a missing field fails at runtime and an empty row value cannot identify a table. When tablename_in_table is false and specify_fields is false, the runtime excludes the table-name field from its internal INSERT row and column list. With specify_fields true, the explicit fields.field mapping determines inserted columns instead; the table-name field is not automatically removed. This does not remove the field from TableOutputMeta.getFields() downstream row metadata. Diagnose source-field existence and insert projection separately; do not reject draft saves."),
+              new RuntimePrecondition(
+                  "TABLE_OUTPUT_SCHEMA_DDL_OPTIONS_REQUIRE_MASTER_SWITCH_AND_STATIC_TARGET",
+                  List.of("/auto_update_table_structure", "/always_drop_and_recreate",
+                      "/add_columns", "/drop_columns", "/change_column_types",
+                      "/tablename_in_field", "/partitioning_enabled"),
+                  "Native TableOutput.processRow() invokes updateTableStructure() on the first "
+                      + "input row only when auto_update_table_structure is true. Its inner "
+                      + "guard normally restricts DDL to a static unpartitioned table in "
+                      + "the first transform copy, but also permits a nonempty partition "
+                      + "id. The four subordinate flags can drop/recreate the table, add "
+                      + "columns, drop surplus columns, or alter column types. Inactive "
+                      + "flags remain persisted and can become destructive if the master "
+                      + "switch is later re-enabled. Diagnose the actual runtime target "
+                      + "and DDL risk before execution; never clear inactive values or "
+                      + "perform DDL during draft editing."));
       case "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta" ->
           List.of(new RuntimePrecondition(
               "UNIQUE_ROWS_HASHSET_COMPARE_FIELDS_REQUIRE_INPUT_ROW_FIELDS",
