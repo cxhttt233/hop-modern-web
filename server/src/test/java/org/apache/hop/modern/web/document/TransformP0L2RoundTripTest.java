@@ -9957,4 +9957,91 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEOUTPUT_DATE_PARTITION_PRIORITY_HPL=PASS");
   }
 
+
+  @Test
+  void tableInputExpandedRowLimitAndUnlimitedFallbackSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableInput");
+    assertNotNull(plugin, "production TableInput plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    var nativeOriginal = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta) original;
+    nativeOriginal.setSql("SELECT '黄河<&雪>' AS txt");
+    nativeOriginal.setRowLimit("0");
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "TABLE_INPUT_ROW_LIMIT_EXPANDED_INTEGER_AND_UNLIMITED_FALLBACK"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/limit", "/variables_active", "/connection"),
+        diagnostic.keyListPointers());
+    assertTrue(diagnostic.explanation().contains("Const.toIntExpanded"));
+    assertTrue(diagnostic.explanation().contains("Statement.setMaxRows"));
+    assertEquals(Shape.STRING, property(descriptor, "limit").shape());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "variables_active").shape());
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    variables.setVariable("ROW_CAP", "3k");
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("tableinput-expanded-row-limit.hpl");
+    String node = "输入限制<&雪>";
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("tableinput-expanded-row-limit");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableInput", node, original));
+    store.save(hpl, pipeline);
+
+    String[] limits = {"${ROW_CAP}", "1e3", "2_500", "-7",
+        "invalid<&雪>", "", "2147483648"};
+    int[] expected = {3000, 1000, 2500, -7, 0, 0, 0};
+    for (int i = 0; i < limits.length; i++) {
+      var opened = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      String id = "tableinput-rowlimit-" + i;
+      documents.put(new PipelineDocument(id, hpl, opened));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read(id, new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, current.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          current.config()).deepCopy();
+      edited.put("limit", limits[i]);
+      edited.put("variables_active", i % 2 == 0);
+      assertEquals(200, resource.write(id,
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, opened);
+
+      var disk = store.open(hpl);
+      var nativeDisk = (org.apache.hop.pipeline.transforms.tableinput.TableInputMeta)
+          disk.findTransform(node).getTransform();
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          nativeDisk, provider);
+      assertTrue(wire.at("/limit").isTextual(), "limit must remain STRING");
+      assertEquals(limits[i], wire.at("/limit").asText());
+      assertEquals(limits[i], nativeDisk.getRowLimit());
+      assertTrue(wire.at("/variables_active").isBoolean());
+      assertEquals(i % 2 == 0, wire.at("/variables_active").booleanValue());
+      assertEquals("SELECT '黄河<&雪>' AS txt", wire.at("/sql").asText());
+      // Native TableInput.init() resolves this string regardless of the
+      // independent SQL-body variables_active flag, then passes it to Const.
+      int parsed = org.apache.hop.core.Const.toIntExpanded(
+          variables.resolve(nativeDisk.getRowLimit()), 0);
+      assertEquals(expected[i], parsed, limits[i]);
+      if (i == 0) {
+        variables.setVariable("ROW_CAP", "9");
+        assertEquals(9, org.apache.hop.core.Const.toIntExpanded(
+            variables.resolve(nativeDisk.getRowLimit()), 0));
+        assertEquals("${ROW_CAP}", wire.at("/limit").asText(),
+            "the expression, not its resolved value, must survive disk reopen");
+        variables.setVariable("ROW_CAP", "3k");
+      }
+    }
+    // No database connection is made. The positive-limit JDBC dialect gate
+    // is source-verified in pinned Database.openQuery(), not executed here.
+    System.out.println("PROD_P0_TABLEINPUT_ROW_LIMIT_EXPANDED_HPL=PASS");
+  }
+
 }
