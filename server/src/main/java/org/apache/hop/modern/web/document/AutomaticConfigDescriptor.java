@@ -1324,7 +1324,24 @@ public final class AutomaticConfigDescriptor {
                       + "and duplicates through the canonical JSON/HPL transport, but duplicate "
                       + "entries do not increase retry attempts. Keep the editable lists as "
                       + "literal strings and surface this runtime diagnostic; do not silently "
-                      + "uppercase, trim, deduplicate or reject a draft at save time."));
+                      + "uppercase, trim, deduplicate or reject a draft at save time."),
+               new RuntimePrecondition(
+                   "REST_CONNECTION_SUPERSEDES_TRANSFORM_CLIENT_SETTINGS",
+                   List.of("/connection_name", "/proxyHost", "/proxyPort",
+                       "/httpLogin", "/httpPassword", "/non_preemptive_basic_auth",
+                       "/trustStoreFile", "/trustStorePassword", "/ignoreSsl",
+                       "/connectionTimeout", "/readTimeout"),
+                   "When connection_name resolves to a nonempty REST connection name, native "
+                       + "Rest.init() loads that metadata connection and Rest.createClientSettings() "
+                       + "uses its complete client settings. Transform-level proxy, Basic auth, "
+                       + "SSL trust store/ignoreSsl and connection/read timeouts are ignored, "
+                       + "not merged or used as fallback; the connection may also supply other "
+                       + "auth schemes and binds credentials to its base URL origin. An unknown "
+                       + "connection name fails initialization rather than reverting to the "
+                       + "transform fields. Deselecting the connection restores the previously "
+                       + "saved transform-level values. Resolve connection_name through Hop "
+                       + "variables before diagnosing which settings are active; preserve "
+                       + "inactive sensitive values without logging them or blocking draft saves."));
       case "org.apache.hop.pipeline.transforms.replacestring.ReplaceStringMeta" ->
           List.of(
               new RuntimePrecondition(
