@@ -9101,5 +9101,105 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_HTTP_PROXY_PORT_NATIVE_INIT_FALLBACK_HPL=PASS");
   }
 
+  @Test
+  void sortRowsCompressionVariableOverridesStaticFlagAtNativeInitAfterRealHplReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "SortRows");
+    assertNotNull(plugin, "production SortRows plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "compress").shape());
+    assertEquals(Shape.STRING, property(descriptor, "compress_variables").shape());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SORT_ROWS_COMPRESSION_VARIABLE_OVERRIDES_STATIC_FLAG_AT_INIT"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/compress", "/compress_variables", "/sort_size"),
+        diagnostic.keyListPointers());
+    assertTrue(diagnostic.explanation().contains("getVariableBoolean"));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var hpl = tempDir.resolve("sort-compression-variable.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("sort-compression-variable");
+    String node = "排序压缩<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "SortRows", node, original));
+    store.save(hpl, pipeline);
+
+    // A defined variable overrides the static flag in BOTH directions;
+    // absent/empty variable names or values fall back to the static flag.
+    String[] variableNames = {"SORT_GZIP", "SORT_GZIP", "UNDEFINED_SORT_GZIP",
+        "", "SORT_GZIP"};
+    String[] variableValues = {"Y", "N", null, null, null};
+    boolean[] configuredFlags = {false, true, true, true, false};
+    boolean[] expectedRuntime = {true, false, true, true, false};
+    for (int i = 0; i < configuredFlags.length; i++) {
+      var loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("sort-compress-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("sort-compress-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, current.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          current.config()).deepCopy();
+      edited.put("compress", configuredFlags[i]);
+      edited.put("compress_variables", variableNames[i]);
+      edited.put("sort_prefix", "临时<&雪>");
+      assertEquals(200, resource.write("sort-compress-doc",
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, loaded);
+
+      var reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform(node).getTransform();
+      var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertTrue(diskWire.at("/compress").isBoolean());
+      assertEquals(configuredFlags[i], diskWire.at("/compress").booleanValue());
+      if (variableNames[i].isEmpty()) {
+        assertTrue(diskWire.at("/compress_variables").isMissingNode()
+            || diskWire.at("/compress_variables").isNull()
+            || diskWire.at("/compress_variables").asText().isEmpty());
+      } else {
+        assertEquals(variableNames[i], diskWire.at("/compress_variables").asText());
+      }
+      assertEquals("临时<&雪>", diskWire.at("/sort_prefix").asText());
+
+      ClassLoader loader = diskMeta.getClass().getClassLoader();
+      Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.sort.SortRows");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.sort.SortRowsData");
+      Object data = dataType.getConstructor().newInstance();
+      var constructor = runtimeType.getConstructor(
+          org.apache.hop.pipeline.transform.TransformMeta.class,
+          diskMeta.getClass(), dataType, int.class,
+          org.apache.hop.pipeline.PipelineMeta.class,
+          org.apache.hop.pipeline.Pipeline.class);
+      var engine = org.mockito.Mockito.spy(
+          new org.apache.hop.pipeline.engines.local.LocalPipelineEngine());
+      if (variableValues[i] != null) {
+        engine.setVariable(variableNames[i], variableValues[i]);
+      }
+      Object nativeSort = constructor.newInstance(
+          reopened.findTransform(node), diskMeta, data, 0, reopened, engine);
+      runtimeType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class)
+          .invoke(nativeSort, provider);
+      assertTrue((Boolean) runtimeType.getMethod("init").invoke(nativeSort),
+          "native SortRows.init should not require input rows");
+      assertEquals(expectedRuntime[i], dataType.getField("compressFiles").getBoolean(data),
+          "effective spill compression must use variable override or static fallback");
+    }
+    // This proves native init-time GZIP selection and lossless HPL/JSON editing;
+    // no external sort spill or compressed temporary file is executed here.
+    System.out.println("PROD_P0_SORTROWS_VARIABLE_COMPRESSION_NATIVE_INIT_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 }
