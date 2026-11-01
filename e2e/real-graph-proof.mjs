@@ -410,6 +410,75 @@ try {
   }
   console.log("Disabled-Hop visual proof passed: real XML enabled=N -> authoritative Graph JSON -> dashed Chinese React Flow link -> disk reopen.");
 
+  // Data-integrity regression: a disabled native Hop must remain disabled
+  // after a different semantic edit is saved. A read-only reopen alone cannot
+  // catch XML writers that accidentally re-enable an existing Hop.
+  const disabledSource = page.locator('.react-flow__node[data-id="source"]');
+  await disabledSource.waitFor({ state: "visible" });
+  const beforeDisabledMove = disabledReopened.nodes.find((node) => node.id === "source");
+  if (!beforeDisabledMove) throw new Error("Disabled-Hop graph is missing source transform");
+  const disabledIconBox = await disabledSource.locator(".transform-node-icon").boundingBox();
+  if (!disabledIconBox) throw new Error("Disabled-Hop source drag handle is not visible");
+  const disabledMovePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/move$").test(new URL(response.url()).pathname));
+  const disabledDragStart = {
+    x: disabledIconBox.x + disabledIconBox.width / 2,
+    y: disabledIconBox.y + disabledIconBox.height / 2,
+  };
+  await page.mouse.move(disabledDragStart.x, disabledDragStart.y);
+  await page.mouse.down();
+  await page.mouse.move(disabledDragStart.x + 46, disabledDragStart.y + 30, { steps: 12 });
+  await page.mouse.up();
+  const disabledMoveResponse = await disabledMovePending;
+  const disabledMovedGraph = await disabledMoveResponse.json();
+  const disabledMovedSource = disabledMovedGraph.nodes?.find((node) => node.id === "source");
+  if (!disabledMoveResponse.ok() || !disabledMovedSource ||
+      (disabledMovedSource.x === beforeDisabledMove.x &&
+       disabledMovedSource.y === beforeDisabledMove.y) ||
+      !disabledMovedGraph.edges?.some((edge) =>
+        edge.id === disabledEdge.id && edge.enabled === false)) {
+    throw new Error("Semantic node move altered or lost disabled Hop state");
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const disabledSavePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/save$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+  const disabledSaveResponse = await disabledSavePending;
+  if (!disabledSaveResponse.ok()) throw new Error("Disabled-Hop native disk save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const disabledSavedXml = await readFile(disabledPath, "utf8");
+  if (!disabledSavedXml.includes("<enabled>N</enabled>") ||
+      disabledSavedXml === disabledXml) {
+    throw new Error("Disabled-Hop disk save did not retain native disabled XML and the semantic move");
+  }
+  const disabledSavedReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== disabledPath) {
+    throw new Error("Disabled-Hop file identity changed before saved disk reopen");
+  }
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const disabledSavedReopenResponse = await disabledSavedReopenPending;
+  const disabledSavedReopened = await disabledSavedReopenResponse.json();
+  const disabledDiskSource = disabledSavedReopened.nodes?.find((node) => node.id === "source");
+  if (!disabledSavedReopenResponse.ok() || !disabledDiskSource ||
+      disabledDiskSource.x !== disabledMovedSource.x ||
+      disabledDiskSource.y !== disabledMovedSource.y ||
+      !disabledSavedReopened.edges?.some((edge) =>
+        edge.id === disabledEdge.id && edge.enabled === false)) {
+    throw new Error("Real Hop disk reopen lost moved coordinates or disabled connection");
+  }
+  await page.waitForFunction((edgeId) => {
+    const edge = [...document.querySelectorAll(".react-flow__edge")]
+      .find((element) => element.getAttribute("data-id") === edgeId);
+    return Boolean(edge?.classList.contains("hop-edge-disabled") &&
+      edge.textContent?.includes("已停用"));
+  }, disabledEdge.id, { timeout: 8000 });
+  console.log("Disabled-Hop edit/save proof passed: real semantic move -> native XML disk save -> reopen preserves disabled Hop and Chinese dashed link.");
+
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
     return path === "/ui" || path.startsWith("/ui/");
