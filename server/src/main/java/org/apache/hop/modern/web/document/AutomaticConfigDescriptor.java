@@ -1641,6 +1641,25 @@ public final class AutomaticConfigDescriptor {
                       + "only where native execution does, and surface the effective "
                       + "thresholds before execution; do not rewrite draft values."),
               new RuntimePrecondition(
+                  "SORT_ROWS_COLLATOR_OVERRIDES_CASE_FLAG_AND_INHERITS_ROW_LOCALE",
+                  List.of("/fields/field", "/unique_rows"),
+                  "When a native SortRows key enables collator_enabled, "
+                      + "SortRowsMeta.assignSortingCriteria() enables the upstream "
+                      + "IValueMeta Collator and sets its collator_strength, but does "
+                      + "not assign a Locale. The comparison therefore uses the "
+                      + "input field's inherited Collator Locale (normally the JVM "
+                      + "default), not a locale configured by this transform. "
+                      + "ValueMetaBase.typeCompare() bypasses case_sensitive entirely "
+                      + "while the Collator is enabled; the selected Collator strength "
+                      + "controls accent/case distinctions. For an explicitly US-locale "
+                      + "STRING field, PRIMARY treats resume and résumé as equal, "
+                      + "whereas TERTIARY distinguishes them. With unique_rows=true "
+                      + "such equality can also change which non-key payload rows "
+                      + "survive sorting. Keep ordered field flags and numeric strength "
+                      + "lossless across JSON/HPL edits, and disclose that runtime "
+                      + "locale and comparison semantics are not a fixed UI locale. "
+                      + "This is a compatibility diagnostic, not a draft-save validator."),
+              new RuntimePrecondition(
                   "SORT_ROWS_COMPRESSION_VARIABLE_OVERRIDES_STATIC_FLAG_AT_INIT",
                   List.of("/compress", "/compress_variables", "/sort_size"),
                   "Native SortRows.init() calls getVariableBoolean(compress_variables, compress). "
