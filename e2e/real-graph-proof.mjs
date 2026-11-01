@@ -625,8 +625,8 @@ try {
   const mixedHistorySaved = await mixedHistorySavePending;
   if (!mixedHistorySaved.ok()) throw new Error("Disabled-Hop undo history save failed");
   const historyXml = await readFile(mixedPath, "utf8");
-  if ((historyXml.match(/<enabled>Y<\\/enabled>/g) ?? []).length !== 1 ||
-      (historyXml.match(/<enabled>N<\\/enabled>/g) ?? []).length !== 1) {
+  if ((historyXml.match(/<enabled>Y<\/enabled>/g) ?? []).length !== 1 ||
+      (historyXml.match(/<enabled>N<\/enabled>/g) ?? []).length !== 1) {
     throw new Error("Undo-restored disabled Hop lost Y/N flags in native disk XML");
   }
   const mixedHistoryReopenPending = page.waitForResponse((response) =>
