@@ -743,6 +743,20 @@ public final class AutomaticConfigDescriptor {
       case "org.apache.hop.pipeline.transforms.http.HttpMeta" ->
           List.of(
               new RuntimePrecondition(
+                  "HTTP_IDLE_CONNECTION_CLOSE_SETTING_IS_NOT_CONSUMED_BY_NATIVE_HTTP",
+                  List.of("/closeIdleConnectionsTime", "/connectionTimeout", "/socketTimeout"),
+                  "The pinned HttpMeta serializes closeIdleConnectionsTime as a STRING, "
+                      + "but native Http.init() never reads that property and "
+                      + "Http.createClientBuilder() configures connectionTimeout and "
+                      + "socketTimeout only. Changing closeIdleConnectionsTime therefore "
+                      + "does not configure idle connection eviction in this native "
+                      + "transform implementation. Unlike that dormant setting, the two "
+                      + "active timeouts are variable-resolved and parsed to integers "
+                      + "at init. Preserve all three literal Hop JSON/XML values so "
+                      + "editing does not discard compatibility data, but do not promise "
+                      + "an effective idle-close policy from this field. This is a "
+                      + "source-verified runtime warning, not a draft-save validator."),
+              new RuntimePrecondition(
                   "HTTP_PROXY_PORT_INVALID_TEXT_FALLS_BACK_TO_8080",
                   List.of("/proxyHost", "/proxyPort"),
                   "Native Http.init() resolves proxyHost and proxyPort once per transform "
