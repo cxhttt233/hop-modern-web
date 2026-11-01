@@ -8733,5 +8733,108 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEOUTPUT_STATIC_PARTITION_ACTIVATION_HPL=PASS");
   }
 
+  @Test
+  void tableOutputZeroRowTruncateGuardPublishesNativeActivationAndSurvivesHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin is required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+
+    // Native TableOutput.truncateTable() skips dynamic and partitioned targets.
+    // only_when_have_rows prevents truncation on an empty input stream; it is
+    // not an independent safety guard when truncate itself is inactive.
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext(
+        "/tablename_in_field", false,
+        List.of(new AutomaticConfigDescriptor.ActivationCondition(
+            "/partitioning_enabled", false))),
+        property(descriptor, "truncate").activationContext());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext(
+        "/truncate", true, List.of(
+            new AutomaticConfigDescriptor.ActivationCondition("/tablename_in_field", false),
+            new AutomaticConfigDescriptor.ActivationCondition("/partitioning_enabled", false))),
+        property(descriptor, "only_when_have_rows").activationContext());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(descriptor);
+    for (String key : List.of("truncate", "only_when_have_rows")) {
+      int index = -1;
+      for (int i = 0; i < descriptor.properties().size(); i++) {
+        if (descriptor.properties().get(i).key().equals(key)) { index = i; break; }
+      }
+      assertTrue(index >= 0, key);
+      var json = published.at("/properties/" + index + "/activationContext");
+      assertTrue(json.isObject(), key);
+      assertTrue(json.path("additionalConditions").isArray(), key);
+    }
+    var risk = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "TABLE_OUTPUT_TRUNCATE_EMPTY_INPUT_CAN_CLEAR_STATIC_TABLE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/truncate", "/only_when_have_rows",
+        "/tablename_in_field", "/partitioning_enabled"), risk.keyListPointers());
+
+    original.getClass().getMethod("setTableName", String.class)
+        .invoke(original, "零行清空风险<&雪>");
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var hpl = tempDir.resolve("table-output-zero-row-truncate.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("table-output-zero-row-truncate");
+    String node = "清空目标<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", node, original));
+    store.save(hpl, pipeline);
+
+    // truncate, only-when-have-rows, dynamic target, date partition.
+    // Inactive BOOLEAN values must survive every native XML disk reopen.
+    boolean[][] modes = {
+        {true, false, false, false},
+        {true, true, false, false},
+        {false, true, false, false},
+        {true, false, true, false},
+        {true, false, false, true},
+        {true, true, false, false}
+    };
+    String[] setters = {"setTruncateTable", "setOnlyWhenHaveRows",
+        "setTableNameInField", "setPartitioningEnabled"};
+    String[] pointers = {"/truncate", "/only_when_have_rows",
+        "/tablename_in_field", "/partitioning_enabled"};
+    for (boolean[] mode : modes) {
+      var reopened = store.open(hpl);
+      var nativeMeta = reopened.findTransform(node).getTransform();
+      for (int i = 0; i < mode.length; i++) {
+        nativeMeta.getClass().getMethod(setters[i], boolean.class)
+            .invoke(nativeMeta, mode[i]);
+      }
+      store.save(hpl, reopened);
+
+      var diskPipeline = store.open(hpl);
+      var diskMeta = diskPipeline.findTransform(node).getTransform();
+      var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      for (int i = 0; i < mode.length; i++) {
+        assertTrue(diskWire.at(pointers[i]).isBoolean(), pointers[i]);
+        assertEquals(mode[i], diskWire.at(pointers[i]).booleanValue(), pointers[i]);
+      }
+      assertEquals("零行清空风险<&雪>", diskWire.at("/table").asText());
+
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("table-truncate-doc", hpl, diskPipeline));
+      var resource = new PipelineConfigResource(documents, provider);
+      var response = resource.read("table-truncate-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, response.getStatus());
+      var body = (PipelineConfigResource.ConfigResponse) response.getEntity();
+      assertEquals(descriptor, body.descriptor());
+      for (int i = 0; i < mode.length; i++) {
+        assertEquals(mode[i], body.config().at(pointers[i]).booleanValue(), pointers[i]);
+      }
+    }
+    // No JDBC connection or destructive TRUNCATE is executed by this test.
+    System.out.println("PROD_P0_TABLEOUTPUT_ZERO_ROW_TRUNCATE_ACTIVATION_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 }
