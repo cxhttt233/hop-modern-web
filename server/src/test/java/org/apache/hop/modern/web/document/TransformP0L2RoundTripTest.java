@@ -9202,4 +9202,143 @@ class TransformP0L2RoundTripTest {
   }
 
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
+
+  @Test
+  void restConnectionOverridesTransformTransportSettingsAfterRealHplConfigEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+    assertNotNull(plugin, "production Rest plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://transform.example.invalid/river?station=雪");
+    original.getClass().getMethod("setMethod", String.class).invoke(original, "GET");
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("REST_CONNECTION_SUPERSEDES_TRANSFORM_CLIENT_SETTINGS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/connection_name", "/proxyHost", "/proxyPort",
+        "/httpLogin", "/httpPassword", "/non_preemptive_basic_auth",
+        "/trustStoreFile", "/trustStorePassword", "/ignoreSsl",
+        "/connectionTimeout", "/readTimeout"), contract.keyListPointers());
+    assertTrue(contract.explanation().contains("not merged"));
+    assertTrue(property(descriptor, "httpPassword").sensitive());
+    assertTrue(property(descriptor, "trustStorePassword").sensitive());
+
+    var provider = new MemoryMetadataProvider();
+    ClassLoader loader = original.getClass().getClassLoader();
+    Class<?> connectionType = loader.loadClass("org.apache.hop.metadata.rest.RestConnection");
+    Object connection = connectionType.getConstructor().newInstance();
+    String connectionName = "REST连接<&雪>";
+    connectionType.getMethod("setName", String.class).invoke(connection, connectionName);
+    connectionType.getMethod("setBaseUrl", String.class)
+        .invoke(connection, "https://connection.example.invalid/api");
+    connectionType.getMethod("setProxyHost", String.class)
+        .invoke(connection, "connection.proxy.invalid");
+    connectionType.getMethod("setProxyPort", String.class).invoke(connection, "3128");
+    connectionType.getMethod("setConnectTimeout", String.class).invoke(connection, "1357");
+    connectionType.getMethod("setReadTimeout", String.class).invoke(connection, "2468");
+    connectionType.getMethod("setAuthType", String.class).invoke(connection, "Basic");
+    connectionType.getMethod("setUsername", String.class).invoke(connection, "connection-user");
+    connectionType.getMethod("setPassword", String.class).invoke(connection, "test-only-secret");
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    org.apache.hop.metadata.api.IHopMetadataSerializer serializer =
+        provider.getSerializer((Class) connectionType);
+    serializer.save((org.apache.hop.metadata.api.IHopMetadata) connection);
+
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("rest-client-precedence");
+    String node = "REST传输<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Rest", node, original));
+    var hpl = tempDir.resolve("rest-client-precedence.hpl");
+    store.save(hpl, pipeline);
+
+    // Selected connection, deselected connection, then selected again:
+    // dormant transform settings must not be erased by a mode switch.
+    for (boolean selected : new boolean[] {true, false, true}) {
+      var loaded = store.open(hpl);
+      var docs = new PipelineDocumentRegistry();
+      docs.put(new PipelineDocument("rest-client-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(docs, provider);
+      var read = resource.read("rest-client-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var response = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, response.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          response.config()).deepCopy();
+      edited.put("connection_name", selected ? connectionName : "");
+      edited.put("proxyHost", "transform.proxy.invalid");
+      edited.put("proxyPort", "8999");
+      edited.put("httpLogin", "transform-user");
+      edited.put("connectionTimeout", "8888");
+      edited.put("readTimeout", "7777");
+      edited.put("ignoreSsl", true);
+      assertEquals(200, resource.write("rest-client-doc",
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, loaded);
+
+      var reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform(node).getTransform();
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertEquals(selected ? connectionName : "",
+          wire.at("/connection_name").asText());
+      assertEquals("transform.proxy.invalid", wire.at("/proxyHost").asText());
+      assertEquals("8999", wire.at("/proxyPort").asText());
+      assertEquals("transform-user", wire.at("/httpLogin").asText());
+      assertEquals("8888", wire.at("/connectionTimeout").asText());
+      assertEquals("7777", wire.at("/readTimeout").asText());
+      assertTrue(wire.at("/ignoreSsl").isBoolean());
+      assertTrue(wire.at("/ignoreSsl").booleanValue());
+
+      Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+      var ctor = runtimeType.getConstructor(
+          org.apache.hop.pipeline.transform.TransformMeta.class,
+          diskMeta.getClass(), dataType, int.class,
+          org.apache.hop.pipeline.PipelineMeta.class,
+          org.apache.hop.pipeline.Pipeline.class);
+      Object nativeRest = ctor.newInstance(
+          reopened.findTransform(node), diskMeta, dataType.getConstructor().newInstance(),
+          0, reopened,
+          org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+      runtimeType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class)
+          .invoke(nativeRest, provider);
+      assertTrue((Boolean) runtimeType.getMethod("init").invoke(nativeRest),
+          "native Rest.init must resolve transport settings without network access");
+      var getSettings = runtimeType.getDeclaredMethod("createClientSettings");
+      getSettings.setAccessible(true);
+      Object settings = getSettings.invoke(nativeRest);
+      Class<?> settingsType = loader.loadClass(
+          "org.apache.hop.metadata.rest.client.RestClientSettings");
+      assertEquals(selected ? "connection.proxy.invalid" : "transform.proxy.invalid",
+          settingsType.getMethod("getProxyHost").invoke(settings));
+      assertEquals(selected ? 1357 : 8888,
+          settingsType.getMethod("getConnectTimeout").invoke(settings));
+      assertEquals(selected ? 2468 : 7777,
+          settingsType.getMethod("getReadTimeout").invoke(settings));
+      assertEquals(selected ? "connection-user" : "transform-user",
+          settingsType.getMethod("getBasicUsername").invoke(settings));
+      if (selected) {
+        assertEquals("https://connection.example.invalid/api",
+            settingsType.getMethod("getAuthOrigin").invoke(settings));
+        assertNull(settingsType.getMethod("getSslContext").invoke(settings),
+            "transform-level ignoreSsl must not leak into connection settings");
+        assertFalse((Boolean) settingsType.getMethod("isPermissiveHostnameVerifier")
+            .invoke(settings));
+      } else {
+        assertNotNull(settingsType.getMethod("getSslContext").invoke(settings),
+            "transform-level ignoreSsl is restored when connection is deselected");
+      }
+    }
+    // No network request, credential disclosure or Hop Core modification.
+    System.out.println("PROD_P0_REST_CONNECTION_TRANSPORT_PRECEDENCE_NATIVE_INIT_HPL=PASS");
+  }
 }
