@@ -738,4 +738,178 @@ class RestDynamicMethodFullPipelineP0Test {
       second.stop(0);
     }
   }
+
+  /**
+   * The configured method, not the dynamic per-row method, controls whether
+   * REST binds its query/matrix LISTs. Exercise both sides of that native gate
+   * through real DataGrid -> Rest, JSON config edits, and HPL disk reopens.
+   */
+  @Test
+  void restDynamicOptionsAndGetParameterListsFollowStaticMethodGateAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    record Seen(String method, String rawPath, String rawQuery) {}
+    List<Seen> seen = new CopyOnWriteArrayList<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/dynamic-params", exchange -> {
+      try (exchange) {
+        seen.add(new Seen(exchange.getRequestMethod(),
+            exchange.getRequestURI().getRawPath(),
+            exchange.getRequestURI().getRawQuery()));
+        byte[] body = "OK".getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+        exchange.sendResponseHeaders(200, body.length);
+        exchange.getResponseBody().write(body);
+      }
+    });
+    server.start();
+    try {
+      String url = "http://127.0.0.1:" + server.getAddress().getPort()
+          + "/dynamic-params?base=1";
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+      IPlugin restPlugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(gridPlugin);
+      assertNotNull(restPlugin);
+      ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+      grid.setDefault();
+      ClassLoader loader = grid.getClass().getClassLoader();
+      Class<?> fieldType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+      Class<?> lineType = loader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+      List<Object> fields = new ArrayList<>();
+      for (String name : List.of("动态方法_雪", "路径参数<&>")) {
+        Object field = fieldType.getConstructor().newInstance();
+        fieldType.getMethod("setName", String.class).invoke(field, name);
+        fieldType.getMethod("setType", String.class).invoke(field, "String");
+        fields.add(field);
+      }
+      grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, fields);
+      List<Object> lines = new ArrayList<>();
+      for (List<String> values : List.of(
+          List.of("GET", "黄河 +雪"),
+          List.of("OPTIONS", "长江<&>"))) {
+        Object line = lineType.getConstructor().newInstance();
+        lineType.getMethod("setDatalines", List.class).invoke(line, values);
+        lines.add(line);
+      }
+      grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+      ITransformMeta rest = plugins.loadClass(restPlugin, ITransformMeta.class);
+      rest.setDefault();
+      TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+      TransformMeta target = new TransformMeta("Rest", "rest-node", rest);
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("rest-dynamic-parameter-static-method-gate");
+      pipeline.addTransform(source);
+      pipeline.addTransform(target);
+      pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("rest-dynamic-parameter-gate.hpl");
+      store.save(hpl, pipeline);
+
+      for (String configuredMethod : List.of("GET", "OPTIONS")) {
+        PipelineMeta opened = store.open(hpl);
+        var registry = new PipelineDocumentRegistry();
+        registry.put(new PipelineDocument("rest-param-gate-doc", hpl, opened));
+        var resource = new PipelineConfigResource(registry, provider);
+        var read = resource.read("rest-param-gate-doc",
+            new PipelineConfigResource.ReadRequest("rest-node"));
+        assertEquals(200, read.getStatus());
+        ObjectNode draft = ((ObjectNode)
+            ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+        draft.put("url", url);
+        draft.put("method", configuredMethod);
+        draft.put("dynamicMethod", true);
+        draft.put("methodFieldName", "动态方法_雪");
+        draft.put("streamingEnabled", false);
+        draft.putObject("parameters").putArray("parameter")
+            .addObject().put("field", "路径参数<&>").put("name", "q");
+        draft.putObject("matrixParameters").putArray("matrixParameter")
+            .addObject().put("field", "路径参数<&>").put("name", "m");
+        ObjectNode result = (ObjectNode) draft.path("result");
+        result.put("name", "响应正文");
+        result.put("code", "HTTP状态");
+        result.put("response_header", "");
+        result.put("response_time", "");
+        result.put("binary", false);
+        var write = resource.write("rest-param-gate-doc",
+            new PipelineConfigResource.WriteRequest("rest-node", draft));
+        assertEquals(200, write.getStatus());
+        store.save(hpl, opened);
+        PipelineMeta reopened = store.open(hpl);
+        assertEquals(2, reopened.nrTransforms());
+        assertEquals(1, reopened.nrPipelineHops());
+        JsonNode wire = ConfigJsonSerializer.toJson(
+            reopened.findTransform("rest-node").getTransform(), provider);
+        assertEquals(configuredMethod, wire.at("/method").asText());
+        assertTrue(wire.at("/dynamicMethod").booleanValue());
+        assertEquals("动态方法_雪", wire.at("/methodFieldName").asText());
+        assertEquals("路径参数<&>", wire.at("/parameters/parameter/0/field").asText());
+        assertEquals("q", wire.at("/parameters/parameter/0/name").asText());
+        assertEquals("路径参数<&>", wire.at("/matrixParameters/matrixParameter/0/field").asText());
+        assertEquals("m", wire.at("/matrixParameters/matrixParameter/0/name").asText());
+        var contract = AutomaticConfigDescriptor.describe(
+            reopened.findTransform("rest-node").getTransform().getClass())
+            .runtimePreconditions().stream()
+            .filter(c -> c.code().equals(
+                "REST_DYNAMIC_METHOD_PARAMETERS_USE_STATIC_METHOD_GATE"))
+            .findFirst().orElseThrow();
+        assertEquals(List.of("/method", "/dynamicMethod", "/methodFieldName",
+            "/parameters/parameter", "/matrixParameters/matrixParameter"),
+            contract.keyListPointers());
+
+        seen.clear();
+        List<Object[]> rows = new CopyOnWriteArrayList<>();
+        LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+        engine.setMetadataProvider(provider);
+        try {
+          engine.prepareExecution();
+          ITransform output = engine.getRunThread("rest-node", 0);
+          assertNotNull(output);
+          output.addRowListener(new RowAdapter() {
+            @Override
+            public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+              rows.add(row.clone());
+            }
+          });
+          engine.startThreads();
+          engine.waitUntilFinished();
+          assertEquals(0, engine.getErrors(), "native REST dynamic-method pipeline must finish");
+        } finally {
+          if (!engine.isFinishedOrStopped()) engine.stopAll();
+          engine.cleanup();
+        }
+        assertEquals(2, rows.size());
+        assertEquals(2, seen.size(), "each source row must send one loopback request");
+        for (Object[] row : rows) {
+          assertTrue("GET".equals(row[0]) || "OPTIONS".equals(row[0]));
+          assertEquals(200L, row[3]);
+        }
+        for (Seen request : seen) {
+          String value = request.method().equals("GET") ? "黄河 +雪" : "长江<&>";
+          if (configuredMethod.equals("GET")) {
+            String prefix = "/dynamic-params;m=";
+            assertTrue(request.rawPath().startsWith(prefix), request.toString());
+            assertEquals(value, java.net.URLDecoder.decode(
+                request.rawPath().substring(prefix.length()), StandardCharsets.UTF_8));
+            assertNotNull(request.rawQuery());
+            String[] queryPairs = request.rawQuery().split("&");
+            assertEquals(2, queryPairs.length, request.toString());
+            assertEquals("base=1", queryPairs[0]);
+            assertEquals("q=" + value, java.net.URLDecoder.decode(
+                queryPairs[1], StandardCharsets.UTF_8));
+          } else {
+            assertEquals("/dynamic-params", request.rawPath(),
+                "static OPTIONS must suppress even a dynamic GET row's matrix parameter");
+            assertEquals("base=1", request.rawQuery(),
+                "existing URL query remains while configured parameter LIST is inactive");
+          }
+        }
+      }
+      System.out.println("PROD_P0_REST_DYNAMIC_STATIC_PARAMETER_GATE_NATIVE_ENGINE_JSON_HPL=PASS");
+    } finally {
+      server.stop(0);
+    }
+  }
 }
