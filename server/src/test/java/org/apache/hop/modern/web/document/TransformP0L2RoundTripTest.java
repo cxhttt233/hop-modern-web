@@ -10044,4 +10044,93 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEINPUT_ROW_LIMIT_EXPANDED_HPL=PASS");
   }
 
+
+
+  @Test
+  void mergeJoinNullKeysCompareEqualUnlikeSqlAfterNativeHplConfigEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "MergeJoin");
+    assertNotNull(plugin, "production MergeJoin plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setJoinType", String.class).invoke(original, "INNER");
+    original.getClass().getMethod("setKeyFields1", List.class)
+        .invoke(original, List.of("左侧原键"));
+    original.getClass().getMethod("setKeyFields2", List.class)
+        .invoke(original, List.of("右侧原键"));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("MERGE_JOIN_NULL_KEYS_MATCH_UNLIKE_SQL_EQUALITY"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/keys_1/key", "/keys_2/key", "/join_type"),
+        diagnostic.keyListPointers());
+    assertTrue(diagnostic.explanation().contains("Cartesian-product"));
+    assertEquals(List.of("/keys_1/key", "/keys_2/key"),
+        descriptor.wireLists().stream().map(
+            AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("mergejoin-null-comparator.hpl");
+    String node = "空键关联<&雪>";
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("mergejoin-null-comparator");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "MergeJoin", node, original));
+    store.save(hpl, pipeline);
+
+    var opened = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("mergejoin-null-keys", hpl, opened));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("mergejoin-null-keys",
+        new PipelineConfigResource.ReadRequest(node));
+    assertEquals(200, read.getStatus());
+    var config = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals(descriptor, config.descriptor());
+    var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        config.config()).deepCopy();
+    ((com.fasterxml.jackson.databind.node.ArrayNode) edited.at("/keys_1/key"))
+        .set(0, com.fasterxml.jackson.databind.node.TextNode.valueOf("左键<&雪>"));
+    ((com.fasterxml.jackson.databind.node.ArrayNode) edited.at("/keys_2/key"))
+        .set(0, com.fasterxml.jackson.databind.node.TextNode.valueOf("右键<&雪>"));
+    assertEquals(200, resource.write("mergejoin-null-keys",
+        new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+    store.save(hpl, opened);
+
+    var disk = store.open(hpl);
+    var nativeDisk = disk.findTransform(node).getTransform();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        nativeDisk, provider);
+    assertEquals("左键<&雪>", wire.at("/keys_1/key/0").asText());
+    assertEquals("右键<&雪>", wire.at("/keys_2/key/0").asText());
+    assertEquals("INNER", wire.at("/join_type").asText());
+    assertEquals(List.of("左键<&雪>"),
+        nativeDisk.getClass().getMethod("getKeyFields1").invoke(nativeDisk));
+    assertEquals(List.of("右键<&雪>"),
+        nativeDisk.getClass().getMethod("getKeyFields2").invoke(nativeDisk));
+
+    // This is the exact RowMeta.compare overload called by native
+    // MergeJoin.processRow() before its equal-key/duplicate-key branches.
+    var left = new org.apache.hop.core.row.RowMeta();
+    left.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("左键<&雪>"));
+    var right = new org.apache.hop.core.row.RowMeta();
+    right.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("右键<&雪>"));
+    int[] key = {0};
+    assertEquals(0, left.compare(new Object[] {null}, right,
+        new Object[] {null}, key, key),
+        "native comparator matches null/null, unlike SQL NULL equality");
+    assertEquals(-1, left.compare(new Object[] {null}, right,
+        new Object[] {"黄河"}, key, key));
+    assertEquals(0, left.compare(new Object[] {"黄河"}, right,
+        new Object[] {"黄河"}, key, key));
+    assertEquals(0, left.compare(new Object[] {null}, new Object[] {null}, key),
+        "same-side null keys are equal for the native duplicate-key branch");
+    // No full pipeline execution or output cardinality is claimed here.
+    // The Cartesian-product behavior is source-verified in MergeJoin.processRow().
+    System.out.println("PROD_P0_MERGEJOIN_NULL_KEY_NATIVE_COMPARE_HPL=PASS");
+  }
 }
