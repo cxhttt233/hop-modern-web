@@ -8836,5 +8836,96 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEOUTPUT_ZERO_ROW_TRUNCATE_ACTIVATION_HPL=PASS");
   }
 
+
+  @Test
+  void tableOutputBatchModeGatesRetainInactiveFlagAndCommitAcrossRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin is required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+
+    // Pinned TableOutput.init() requires useBatchUpdate, a positive parsed
+    // commit size, no generated keys and no DB-specific error savepoints.
+    // The editor can express the generated-key gate; the other runtime
+    // conditions remain producer-owned diagnostics, not save-time validators.
+    var batchProperty = property(descriptor, "use_batch");
+    assertEquals(Shape.BOOLEAN, batchProperty.shape());
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext(
+        "/return_keys", false), batchProperty.activationContext());
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(batchProperty);
+    assertEquals("/return_keys",
+        published.at("/activationContext/flagPointer").asText());
+    assertFalse(published.at("/activationContext/activeWhen").booleanValue());
+
+    var runtimeGate = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("TABLE_OUTPUT_BATCH_MODE_RUNTIME_GATES"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/use_batch", "/commit", "/return_keys"),
+        runtimeGate.keyListPointers());
+    assertTrue(runtimeGate.explanation().contains("savepoint"));
+
+    original.getClass().getMethod("setTableName", String.class)
+        .invoke(original, "批量写入<&雪>");
+    original.getClass().getMethod("setGeneratedKeyField", String.class)
+        .invoke(original, "主键<&雪>");
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var hpl = tempDir.resolve("table-output-batch-runtime-gates.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("table-output-batch-runtime-gates");
+    String node = "批处理开关<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", node, original));
+    store.save(hpl, pipeline);
+
+    // A true persisted use_batch is not necessarily effective at runtime:
+    // generated keys and commit=0 independently disable native batchMode.
+    boolean[] useBatch = {true, true, true, false, true};
+    boolean[] returnKeys = {false, true, false, false, false};
+    String[] commit = {"100", "100", "0", "100", "250"};
+    for (int i = 0; i < useBatch.length; i++) {
+      var reopened = store.open(hpl);
+      var edit = reopened.findTransform(node).getTransform();
+      edit.getClass().getMethod("setUseBatchUpdate", boolean.class)
+          .invoke(edit, useBatch[i]);
+      edit.getClass().getMethod("setReturningGeneratedKeys", boolean.class)
+          .invoke(edit, returnKeys[i]);
+      edit.getClass().getMethod("setCommitSize", String.class)
+          .invoke(edit, commit[i]);
+      store.save(hpl, reopened);
+
+      var diskPipeline = store.open(hpl);
+      var diskMeta = diskPipeline.findTransform(node).getTransform();
+      var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertTrue(diskWire.at("/use_batch").isBoolean());
+      assertEquals(useBatch[i], diskWire.at("/use_batch").booleanValue());
+      assertTrue(diskWire.at("/return_keys").isBoolean());
+      assertEquals(returnKeys[i], diskWire.at("/return_keys").booleanValue());
+      assertEquals(commit[i], diskWire.at("/commit").asText());
+      assertEquals("批量写入<&雪>", diskWire.at("/table").asText());
+      assertEquals("主键<&雪>", diskWire.at("/return_field").asText());
+
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("table-batch-doc", hpl, diskPipeline));
+      var resource = new PipelineConfigResource(documents, provider);
+      var response = resource.read("table-batch-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, response.getStatus());
+      var body = (PipelineConfigResource.ConfigResponse) response.getEntity();
+      assertEquals(descriptor, body.descriptor());
+      assertEquals(useBatch[i], body.config().at("/use_batch").booleanValue());
+      assertEquals(returnKeys[i], body.config().at("/return_keys").booleanValue());
+      assertEquals(commit[i], body.config().at("/commit").asText());
+    }
+    // No JDBC connection is made; database savepoint and driver behavior are
+    // deliberately not claimed as exercised by this HPL persistence test.
+    System.out.println("PROD_P0_TABLEOUTPUT_BATCH_RUNTIME_GATES_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 }
