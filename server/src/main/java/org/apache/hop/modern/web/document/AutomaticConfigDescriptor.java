@@ -1043,6 +1043,22 @@ public final class AutomaticConfigDescriptor {
                   List.of("/fields/field", "/group/field"),
                   "GroupBy COUNT_DISTINCT counts each unique non-null subject value once per contiguous group, while COUNT_ALL counts every non-null subject occurrence including duplicates and COUNT_ANY counts every row without requiring a subject. With only null subject values, native COUNT_DISTINCT leaves its INTEGER aggregate null, COUNT_ALL emits INTEGER zero, and COUNT_ANY still emits the group row count. The distinct set resets for each group. Preserve each fields.field[*].type label, subject, list order and grouping keys across JSON editing and real HPL disk reopen. This is a native execution compatibility diagnostic, not a draft-save validator."),
               new RuntimePrecondition(
+                  "GROUPBY_IGNORED_ROWS_STILL_DEFINE_GROUPS_AND_PASS_THROUGH",
+                  List.of("/ignore_aggregate", "/field_ignore", "/all_rows",
+                      "/group/field", "/fields/field"),
+                  "With ignore_aggregate=true, native GroupBy requires field_ignore to "
+                      + "resolve to an incoming BOOLEAN column; only rows where that "
+                      + "column evaluates true are excluded from aggregate calculations. "
+                      + "Ignored rows still participate in contiguous group-key boundary "
+                      + "detection. When all_rows=true, every source row, including "
+                      + "ignored rows, is emitted with the group's aggregates appended; "
+                      + "when all_rows=false, only the grouped aggregate row is emitted. "
+                      + "When ignore_aggregate=false, the configured field_ignore is "
+                      + "retained but does not exclude any rows. Preserve both BOOLEAN "
+                      + "flags, the field name, and ordered grouping/aggregation LISTs "
+                      + "across JSON editing and real HPL disk reopen. This is a native "
+                      + "runtime behavior diagnostic, not a draft-save validator."),
+              new RuntimePrecondition(
                   "GROUPBY_FIRST_LAST_NULL_INCLUSION_CHANGES_VALUES",
                   List.of("/fields/field", "/group/field"),
                   "GroupBy FIRST and LAST skip null subject values, whereas FIRST_INCL_NULL and LAST_INCL_NULL preserve positional nulls. The first-including-null aggregate marks its first non-ignored row as seen even when that subject is null, so a later non-null value does not replace it. The last-including-null aggregate can overwrite a prior value with null. All four output columns inherit the subject type, and ordered fields.field[*].type labels must survive JSON editing and HPL disk reopen. Diagnose downstream null handling from the selected aggregation type; do not reject draft saves."));
