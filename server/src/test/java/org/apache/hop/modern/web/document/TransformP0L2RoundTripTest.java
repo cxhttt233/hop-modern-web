@@ -9728,4 +9728,117 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_EXECSQL_LITERAL_MARKER_RISK_HPL=PASS");
   }
 
+
+  @Test
+  void tableInputNamedSqlLexerMixedMarkersAndQuotedTokensSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableInput");
+    assertNotNull(plugin, "production TableInput plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "use_named_parameters").shape());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "TABLE_INPUT_NAMED_SQL_LEXER_REJECTS_MIXED_POSITIONAL_MARKERS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/use_named_parameters", "/sql", "/sql_from_file", "/lookup"),
+        diagnostic.keyListPointers());
+    assertTrue(diagnostic.explanation().contains("TableInputSql.parse()"));
+    assertTrue(diagnostic.explanation().contains("HopException"));
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("tableinput-named-lexer.hpl");
+    String node = "输入SQL<&雪>";
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("tableinput-named-lexer");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableInput", node, original));
+    store.save(hpl, pipeline);
+
+    String sql = "SELECT '{literal ?}' AS label, \"{identifier}\" AS quoted, "
+        + "'雪<&>' AS txt FROM ${SCHEMA}.orders WHERE id={订单号} "
+        + "AND parent={订单号} -- {line ?}\\n/* {block ?} */";
+    String expectedJdbc = sql.replace("id={订单号}", "id=?")
+        .replace("parent={订单号}", "parent=?");
+    String mixed = "SELECT * FROM orders WHERE id={订单号} AND status=?";
+    var parsed = org.apache.hop.pipeline.transforms.tableinput.TableInputSql.parse(sql);
+    assertEquals(expectedJdbc, parsed.getJdbcSql());
+    assertEquals(List.of("订单号", "订单号"), parsed.getNamedParameters());
+    assertEquals(0, parsed.getPositionalParameterCount(),
+        "question marks inside quoted SQL and comments must not count");
+    var rowMeta = new org.apache.hop.core.row.RowMeta();
+    rowMeta.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString("订单号"));
+    var bound = org.apache.hop.pipeline.transforms.tableinput.TableInputSql.prepare(
+        true, sql, rowMeta, new Object[] {"黄河<&>"});
+    assertEquals(expectedJdbc, bound.getJdbcSql());
+    assertArrayEquals(new Object[] {"黄河<&>", "黄河<&>"}, bound.getParameterData(),
+        "repeated named placeholders must bind the same incoming field in order");
+    assertEquals(2, bound.getParameterMeta().size());
+    assertThrows(org.apache.hop.core.exception.HopException.class,
+        () -> org.apache.hop.pipeline.transforms.tableinput.TableInputSql.parse(mixed));
+    assertEquals(mixed,
+        org.apache.hop.pipeline.transforms.tableinput.TableInputSql.prepare(
+            false, mixed, rowMeta, new Object[] {"黄河<&>"}).getJdbcSql(),
+        "disabled named binding must leave mixed-looking SQL untouched");
+
+    var opened = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("tableinput-lexer-doc", hpl, opened));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("tableinput-lexer-doc",
+        new PipelineConfigResource.ReadRequest(node));
+    assertEquals(200, read.getStatus());
+    var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals(descriptor, current.descriptor());
+    var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        current.config()).deepCopy();
+    edited.put("sql", sql);
+    edited.put("use_named_parameters", true);
+    assertEquals(200, resource.write("tableinput-lexer-doc",
+        new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+    store.save(hpl, opened);
+    var disk = store.open(hpl);
+    var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        disk.findTransform(node).getTransform(), provider);
+    assertEquals(sql, diskWire.at("/sql").asText());
+    assertTrue(diskWire.at("/use_named_parameters").isBoolean());
+    assertTrue(diskWire.at("/use_named_parameters").booleanValue());
+    assertEquals(expectedJdbc,
+        org.apache.hop.pipeline.transforms.tableinput.TableInputSql.parse(
+            diskWire.at("/sql").asText()).getJdbcSql());
+
+    // Draft persistence must not silently rewrite SQL or reject it based on
+    // the current binding mode; native execution can diagnose mixed markers.
+    var documents2 = new PipelineDocumentRegistry();
+    documents2.put(new PipelineDocument("tableinput-lexer-switch-doc", hpl, disk));
+    var resource2 = new PipelineConfigResource(documents2, provider);
+    var read2 = resource2.read("tableinput-lexer-switch-doc",
+        new PipelineConfigResource.ReadRequest(node));
+    assertEquals(200, read2.getStatus());
+    var edited2 = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read2.getEntity()).config()).deepCopy();
+    edited2.put("sql", mixed);
+    edited2.put("use_named_parameters", false);
+    assertEquals(200, resource2.write("tableinput-lexer-switch-doc",
+        new PipelineConfigResource.WriteRequest(node, edited2)).getStatus());
+    store.save(hpl, disk);
+    var switched = store.open(hpl);
+    var switchedWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        switched.findTransform(node).getTransform(), provider);
+    assertEquals(mixed, switchedWire.at("/sql").asText());
+    assertFalse(switchedWire.at("/use_named_parameters").booleanValue());
+    assertEquals(mixed,
+        org.apache.hop.pipeline.transforms.tableinput.TableInputSql.prepare(
+            false, switchedWire.at("/sql").asText(), rowMeta,
+            new Object[] {"黄河<&>"}).getJdbcSql());
+    assertThrows(org.apache.hop.core.exception.HopException.class,
+        () -> org.apache.hop.pipeline.transforms.tableinput.TableInputSql.parse(
+            switchedWire.at("/sql").asText()));
+    // No database connection or SQL execution is performed.
+    System.out.println("PROD_P0_TABLEINPUT_NAMED_SQL_LEXER_HPL=PASS");
+  }
 }
