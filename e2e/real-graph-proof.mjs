@@ -362,6 +362,60 @@ try {
   await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
   console.log("Recent-file clear proof passed: session shortcuts removed without changing real Hop graph or network requests.");
 
+  // A server-visible .hpl filename is untrusted text. React must never parse
+  // HTML-like path segments as markup in the session-only recent-file chooser.
+  // Use a real copied Hop document and real browser/backend requests.
+  const htmlLikeName = "<img src=x onerror=alert(1)>.hpl";
+  const htmlLikePath = join(unicodeDirectory, htmlLikeName);
+  await copyFile(pipelinePath, htmlLikePath);
+  const unexpectedDialogs = [];
+  page.on("dialog", (dialog) => {
+    unexpectedDialogs.push(dialog.type());
+    void dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(htmlLikePath);
+  const htmlOpenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const htmlOpenResponse = await htmlOpenPending;
+  const htmlGraph = await htmlOpenResponse.json();
+  if (!htmlOpenResponse.ok() ||
+      htmlOpenResponse.request().postDataJSON()?.path !== htmlLikePath ||
+      htmlGraph.name !== graph.name ||
+      htmlGraph.nodes?.length !== graph.nodes.length ||
+      htmlGraph.edges?.length !== graph.edges.length) {
+    throw new Error("HTML-like filename did not open the real Hop document verbatim");
+  }
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  const htmlRecent = page.getByRole("group", { name: "最近打开的流程" })
+    .getByRole("button", { name: `填入最近流程：${htmlLikePath}` });
+  if (await htmlRecent.count() !== 1 ||
+      await htmlRecent.innerText() !== htmlLikeName ||
+      await htmlRecent.locator("img").count() !== 0 ||
+      unexpectedDialogs.length !== 0) {
+    throw new Error("Untrusted recent-file name was not rendered as inert text");
+  }
+  const htmlOpensBeforeChoice = requests.filter((url) => url.includes("/api/pipelines/open")).length;
+  await htmlRecent.click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== htmlLikePath ||
+      requests.filter((url) => url.includes("/api/pipelines/open")).length !== htmlOpensBeforeChoice) {
+    throw new Error("HTML-like recent-file shortcut changed the document without explicit open");
+  }
+  const htmlReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const htmlReopenResponse = await htmlReopenPending;
+  if (!htmlReopenResponse.ok() ||
+      htmlReopenResponse.request().postDataJSON()?.path !== htmlLikePath ||
+      unexpectedDialogs.length !== 0) {
+    throw new Error("HTML-like recent-file explicit disk reopen was not safe and exact");
+  }
+  console.log("HTML-like recent-file proof passed: inert path text, exact native Hop open/reopen, no implicit request or dialog.");
+
+
   // Disabled Hop links are real native .hpl metadata, not React-only state.
   // The browser must distinguish them from executable links without changing
   // their identities, issuing edit commands, or entering RAP.
