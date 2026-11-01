@@ -1106,6 +1106,21 @@ public final class AutomaticConfigDescriptor {
                       + "This is a native runtime compatibility diagnostic, not a draft-save "
                       + "validator."),
               new RuntimePrecondition(
+                  "REST_DYNAMIC_METHOD_PARAMETERS_USE_STATIC_METHOD_GATE",
+                  List.of("/method", "/dynamicMethod", "/methodFieldName",
+                      "/parameters/parameter", "/matrixParameters/matrixParameter"),
+                  "Rest.processRow() chooses the outgoing HTTP method per input row when "
+                      + "dynamicMethod=true, but binds query and matrix parameter LISTs "
+                      + "using RestMeta.isActiveParameters(meta.getMethod()) on the configured "
+                      + "static method, not on each row's effective method. With static GET, "
+                      + "dynamic OPTIONS or HEAD requests can still receive both parameter "
+                      + "LISTs; with static OPTIONS or HEAD, dynamic GET requests omit those "
+                      + "configured parameters. Native Rest.buildRequestUri() preserves the "
+                      + "original URL query independently. Keep both ordered LISTs and the "
+                      + "static/dynamic method fields losslessly editable through JSON/HPL; "
+                      + "warn about the effective request URI rather than silently clearing "
+                      + "inactive settings or rejecting draft saves."),
+              new RuntimePrecondition(
                   "REST_DYNAMIC_METHOD_NATIVE_CHECK_FALSE_POSITIVE",
                   List.of("/dynamicMethod", "/methodFieldName", "/method"),
                   "When dynamicMethod is true, methodFieldName must be non-empty and resolve to an incoming row field. The native RestMeta.check() incorrectly reports ERROR even when the field name is present (MethodFieldOk); this is a native-check false positive, not a reason to reject an otherwise valid dynamic-method configuration. Runtime also validates each incoming HTTP method token. When dynamicMethod is false, method must be a valid non-empty HTTP method token."),
@@ -1118,7 +1133,8 @@ public final class AutomaticConfigDescriptor {
                       + "case, since HTTP method tokens are case-sensitive. RestMeta.isValidMethodToken() "
                       + "accepts RFC 9110 token characters and rejects spaces, CR/LF and empty strings. "
                       + "After normalization, GET/HEAD/OPTIONS have no request body; HEAD/OPTIONS "
-                      + "have no query or matrix parameters, while custom verbs may use both. "
+                      + "disable query and matrix parameters when configured as the static method; " 
+                      + "dynamic per-row methods do not re-evaluate that initialization gate. "
                       + "The method field is STRING, not a closed ENUM: preserve custom tokens "
                       + "through JSON config edits and Hop XML persistence. For dynamicMethod=true, "
                       + "methodFieldName identifies the incoming row field; diagnose runtime tokens "
