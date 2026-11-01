@@ -9841,4 +9841,116 @@ class TransformP0L2RoundTripTest {
     // No database connection or SQL execution is performed.
     System.out.println("PROD_P0_TABLEINPUT_NAMED_SQL_LEXER_HPL=PASS");
   }
+  @Test
+  void tableOutputDatePartitioningNativePeriodPrioritySurvivesRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "TABLE_OUTPUT_PARTITION_DATE_FIELD_AND_DAILY_PRECEDENCE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/partitioning_enabled", "/partitioning_field",
+        "/partitioning_daily", "/partitioning_monthly", "/tablename_in_field", "/table"),
+        diagnostic.keyListPointers());
+    assertTrue(diagnostic.explanation().contains("yyyyMMdd"));
+    assertTrue(diagnostic.explanation().contains("yyyyMM"));
+    assertTrue(diagnostic.explanation().contains("non-null DATE"));
+    assertTrue(diagnostic.explanation().contains("empty target"));
+
+    for (String key : List.of("partitioning_daily", "partitioning_monthly")) {
+      assertEquals(Shape.BOOLEAN, property(descriptor, key).shape());
+      assertEquals(new AutomaticConfigDescriptor.ActivationContext(
+          "/partitioning_enabled", true,
+          List.of(new AutomaticConfigDescriptor.ActivationCondition(
+              "/tablename_in_field", false))),
+          property(descriptor, key).activationContext());
+    }
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext(
+        "/partitioning_enabled", true,
+        List.of(new AutomaticConfigDescriptor.ActivationCondition(
+            "/tablename_in_field", false))),
+        property(descriptor, "partitioning_field").activationContext());
+
+    original.getClass().getMethod("setTableName", String.class)
+        .invoke(original, "黄河分区表<&雪>");
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("table-output-date-partition-mode.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("table-output-date-partition-mode");
+    String node = "按日期分表<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", node, original));
+    store.save(hpl, pipeline);
+
+    // Native processRow() chooses dynamic table names before date partitioning,
+    // and chooses daily formatting before monthly when both flags are true.
+    // The neither-flag and empty-field modes are intentionally persisted as
+    // drafts: native init/processRow must diagnose them before execution.
+    boolean[][] modes = {
+        {true, true, true, false},
+        {true, false, true, false},
+        {true, false, false, false},
+        {true, true, true, true},
+        {true, true, false, false},
+        {false, true, true, false}
+    };
+    String[] fields = {"采样日期<&雪>", "采样日期<&雪>", "采样日期<&雪>",
+        "采样日期<&雪>", "", "采样日期<&雪>"};
+    for (int i = 0; i < modes.length; i++) {
+      var opened = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("table-date-partition-doc", hpl, opened));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("table-date-partition-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, current.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          current.config()).deepCopy();
+      edited.put("partitioning_enabled", modes[i][0]);
+      edited.put("partitioning_daily", modes[i][1]);
+      edited.put("partitioning_monthly", modes[i][2]);
+      edited.put("tablename_in_field", modes[i][3]);
+      edited.put("partitioning_field", fields[i]);
+      edited.put("table", "黄河分区表<&雪>");
+      assertEquals(200, resource.write("table-date-partition-doc",
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, opened);
+
+      var disk = store.open(hpl);
+      var diskMeta = disk.findTransform(node).getTransform();
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      String[] pointers = {"/partitioning_enabled", "/partitioning_daily",
+          "/partitioning_monthly", "/tablename_in_field"};
+      for (int j = 0; j < pointers.length; j++) {
+        assertTrue(wire.at(pointers[j]).isBoolean(), pointers[j]);
+        assertEquals(modes[i][j], wire.at(pointers[j]).booleanValue(), pointers[j]);
+      }
+      assertEquals(fields[i], wire.at("/partitioning_field").asText());
+      assertEquals("黄河分区表<&雪>", wire.at("/table").asText());
+      assertEquals(modes[i][0], diskMeta.getClass()
+          .getMethod("isPartitioningEnabled").invoke(diskMeta));
+      assertEquals(modes[i][1], diskMeta.getClass()
+          .getMethod("isPartitioningDaily").invoke(diskMeta));
+      assertEquals(modes[i][2], diskMeta.getClass()
+          .getMethod("isPartitioningMonthly").invoke(diskMeta));
+      assertEquals(modes[i][3], diskMeta.getClass()
+          .getMethod("isTableNameInField").invoke(diskMeta));
+    }
+    // No JDBC connection, table creation, or partitioned INSERT is performed.
+    // Date suffix selection and empty-target failure are verified against
+    // pinned native TableOutput.processRow()/init() source, not claimed as
+    // database-executed behavior.
+    System.out.println("PROD_P0_TABLEOUTPUT_DATE_PARTITION_PRIORITY_HPL=PASS");
+  }
+
 }
