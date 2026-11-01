@@ -535,8 +535,21 @@ public final class AutomaticConfigDescriptor {
         return new ActivationContext("/specify_fields", true);
       if (key.equals("return_field") && shape == Shape.STRING)
         return new ActivationContext("/return_keys", true);
+      // Native TableOutput.processRow() uses date-based table partitioning only
+      // for static table targets. A dynamic table-name field takes precedence,
+      // even when the partitioning switches remain enabled in saved Hop XML.
+      // Keep inactive values for a later switch back to a static target.
       if (key.equals("partitioning_field") && shape == Shape.STRING)
-        return new ActivationContext("/partitioning_enabled", true);
+        return new ActivationContext("/partitioning_enabled", true,
+            List.of(new ActivationCondition("/tablename_in_field", false)));
+      if (shape == Shape.BOOLEAN
+          && Set.of("partitioning_daily", "partitioning_monthly").contains(key))
+        return new ActivationContext("/partitioning_enabled", true,
+            List.of(new ActivationCondition("/tablename_in_field", false)));
+      // The per-row table-name column is included in INSERT data only in
+      // dynamic target mode (and only without an explicit field mapping).
+      if (key.equals("tablename_in_table") && shape == Shape.BOOLEAN)
+        return new ActivationContext("/tablename_in_field", true);
       // Native TableOutput invokes DDL only when the master schema-update
       // switch is enabled. Preserve the individual (potentially destructive)
       // options when the master switch is off; the editor only disables them.
