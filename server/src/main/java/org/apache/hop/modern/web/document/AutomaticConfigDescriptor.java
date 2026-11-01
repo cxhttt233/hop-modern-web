@@ -1528,7 +1528,21 @@ public final class AutomaticConfigDescriptor {
                       + "typed ascending BOOLEAN through JSON editing and real HPL disk "
                       + "reopen; do not substitute lexical string sorting or silently "
                       + "discard rows with missing numeric values. This is a runtime "
-                      + "compatibility diagnostic, not a save-time validator."));
+                      + "compatibility diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "SORT_ROWS_COMPRESSION_VARIABLE_OVERRIDES_STATIC_FLAG_AT_INIT",
+                  List.of("/compress", "/compress_variables", "/sort_size"),
+                  "Native SortRows.init() calls getVariableBoolean(compress_variables, compress). "
+                      + "compress_variables is a variable NAME, not a Boolean expression or "
+                      + "a switch that depends on compress=true. When that variable has a "
+                      + "nonempty value, its Boolean interpretation overrides the static "
+                      + "compress flag in either direction; an unset or empty variable name "
+                      + "or value falls back to compress. The effective choice controls "
+                      + "GZIP compression of temporary spill files, not in-memory sorting. "
+                      + "Preserve the literal STRING variable name and typed BOOLEAN "
+                      + "compress flag through JSON editing and real HPL disk reopen; "
+                      + "do not disable the variable-name editor when compress=false or "
+                      + "treat this runtime choice as a save-time validator."));
       case "org.apache.hop.pipeline.transforms.streamlookup.StreamLookupMeta" ->
           List.of(
               new RuntimePrecondition(
