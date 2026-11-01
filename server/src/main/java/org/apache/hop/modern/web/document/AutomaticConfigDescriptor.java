@@ -535,6 +535,12 @@ public final class AutomaticConfigDescriptor {
         return new ActivationContext("/specify_fields", true);
       if (key.equals("return_field") && shape == Shape.STRING)
         return new ActivationContext("/return_keys", true);
+      // Native TableOutput.init() disables JDBC batch mode when generated keys
+      // are requested, even if use_batch remains true in persisted Hop XML.
+      // The other runtime gates (commit size and database savepoints) cannot
+      // be represented by this BOOLEAN activation alone; publish them below.
+      if (key.equals("use_batch") && shape == Shape.BOOLEAN)
+        return new ActivationContext("/return_keys", false);
       // Native truncateTable() only targets a static, unpartitioned table.
       // only_when_have_rows controls whether zero incoming rows still trigger
       // a destructive truncate; preserve inactive flags when changing modes.
@@ -1637,6 +1643,20 @@ public final class AutomaticConfigDescriptor {
                       + "switch is later re-enabled. Diagnose the actual runtime target "
                       + "and DDL risk before execution; never clear inactive values or "
                       + "perform DDL during draft editing."),
+              new RuntimePrecondition(
+                  "TABLE_OUTPUT_BATCH_MODE_RUNTIME_GATES",
+                  List.of("/use_batch", "/commit", "/return_keys"),
+                  "Native TableOutput.init() enables JDBC batchMode only when "
+                      + "use_batch=true, the variable-resolved commit value parses "
+                      + "to an integer greater than zero, return_keys=false, and "
+                      + "database-backed savepoint error handling is not active. "
+                      + "A commit of 0 disables batching even though native init "
+                      + "later converts it to Integer.MAX_VALUE for commit control. "
+                      + "With return_keys=true, native batching is disabled even "
+                      + "when the persisted use_batch flag is true; re-enabling "
+                      + "generated-key-free mode can reactivate it. Driver support "
+                      + "and error-hop semantics must be checked before execution. "
+                      + "This is a runtime diagnostic, not a draft-save validator."),
               new RuntimePrecondition(
                   "TABLE_OUTPUT_TRUNCATE_EMPTY_INPUT_CAN_CLEAR_STATIC_TABLE",
                   List.of("/truncate", "/only_when_have_rows",
