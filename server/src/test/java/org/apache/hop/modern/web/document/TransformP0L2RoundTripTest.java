@@ -8273,7 +8273,8 @@ class TransformP0L2RoundTripTest {
     assertEquals(Shape.LIST, property(descriptor, "field").shape());
     assertEquals(new AutomaticConfigDescriptor.ActivationContext("/return_keys", true),
         property(descriptor, "return_field").activationContext());
-    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/partitioning_enabled", true),
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/partitioning_enabled", true,
+        List.of(new AutomaticConfigDescriptor.ActivationCondition("/tablename_in_field", false))),
         property(descriptor, "partitioning_field").activationContext());
     assertNull(property(descriptor, "connection").activationContext());
     assertEquals("/fields/field", descriptor.wireLists().stream()
@@ -8627,6 +8628,106 @@ class TransformP0L2RoundTripTest {
     // No live JDBC/DDL is performed: this proves descriptor activation and
     // native Hop XML/JSON persistence, not database schema mutation safety.
     System.out.println("PROD_P0_TABLEOUTPUT_SCHEMA_DDL_ACTIVATION_HPL=PASS");
+  }
+
+  @Test
+  void tableOutputStaticPartitionOptionsAndDynamicTargetActivationSurviveRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin is required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+
+    // Native TableOutput.processRow() checks dynamic table names first; date
+    // partitioning is an else-if branch and cannot run for dynamic targets.
+    var partitionActivation = new AutomaticConfigDescriptor.ActivationContext(
+        "/partitioning_enabled", true,
+        List.of(new AutomaticConfigDescriptor.ActivationCondition("/tablename_in_field", false)));
+    for (String key : List.of("partitioning_field", "partitioning_daily", "partitioning_monthly")) {
+      assertEquals(partitionActivation, property(descriptor, key).activationContext(), key);
+      var published = new com.fasterxml.jackson.databind.ObjectMapper()
+          .valueToTree(property(descriptor, key));
+      assertEquals("/partitioning_enabled",
+          published.at("/activationContext/flagPointer").asText(), key);
+      assertEquals("/tablename_in_field",
+          published.at("/activationContext/additionalConditions/0/flagPointer").asText(), key);
+      assertFalse(published.at("/activationContext/additionalConditions/0/activeWhen")
+          .booleanValue(), key);
+    }
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/tablename_in_field", true),
+        property(descriptor, "tablename_in_table").activationContext());
+    assertNull(property(descriptor, "partitioning_enabled").activationContext());
+
+    original.getClass().getMethod("setTableName", String.class)
+        .invoke(original, "静态目标表<&雪>");
+    original.getClass().getMethod("setTableNameField", String.class)
+        .invoke(original, "每行目标<&雪>");
+    original.getClass().getMethod("setPartitioningField", String.class)
+        .invoke(original, "分区日期<&雪>");
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("table-output-static-partition-activation.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("table-output-static-partition-activation");
+    String node = "输出分区<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", node, original));
+    store.save(hpl, pipeline);
+
+    // Dynamic target takes precedence even if the partition flags remain true.
+    // Switching either master flag off must not erase the saved daily/monthly
+    // values or the dynamic target column inclusion preference.
+    boolean[][] modes = {
+        // dynamic, partition-enabled, daily, monthly, include-table-name-column
+        {false, true, true, false, true},
+        {true, true, true, false, false},
+        {true, false, true, false, true},
+        {false, false, true, false, false},
+        {false, true, false, true, true}
+    };
+    String[] setters = {"setTableNameInField", "setPartitioningEnabled",
+        "setPartitioningDaily", "setPartitioningMonthly", "setTableNameInTable"};
+    String[] pointers = {"/tablename_in_field", "/partitioning_enabled",
+        "/partitioning_daily", "/partitioning_monthly", "/tablename_in_table"};
+    for (boolean[] mode : modes) {
+      var reopened = store.open(hpl);
+      var nativeMeta = reopened.findTransform(node).getTransform();
+      for (int i = 0; i < mode.length; i++) {
+        nativeMeta.getClass().getMethod(setters[i], boolean.class)
+            .invoke(nativeMeta, mode[i]);
+      }
+      store.save(hpl, reopened);
+      var diskPipeline = store.open(hpl);
+      var diskMeta = diskPipeline.findTransform(node).getTransform();
+      var nativeWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      for (int i = 0; i < mode.length; i++) {
+        assertTrue(nativeWire.at(pointers[i]).isBoolean(), pointers[i]);
+        assertEquals(mode[i], nativeWire.at(pointers[i]).booleanValue(), pointers[i]);
+      }
+      assertEquals("静态目标表<&雪>", nativeWire.at("/table").asText());
+      assertEquals("每行目标<&雪>", nativeWire.at("/tablename_field").asText());
+      assertEquals("分区日期<&雪>", nativeWire.at("/partitioning_field").asText());
+
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("table-output-partition-doc", hpl, diskPipeline));
+      var resource = new PipelineConfigResource(documents, provider);
+      var response = resource.read("table-output-partition-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, response.getStatus());
+      var body = (PipelineConfigResource.ConfigResponse) response.getEntity();
+      assertEquals(descriptor, body.descriptor());
+      for (int i = 0; i < mode.length; i++) {
+        assertEquals(mode[i], body.config().at(pointers[i]).booleanValue(), pointers[i]);
+      }
+    }
+    // This proves producer activation and Hop XML/JSON persistence, not a live
+    // JDBC INSERT or runtime date-partition routing.
+    System.out.println("PROD_P0_TABLEOUTPUT_STATIC_PARTITION_ACTIVATION_HPL=PASS");
   }
 
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
