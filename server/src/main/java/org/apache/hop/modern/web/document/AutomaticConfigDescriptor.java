@@ -535,6 +535,16 @@ public final class AutomaticConfigDescriptor {
         return new ActivationContext("/specify_fields", true);
       if (key.equals("return_field") && shape == Shape.STRING)
         return new ActivationContext("/return_keys", true);
+      // Native truncateTable() only targets a static, unpartitioned table.
+      // only_when_have_rows controls whether zero incoming rows still trigger
+      // a destructive truncate; preserve inactive flags when changing modes.
+      if (key.equals("truncate") && shape == Shape.BOOLEAN)
+        return new ActivationContext("/tablename_in_field", false,
+            List.of(new ActivationCondition("/partitioning_enabled", false)));
+      if (key.equals("only_when_have_rows") && shape == Shape.BOOLEAN)
+        return new ActivationContext("/truncate", true,
+            List.of(new ActivationCondition("/tablename_in_field", false),
+                new ActivationCondition("/partitioning_enabled", false)));
       // Native TableOutput.processRow() uses date-based table partitioning only
       // for static table targets. A dynamic table-name field takes precedence,
       // even when the partitioning switches remain enabled in saved Hop XML.
@@ -1626,7 +1636,21 @@ public final class AutomaticConfigDescriptor {
                       + "flags remain persisted and can become destructive if the master "
                       + "switch is later re-enabled. Diagnose the actual runtime target "
                       + "and DDL risk before execution; never clear inactive values or "
-                      + "perform DDL during draft editing."));
+                      + "perform DDL during draft editing."),
+              new RuntimePrecondition(
+                  "TABLE_OUTPUT_TRUNCATE_EMPTY_INPUT_CAN_CLEAR_STATIC_TABLE",
+                  List.of("/truncate", "/only_when_have_rows",
+                      "/tablename_in_field", "/partitioning_enabled"),
+                  "Native TableOutput.processRow() truncates a static unpartitioned target "
+                      + "on the first input row when truncate=true. If no rows arrive, "
+                      + "it still calls truncateTable() when only_when_have_rows=false; "
+                      + "setting only_when_have_rows=true suppresses that empty-input "
+                      + "truncate. Native truncateTable() skips dynamic table-name and "
+                      + "date-partitioned modes, and only the first ordinary transform "
+                      + "copy truncates. Re-enabling inactive flags can delete existing "
+                      + "database data even for an empty pipeline. Preserve these native "
+                      + "BOOLEAN values across JSON/HPL edits and diagnose the destructive "
+                      + "zero-row behavior before execution; never execute DDL in the editor."));
       case "org.apache.hop.pipeline.transforms.uniquerowsbyhashset.UniqueRowsByHashSetMeta" ->
           List.of(new RuntimePrecondition(
               "UNIQUE_ROWS_HASHSET_COMPARE_FIELDS_REQUIRE_INPUT_ROW_FIELDS",
