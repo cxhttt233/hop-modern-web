@@ -9004,5 +9004,102 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_HTTP_IGNORE_SSL_TLS_RISK_HPL=PASS");
   }
 
+  @Test
+  void httpProxyPortInvalidTextFallsBackTo8080AtNativeInitAfterRealHplReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Http");
+    assertNotNull(plugin, "production Http plugin is required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    assertEquals(Shape.STRING, property(descriptor, "proxyHost").shape());
+    assertEquals(Shape.STRING, property(descriptor, "proxyPort").shape());
+    var contract = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("HTTP_PROXY_PORT_INVALID_TEXT_FALLS_BACK_TO_8080"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/proxyHost", "/proxyPort"), contract.keyListPointers());
+    assertTrue(contract.explanation().contains("8080"));
+    assertTrue(contract.explanation().contains("nonblank"));
+
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/river?station=雪");
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var hpl = tempDir.resolve("http-proxy-port-native-init.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("http-proxy-port-native-init");
+    String node = "HTTP代理<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Http", node, original));
+    store.save(hpl, pipeline);
+
+    String[] hosts = {"proxy.internal.invalid", "proxy.internal.invalid", "",
+        "proxy.internal.invalid", "proxy.internal.invalid"};
+    String[] ports = {"invalid<&雪>", "3128", "9999", "0", "-1"};
+    int[] expectedPorts = {8080, 3128, 9999, 0, -1};
+    for (int i = 0; i < ports.length; i++) {
+      var loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("http-proxy-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("http-proxy-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, current.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          current.config()).deepCopy();
+      edited.put("proxyHost", hosts[i]);
+      edited.put("proxyPort", ports[i]);
+      assertEquals(200, resource.write("http-proxy-doc",
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, loaded);
+
+      var reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform(node).getTransform();
+      var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertEquals(ports[i], diskWire.at("/proxyPort").asText());
+      if (hosts[i].isEmpty()) {
+        assertTrue(diskWire.at("/proxyHost").isMissingNode()
+            || diskWire.at("/proxyHost").isNull()
+            || diskWire.at("/proxyHost").asText().isEmpty());
+      } else {
+        assertEquals(hosts[i], diskWire.at("/proxyHost").asText());
+      }
+
+      ClassLoader loader = diskMeta.getClass().getClassLoader();
+      Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.http.Http");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.http.HttpData");
+      Object data = dataType.getConstructor().newInstance();
+      var constructor = runtimeType.getConstructor(
+          org.apache.hop.pipeline.transform.TransformMeta.class,
+          diskMeta.getClass(), dataType, int.class,
+          org.apache.hop.pipeline.PipelineMeta.class,
+          org.apache.hop.pipeline.Pipeline.class);
+      Object nativeHttp = constructor.newInstance(
+          reopened.findTransform(node), diskMeta, data, 0, reopened,
+          org.mockito.Mockito.spy(new org.apache.hop.pipeline.engines.local.LocalPipelineEngine()));
+      runtimeType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class)
+          .invoke(nativeHttp, provider);
+      assertTrue((Boolean) runtimeType.getMethod("init").invoke(nativeHttp),
+          "native Http.init must parse proxy settings without making a request");
+      assertEquals(expectedPorts[i], dataType.getField("realProxyPort").getInt(data),
+          "non-numeric proxy ports default to 8080, numeric values remain unchanged");
+      String resolvedHost = (String) dataType.getField("realProxyHost").get(data);
+      if (hosts[i].isEmpty()) {
+        assertTrue(resolvedHost == null || resolvedHost.isBlank());
+      } else {
+        assertEquals(hosts[i], resolvedHost);
+      }
+    }
+    // No proxy connection or HTTP request is performed; this verifies the
+    // native init-time parsing and HPL/JSON preservation, not proxy reachability.
+    System.out.println("PROD_P0_HTTP_PROXY_PORT_NATIVE_INIT_FALLBACK_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 }
