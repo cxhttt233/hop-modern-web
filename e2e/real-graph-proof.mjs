@@ -528,27 +528,21 @@ try {
       getComputedStyle(inactivePath).strokeDasharray.includes("8"));
   }, [activeLink.id, inactiveLink.id], { timeout: 8000 });
 
-  const sharedSourceNode = page.locator('.react-flow__node[data-id="source"]');
-  await sharedSourceNode.waitFor({ state: "visible" });
-  const sharedSourceIcon = await sharedSourceNode.locator(".transform-node-icon").boundingBox();
-  if (!sharedSourceIcon) throw new Error("Native shared-source transform is not draggable");
-  const mixedMovePending = page.waitForResponse((response) =>
+  // Use an independently authoritative add edit. The active and disabled
+  // branches must survive an unrelated real Hop mutation before disk save.
+  const mixedAddPending = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
-    new RegExp("/api/pipelines/[^/]+/move$").test(new URL(response.url()).pathname));
-  await page.mouse.move(sharedSourceIcon.x + sharedSourceIcon.width / 2, sharedSourceIcon.y + sharedSourceIcon.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(sharedSourceIcon.x + sharedSourceIcon.width / 2 + 40, sharedSourceIcon.y + sharedSourceIcon.height / 2 + 24, { steps: 12 });
-  await page.mouse.up();
-  const mixedMoveResponse = await mixedMovePending;
-  if (!mixedMoveResponse.ok()) throw new Error("Mixed Hop branch semantic move failed");
-  const movedMixed = await mixedMoveResponse.json();
-  const movedMixedSource = movedMixed.nodes?.find((node) => node.id === "source");
-  const originalMixedSource = mixedGraph.nodes.find((node) => node.id === "source");
-  if (!movedMixedSource || !originalMixedSource ||
-      (movedMixedSource.x === originalMixedSource.x && movedMixedSource.y === originalMixedSource.y) ||
-      !movedMixed.edges?.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
-      !movedMixed.edges?.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
-    throw new Error("Mixed Hop move changed link identity or enabled flags");
+    new RegExp("/api/pipelines/[^/]+/edit/add$").test(new URL(response.url()).pathname));
+  await page.locator(".transform-group").getByRole("button", { name: "TableInput" }).click();
+  const mixedAddResponse = await mixedAddPending;
+  if (!mixedAddResponse.ok()) throw new Error("Mixed Hop semantic TableInput add failed");
+  const editedMixed = await mixedAddResponse.json();
+  const addedMixedNode = editedMixed.nodes?.find((node) =>
+    node.pluginId === "TableInput" && !mixedGraph.nodes.some((previous) => previous.id === node.id));
+  if (!addedMixedNode || editedMixed.nodes?.length !== 4 || editedMixed.edges?.length !== 2 ||
+      !editedMixed.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
+      !editedMixed.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
+    throw new Error("Mixed Hop add changed independent Y/N branch identities");
   }
   await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
   const mixedSavePending = page.waitForResponse((response) =>
@@ -571,12 +565,13 @@ try {
   const mixedReopenResponse = await mixedReopenPending;
   if (!mixedReopenResponse.ok()) throw new Error("Mixed Hop disk reopen failed");
   const mixedReopened = await mixedReopenResponse.json();
-  const diskMixedSource = mixedReopened.nodes?.find((node) => node.id === "source");
-  if (!diskMixedSource || diskMixedSource.x !== movedMixedSource.x || diskMixedSource.y !== movedMixedSource.y ||
-      mixedReopened.edges?.length !== 2 ||
+  const diskAdded = mixedReopened.nodes?.find((node) => node.id === addedMixedNode.id);
+  if (!diskAdded || diskAdded.pluginId !== "TableInput" ||
+      diskAdded.x !== addedMixedNode.x || diskAdded.y !== addedMixedNode.y ||
+      mixedReopened.nodes?.length !== 4 || mixedReopened.edges?.length !== 2 ||
       !mixedReopened.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
       !mixedReopened.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
-    throw new Error("Mixed Hop disk reopen lost branch position or Y/N edge identity");
+    throw new Error("Mixed Hop disk reopen lost added transform or Y/N edge identity");
   }
   await page.waitForFunction(([activeId, inactiveId]) => {
     const edges = [...document.querySelectorAll(".react-flow__edge")];
@@ -586,7 +581,7 @@ try {
       !active.textContent?.includes("已停用") &&
       inactive.classList.contains("hop-edge-disabled") && inactive.textContent?.includes("已停用"));
   }, [activeLink.id, inactiveLink.id], { timeout: 8000 });
-  console.log("Mixed-Hop native proof passed: one active Y and one disabled N branch -> React Flow isolation -> semantic move -> XML save -> disk reopen.");
+  console.log("Mixed-Hop native proof passed: active Y and disabled N branches -> React Flow isolation -> real TableInput add -> XML save -> disk reopen.");
 
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
