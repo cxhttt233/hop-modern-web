@@ -619,4 +619,165 @@ class SortRowsFullPipelineP0Test {
     System.out.println("PROD_P0_SORTROWS_NUMERIC_NULL_ASC_DESC_JSON_HPL_ROWS=PASS");
   }
 
+
+  /**
+   * Full-engine follow-up to the descriptor/RowMeta comparator acceptance:
+   * verify that native SortRows unique_rows actually emits different row
+   * counts at PRIMARY and TERTIARY collation strength, independently of
+   * case_sensitive, after the server config write and real HPL disk reopen.
+   */
+  @Test
+  void sortRowsCollatorStrengthChangesActualDistinctRowsAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    java.util.Locale originalLocale = java.util.Locale.getDefault();
+    java.util.Locale.setDefault(java.util.Locale.US);
+    try {
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+      IPlugin sortPlugin = plugins.findPluginWithId(TransformPluginType.class, "SortRows");
+      assertNotNull(gridPlugin);
+      assertNotNull(sortPlugin);
+
+      ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+      grid.setDefault();
+      ClassLoader gridLoader = grid.getClass().getClassLoader();
+      Class<?> fieldType = gridLoader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+      Class<?> lineType = gridLoader.loadClass(
+          "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+      List<Object> fields = new ArrayList<>();
+      for (String name : List.of("名称<&>", "来源")) {
+        Object field = fieldType.getConstructor().newInstance();
+        fieldType.getMethod("setName", String.class).invoke(field, name);
+        fieldType.getMethod("setType", String.class).invoke(field, "String");
+        fields.add(field);
+      }
+      grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, fields);
+      List<Object> lines = new ArrayList<>();
+      for (List<String> values : List.of(
+          List.of("Resume", "capital"),
+          List.of("resume", "lower"),
+          List.of("résumé", "accent"),
+          List.of("zeta", "other"))) {
+        Object line = lineType.getConstructor().newInstance();
+        lineType.getMethod("setDatalines", List.class).invoke(line, values);
+        lines.add(line);
+      }
+      grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+      ITransformMeta sort = plugins.loadClass(sortPlugin, ITransformMeta.class);
+      sort.setDefault();
+      assertEquals(List.of("/fields/field", "/unique_rows"),
+          AutomaticConfigDescriptor.describe(sort.getClass()).runtimePreconditions()
+              .stream()
+              .filter(rule -> rule.code().equals(
+                  "SORT_ROWS_COLLATOR_OVERRIDES_CASE_FLAG_AND_INHERITS_ROW_LOCALE"))
+              .findFirst().orElseThrow().keyListPointers());
+
+      TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+      TransformMeta target = new TransformMeta("SortRows", "sort-node", sort);
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("sort-collator-native-unique-rows");
+      pipeline.addTransform(source);
+      pipeline.addTransform(target);
+      pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("sort-collator-unique.hpl");
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("collator-unique-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+
+      int[] strengths = {
+          java.text.Collator.PRIMARY,
+          java.text.Collator.PRIMARY,
+          java.text.Collator.TERTIARY
+      };
+      boolean[] caseSensitiveFlags = {true, false, false};
+      int[] expectedRows = {2, 2, 4};
+
+      for (int scenario = 0; scenario < strengths.length; scenario++) {
+        var read = resource.read("collator-unique-doc",
+            new PipelineConfigResource.ReadRequest("sort-node"));
+        assertEquals(200, read.getStatus());
+        ObjectNode draft = ((ObjectNode)
+            ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+        draft.put("directory", tempDir.toAbsolutePath().toString());
+        draft.put("sort_size", "1000");
+        draft.put("unique_rows", true);
+        draft.putObject("fields").putArray("field").addObject()
+            .put("name", "名称<&>")
+            .put("ascending", true)
+            .put("case_sensitive", caseSensitiveFlags[scenario])
+            .put("collator_enabled", true)
+            .put("collator_strength", strengths[scenario])
+            .put("presorted", false);
+        var write = resource.write("collator-unique-doc",
+            new PipelineConfigResource.WriteRequest("sort-node", draft));
+        assertEquals(200, write.getStatus());
+        store.save(hpl, loaded);
+
+        PipelineMeta reopened = store.open(hpl);
+        assertEquals(1, reopened.nrPipelineHops());
+        JsonNode wire = ConfigJsonSerializer.toJson(
+            reopened.findTransform("sort-node").getTransform(), provider);
+        assertTrue(wire.at("/unique_rows").booleanValue());
+        assertEquals("名称<&>", wire.at("/fields/field/0/name").asText());
+        assertTrue(wire.at("/fields/field/0/collator_enabled").booleanValue());
+        assertTrue(wire.at("/fields/field/0/collator_strength").isIntegralNumber());
+        assertEquals(strengths[scenario],
+            wire.at("/fields/field/0/collator_strength").intValue());
+        assertEquals(caseSensitiveFlags[scenario],
+            wire.at("/fields/field/0/case_sensitive").booleanValue());
+
+        List<Object[]> emitted = new CopyOnWriteArrayList<>();
+        AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+        LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+        engine.setMetadataProvider(provider);
+        try {
+          engine.prepareExecution();
+          ITransform output = engine.getRunThread("sort-node", 0);
+          assertNotNull(output);
+          output.addRowListener(new RowAdapter() {
+            @Override
+            public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+              outputMeta.set(rowMeta.clone());
+              emitted.add(row.clone());
+            }
+          });
+          engine.startThreads();
+          engine.waitUntilFinished();
+          assertEquals(0, engine.getErrors(), "native SortRows engine must finish");
+        } finally {
+          if (!engine.isFinishedOrStopped()) engine.stopAll();
+          engine.cleanup();
+        }
+
+        assertNotNull(outputMeta.get());
+        IValueMeta keyMeta = outputMeta.get().getValueMeta(0);
+        assertFalse(keyMeta.isCollatorDisabled());
+        assertEquals(java.util.Locale.US, keyMeta.getCollatorLocale());
+        assertEquals(strengths[scenario], keyMeta.getCollatorStrength());
+        assertEquals(!caseSensitiveFlags[scenario], keyMeta.isCaseInsensitive());
+        assertEquals(expectedRows[scenario], emitted.size(),
+            "native unique_rows must use Collator strength, not case_sensitive");
+        List<String> names = emitted.stream().map(row -> (String) row[0]).toList();
+        assertTrue(names.contains("zeta"));
+        if (strengths[scenario] == java.text.Collator.PRIMARY) {
+          assertEquals(1, names.stream()
+              .filter(name -> name.equals("Resume")
+                  || name.equals("resume") || name.equals("résumé")).count());
+        } else {
+          assertTrue(names.containsAll(List.of("Resume", "resume", "résumé")));
+        }
+      }
+      System.out.println("PROD_P0_SORTROWS_COLLATOR_NATIVE_UNIQUE_ROWS_HPL=PASS");
+    } finally {
+      java.util.Locale.setDefault(originalLocale);
+    }
+  }
+
 }
