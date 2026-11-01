@@ -8564,9 +8564,9 @@ class TransformP0L2RoundTripTest {
         .filter(p -> p.code().equals(
             "TABLE_OUTPUT_SCHEMA_DDL_OPTIONS_REQUIRE_MASTER_SWITCH_AND_STATIC_TARGET"))
         .findFirst().orElseThrow();
-    assertTrue(ddlRisk.relatedPointers().contains("/auto_update_table_structure"));
-    assertTrue(ddlRisk.relatedPointers().contains("/tablename_in_field"));
-    assertTrue(ddlRisk.relatedPointers().contains("/partitioning_enabled"));
+    assertTrue(ddlRisk.keyListPointers().contains("/auto_update_table_structure"));
+    assertTrue(ddlRisk.keyListPointers().contains("/tablename_in_field"));
+    assertTrue(ddlRisk.keyListPointers().contains("/partitioning_enabled"));
 
     // Native Hop persists inactive values. A disabled master switch must not
     // erase a previously selected drop/recreate or drop-columns option.
