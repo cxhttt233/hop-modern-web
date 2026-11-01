@@ -950,7 +950,26 @@ public final class AutomaticConfigDescriptor {
               new RuntimePrecondition(
                   "EXEC_SQL_RESULT_COUNTER_FIELDS_APPEND_FIXED_ORDER_INTEGERS",
                   List.of("/update_field", "/insert_field", "/delete_field", "/read_field"),
-                  "ExecSqlMeta.getFields() appends one INTEGER output column for each non-empty configured update_field, insert_field, delete_field, and read_field, always in that order (update, insert, delete, read), regardless of the annotation declaration order. ExecSql.getResultRow() uses the configured counter names literally, without resolving Hop variables; the columns have default integer length. In execute_each_row mode these counters follow the input row, while once-only execution emits only counter fields. Derive downstream output metadata from the four names and execution mode; this is a diagnostic, not a save-time validator."));
+                  "ExecSqlMeta.getFields() appends one INTEGER output column for each non-empty configured update_field, insert_field, delete_field, and read_field, always in that order (update, insert, delete, read), regardless of the annotation declaration order. ExecSql.getResultRow() uses the configured counter names literally, without resolving Hop variables; the columns have default integer length. In execute_each_row mode these counters follow the input row, while once-only execution emits only counter fields. Derive downstream output metadata from the four names and execution mode; this is a diagnostic, not a save-time validator."),
+              new RuntimePrecondition(
+                  "EXEC_SQL_LITERAL_MARKERS_SCAN_QUOTED_SQL_AND_REQUIRE_ARGUMENT_ARITY",
+                  List.of("/execute_each_row", "/set_params", "/quoteString",
+                      "/sql", "/sql_from_file", "/arguments/argument"),
+                  "With execute_each_row=true and set_params=false, native ExecSql.processRow() "
+                      + "scans every literal '?' character in the effective SQL from right "
+                      + "to left, including question marks inside quoted SQL text or comments. "
+                      + "It does not tokenize SQL before substitution. Each marker consumes "
+                      + "an incoming-row argument by position, so more question marks than "
+                      + "configured arguments can fail at runtime with an index error; "
+                      + "all configured argument names must still resolve to input fields. "
+                      + "When quoteString=true, STRING values are quoted by the database "
+                      + "dialect, but that does not make marker recognition SQL-aware. "
+                      + "With quoteString=false, raw row strings are interpolated and may "
+                      + "change SQL syntax; JDBC parameter binding (set_params=true) avoids "
+                      + "this literal substitution path. Preserve SQL text, Boolean flags "
+                      + "and the ordered argument list across JSON/HPL editing. This is a "
+                      + "source-verified execution and injection-risk diagnostic, not a "
+                      + "draft-save validator; the editor must not execute SQL."));
       case "org.apache.hop.pipeline.transforms.filterrows.FilterRowsMeta" ->
           List.of(new RuntimePrecondition(
               "FILTER_ROWS_NESTED_CONDITION_FIELDS_REQUIRE_UPSTREAM_FIELDS",
