@@ -9761,7 +9761,7 @@ class TransformP0L2RoundTripTest {
 
     String sql = "SELECT '{literal ?}' AS label, \"{identifier}\" AS quoted, "
         + "'雪<&>' AS txt FROM ${SCHEMA}.orders WHERE id={订单号} "
-        + "AND parent={订单号} -- {line ?}\\n/* {block ?} */";
+        + "AND parent={订单号} -- {line ?}\n/* {block ?} */";
     String expectedJdbc = sql.replace("id={订单号}", "id=?")
         .replace("parent={订单号}", "parent=?");
     String mixed = "SELECT * FROM orders WHERE id={订单号} AND status=?";
