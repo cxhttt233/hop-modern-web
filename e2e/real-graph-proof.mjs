@@ -618,6 +618,35 @@ try {
       .find((element) => element.getAttribute("data-id") === edgeId);
     return Boolean(edge?.classList.contains("hop-edge-disabled") && edge.textContent?.includes("已停用"));
   }, inactiveLink.id, { timeout: 8000 });
+  const mixedRedoPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/edit/redo$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "重做（Redo）" }).click();
+  const mixedRedoResponse = await mixedRedoPending;
+  const mixedRedone = await mixedRedoResponse.json();
+  if (!mixedRedoResponse.ok() ||
+      mixedRedone.nodes.some((node) => node.id === disabledTarget.id) ||
+      mixedRedone.edges.some((edge) => edge.id === inactiveLink.id) ||
+      !mixedRedone.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false)) {
+    throw new Error("Redo disabled-branch deletion altered the independent enabled Hop");
+  }
+  const mixedFinalUndoPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/edit/undo$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "撤销（Undo）" }).click();
+  const mixedFinalUndoResponse = await mixedFinalUndoPending;
+  const mixedFinalRestored = await mixedFinalUndoResponse.json();
+  if (!mixedFinalUndoResponse.ok() ||
+      !mixedFinalRestored.nodes.some((node) => node.id === disabledTarget.id) ||
+      !mixedFinalRestored.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false) ||
+      !mixedFinalRestored.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false)) {
+    throw new Error("Final undo failed to restore disabled Hop after redo");
+  }
+  await page.waitForFunction((edgeId) => {
+    const edge = [...document.querySelectorAll(".react-flow__edge")]
+      .find((element) => element.getAttribute("data-id") === edgeId);
+    return Boolean(edge?.classList.contains("hop-edge-disabled") && edge.textContent?.includes("已停用"));
+  }, inactiveLink.id, { timeout: 8000 });
   const mixedHistorySavePending = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
     new RegExp("/api/pipelines/[^/]+/save$").test(new URL(response.url()).pathname));
