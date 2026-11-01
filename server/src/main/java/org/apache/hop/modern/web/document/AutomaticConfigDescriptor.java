@@ -1039,6 +1039,21 @@ public final class AutomaticConfigDescriptor {
                   "BOTH_INPUTS_ASCENDING_BY_JOIN_KEYS",
                   List.of("/keys_1/key", "/keys_2/key"),
                   "Both input streams must be sorted ascending by their respective join keys."),
+
+              new RuntimePrecondition(
+                  "MERGE_JOIN_NULL_KEYS_MATCH_UNLIKE_SQL_EQUALITY",
+                  List.of("/keys_1/key", "/keys_2/key", "/join_type"),
+                  "Native MergeJoin.processRow() calls IRowMeta.compare() for its two ordered "
+                      + "join-key lists and treats a comparison result of zero as a match. "
+                      + "ValueMetaBase.compare() returns zero when both compared values are "
+                      + "null, so INNER MergeJoin can match two null keys, unlike SQL's "
+                      + "NULL = NULL predicate. Repeated equal keys, including repeated "
+                      + "null keys, enter the native duplicate-key Cartesian-product "
+                      + "branch and can multiply output rows. Both streams must still be "
+                      + "sorted by the configured key order and have compatible key types. "
+                      + "Preserve the two independent native STRING LISTs across JSON and "
+                      + "HPL editing; warn before execution instead of silently filtering "
+                      + "nulls or rejecting a saved draft."),
               new RuntimePrecondition(
                   "MERGE_JOIN_NATIVE_CHECK_DOES_NOT_VALIDATE_JOIN_TYPE_OR_KEY_ARITY",
                   List.of("/join_type", "/keys_1/key", "/keys_2/key", "/transform1", "/transform2"),
