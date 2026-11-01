@@ -1736,7 +1736,22 @@ public final class AutomaticConfigDescriptor {
                new RuntimePrecondition(
                    "TABLE_INPUT_SPECIFIED_FIELDS_MAP_JDBC_COLUMNS_BY_RESOLVED_NAME",
                    List.of("/specify_fields", "/validate_specified_fields", "/fields/field"),
-                   "With specify_fields true, TableInputMeta.getFields() clears the incoming row metadata and emits the non-empty fields.field entries in configured order, resolving variables in each field name and preserving the declared Hop type, length and precision. TableInputMeta.createSpecifiedMapping() then matches each declared output name to JDBC columns by name, not JDBC position. Missing JDBC columns fail regardless of validate_specified_fields; JDBC type mismatches fail only when validate_specified_fields is true (otherwise values are converted). Diagnose this mapping before execution without blocking draft saves."));
+                   "With specify_fields true, TableInputMeta.getFields() clears the incoming row metadata and emits the non-empty fields.field entries in configured order, resolving variables in each field name and preserving the declared Hop type, length and precision. TableInputMeta.createSpecifiedMapping() then matches each declared output name to JDBC columns by name, not JDBC position. Missing JDBC columns fail regardless of validate_specified_fields; JDBC type mismatches fail only when validate_specified_fields is true (otherwise values are converted). Diagnose this mapping before execution without blocking draft saves."),
+               new RuntimePrecondition(
+                   "TABLE_INPUT_ROW_LIMIT_EXPANDED_INTEGER_AND_UNLIMITED_FALLBACK",
+                   List.of("/limit", "/variables_active", "/connection"),
+                   "Native TableInput.init() always resolves the STRING limit through Hop "
+                       + "variables and passes it to Const.toIntExpanded(..., 0), independently "
+                       + "of variables_active (which governs SQL-body variable expansion). "
+                       + "The integer parser accepts expanded values such as 1k, 2_500 and "
+                       + "1e3, not just plain decimal digits; empty, unresolved, malformed "
+                       + "and out-of-32-bit-range values fall back to 0. Database.openQuery() "
+                       + "calls JDBC Statement.setMaxRows only when the parsed limit is "
+                       + "positive and the database dialect supports it. Zero and negative "
+                       + "limits therefore do not enforce a JDBC row cap. Preserve the "
+                       + "literal STRING limit and variable expression through JSON editing "
+                       + "and real HPL disk reopen; diagnose an accidentally unlimited "
+                       + "query before execution without rewriting draft configuration."));
       case "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
           List.of(
               new RuntimePrecondition(
