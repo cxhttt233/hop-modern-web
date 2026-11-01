@@ -10229,4 +10229,129 @@ class TransformP0L2RoundTripTest {
     assertEquals("OR", wire.at(childPointer + "/2/operator").asText());
     System.out.println("PROD_P0_FILTERROWS_COMPOSITE_ORDER_NATIVE_EVAL_HPL=PASS");
   }
+
+  @Test
+  void sortRowsNativeCollatorInheritsRowLocaleAndOverridesCaseFlagAfterHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "SortRows");
+    assertNotNull(plugin, "production SortRows plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Class<?> keyType = original.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.sort.SortRowsField");
+    Object key = keyType.getConstructor().newInstance();
+    String column = "水位<&雪>";
+    keyType.getMethod("setFieldName", String.class).invoke(key, column);
+    keyType.getMethod("setAscending", boolean.class).invoke(key, true);
+    keyType.getMethod("setCaseSensitive", boolean.class).invoke(key, true);
+    keyType.getMethod("setCollatorEnabled", boolean.class).invoke(key, true);
+    keyType.getMethod("setCollatorStrength", int.class).invoke(key, 0);
+    original.getClass().getMethod("setSortFields", List.class)
+        .invoke(original, List.of(key));
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SORT_ROWS_COLLATOR_OVERRIDES_CASE_FLAG_AND_INHERITS_ROW_LOCALE"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field", "/unique_rows"), diagnostic.keyListPointers());
+    assertTrue(diagnostic.explanation().contains("Locale"));
+    assertEquals("/fields/field",
+        descriptor.wireLists().get(0).listPointer());
+
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("sortrows-native-collator.hpl");
+    String node = "排序字符<&雪>";
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("sortrows-native-collator");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "SortRows", node, original));
+    store.save(hpl, pipeline);
+
+    // Native comparison uses the input ValueMeta's Locale, not a SortRows
+    // locale setting. Explicit Locale.US keeps this regression deterministic.
+    var initial = store.open(hpl);
+    var primaryCaseSensitive = new org.apache.hop.core.row.RowMeta();
+    var initialValue = new org.apache.hop.core.row.value.ValueMetaString(column);
+    initialValue.setCollatorLocale(java.util.Locale.US);
+    primaryCaseSensitive.addValueMeta(initialValue);
+    var initialMeta = initial.findTransform(node).getTransform();
+    initialMeta.getClass().getMethod("assignSortingCriteria",
+        org.apache.hop.core.row.IRowMeta.class).invoke(initialMeta, primaryCaseSensitive);
+    assertFalse(initialValue.isCollatorDisabled());
+    assertFalse(initialValue.isCaseInsensitive());
+    assertEquals(0, primaryCaseSensitive.compare(
+        new Object[] {"resume"}, new Object[] {"résumé"}, new int[] {0}),
+        "PRIMARY Collator ignores accent even with case_sensitive=true");
+
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("sortrows-collator", hpl, initial));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("sortrows-collator",
+        new PipelineConfigResource.ReadRequest(node));
+    assertEquals(200, read.getStatus());
+    var response = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals(descriptor, response.descriptor());
+    var config = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        response.config()).deepCopy();
+    assertTrue(config.at("/fields/field/0/collator_enabled").asBoolean());
+    assertTrue(config.at("/fields/field/0/case_sensitive").asBoolean());
+    assertEquals(0, config.at("/fields/field/0/collator_strength").asInt());
+    ((com.fasterxml.jackson.databind.node.ObjectNode)
+        config.at("/fields/field/0")).put("case_sensitive", false);
+    assertEquals(200, resource.write("sortrows-collator",
+        new PipelineConfigResource.WriteRequest(node, config)).getStatus());
+    store.save(hpl, initial);
+
+    var second = store.open(hpl);
+    var primaryCaseInsensitive = new org.apache.hop.core.row.RowMeta();
+    var secondValue = new org.apache.hop.core.row.value.ValueMetaString(column);
+    secondValue.setCollatorLocale(java.util.Locale.US);
+    primaryCaseInsensitive.addValueMeta(secondValue);
+    second.findTransform(node).getTransform().getClass().getMethod(
+        "assignSortingCriteria", org.apache.hop.core.row.IRowMeta.class)
+        .invoke(second.findTransform(node).getTransform(), primaryCaseInsensitive);
+    assertTrue(secondValue.isCaseInsensitive());
+    assertFalse(secondValue.isCollatorDisabled());
+    assertEquals(0, primaryCaseInsensitive.compare(
+        new Object[] {"resume"}, new Object[] {"résumé"}, new int[] {0}),
+        "case_sensitive does not change a Collator-enabled PRIMARY comparison");
+
+    var secondDocuments = new PipelineDocumentRegistry();
+    secondDocuments.put(new PipelineDocument("sortrows-tertiary", hpl, second));
+    var secondResource = new PipelineConfigResource(secondDocuments, provider);
+    var secondRead = secondResource.read("sortrows-tertiary",
+        new PipelineConfigResource.ReadRequest(node));
+    assertEquals(200, secondRead.getStatus());
+    var tertiaryConfig = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) secondRead.getEntity()).config()).deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)
+        tertiaryConfig.at("/fields/field/0")).put("collator_strength", 2);
+    assertEquals(200, secondResource.write("sortrows-tertiary",
+        new PipelineConfigResource.WriteRequest(node, tertiaryConfig)).getStatus());
+    store.save(hpl, second);
+
+    var disk = store.open(hpl);
+    var tertiaryMeta = disk.findTransform(node).getTransform();
+    var tertiaryRow = new org.apache.hop.core.row.RowMeta();
+    var tertiaryValue = new org.apache.hop.core.row.value.ValueMetaString(column);
+    tertiaryValue.setCollatorLocale(java.util.Locale.US);
+    tertiaryRow.addValueMeta(tertiaryValue);
+    tertiaryMeta.getClass().getMethod("assignSortingCriteria",
+        org.apache.hop.core.row.IRowMeta.class).invoke(tertiaryMeta, tertiaryRow);
+    assertEquals(2, tertiaryValue.getCollatorStrength());
+    assertNotEquals(0, tertiaryRow.compare(
+        new Object[] {"resume"}, new Object[] {"résumé"}, new int[] {0}),
+        "TERTIARY Collator distinguishes accented strings");
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        tertiaryMeta, provider);
+    assertEquals(column, wire.at("/fields/field/0/name").asText());
+    assertTrue(wire.at("/fields/field/0/collator_enabled").asBoolean());
+    assertFalse(wire.at("/fields/field/0/case_sensitive").asBoolean());
+    assertEquals(2, wire.at("/fields/field/0/collator_strength").asInt());
+    System.out.println("PROD_P0_SORTROWS_NATIVE_COLLATOR_LOCALE_CASE_HPL=PASS");
+  }
 }
