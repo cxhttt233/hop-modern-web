@@ -588,12 +588,24 @@ try {
   // disabled edge, redo removes it, and a final undo must survive XML save.
   const disabledTarget = mixedReopened.nodes.find((node) => node.id === inactiveLink.target);
   if (!disabledTarget) throw new Error("Mixed-Hop disabled target is missing");
+  // Reopen responses can arrive before React commits its server-mode state.
+  // Wait for the authoritative editor actions before attempting a mutation.
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).waitFor({ state: "visible" });
   await page.locator('.react-flow__node[data-id="' + disabledTarget.id + '"]').click();
+  const requestsBeforeDelete = requests.length;
   const mixedDeletePending = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
-    new RegExp("/api/pipelines/[^/]+/edit/delete$").test(new URL(response.url()).pathname));
+    new RegExp("/api/pipelines/[^/]+/edit/delete$").test(new URL(response.url()).pathname),
+    { timeout: 8000 });
   await page.getByRole("button", { name: `删除转换：${disabledTarget.name || disabledTarget.id}（Delete）` }).click();
-  const mixedDeleteResponse = await mixedDeletePending;
+  let mixedDeleteResponse;
+  try {
+    mixedDeleteResponse = await mixedDeletePending;
+  } catch (error) {
+    const paths = requests.slice(requestsBeforeDelete).map((url) => new URL(url).pathname);
+    const uiError = await page.locator(".error-note").textContent().catch(() => "");
+    throw new Error(`Disabled-Hop delete issued no matching response; request paths=${JSON.stringify(paths)}, UI=${uiError || "(none)"}; ${String(error)}`);
+  }
   if (!mixedDeleteResponse.ok()) throw new Error("Disabled-branch semantic delete failed");
   const mixedDeleted = await mixedDeleteResponse.json();
   if (mixedDeleted.nodes.some((node) => node.id === disabledTarget.id) ||
