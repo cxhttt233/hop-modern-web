@@ -1547,6 +1547,23 @@ public final class AutomaticConfigDescriptor {
                       + "discard rows with missing numeric values. This is a runtime "
                       + "compatibility diagnostic, not a save-time validator."),
               new RuntimePrecondition(
+                  "SORT_ROWS_SPILL_SIZE_AND_FREE_MEMORY_NATIVE_INIT_FALLBACK",
+                  List.of("/sort_size", "/free_memory"),
+                  "Native SortRows.init() parses sort_size with "
+                      + "Const.toIntExpanded(resolve(sort_size), -1), so Hop variables "
+                      + "can supply the row-count threshold and malformed values become -1. "
+                      + "In contrast, free_memory is parsed directly with "
+                      + "Const.toInt(free_memory, -1), without resolving variables; "
+                      + "a variable expression there is not expanded and becomes -1. "
+                      + "Only when BOTH effective thresholds are <= 0 does native init "
+                      + "set the free-memory percentage threshold to 25. With a positive "
+                      + "sort_size and invalid free_memory, the free-memory threshold "
+                      + "remains -1 rather than falling back to 25. This affects "
+                      + "whether SortRows spills based on row count or memory pressure. "
+                      + "Keep both fields as literal STRING wire values, resolve variables "
+                      + "only where native execution does, and surface the effective "
+                      + "thresholds before execution; do not rewrite draft values."),
+              new RuntimePrecondition(
                   "SORT_ROWS_COMPRESSION_VARIABLE_OVERRIDES_STATIC_FLAG_AT_INIT",
                   List.of("/compress", "/compress_variables", "/sort_size"),
                   "Native SortRows.init() calls getVariableBoolean(compress_variables, compress). "
