@@ -420,6 +420,80 @@ try {
   // The browser must distinguish them from executable links without changing
   // their identities, issuing edit commands, or entering RAP.
   const enabledXml = await readFile(pipelinePath, "utf8");
+
+  // The pipeline's XML <info><name> is user-authored native Hop metadata,
+  // distinct from the filesystem path. Exercise XML escaping, inert React
+  // rendering and preservation through a real semantic edit/save/disk reopen.
+  const metadataName = '黄河 <img src=x onerror=alert(1)> & "监测流程"';
+  const xmlName = metadataName.replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+  const metadataXml = enabledXml.replace(
+    "<name>real-graph-proof</name>", "<name>" + xmlName + "</name>");
+  if (metadataXml === enabledXml) throw new Error("Native Hop pipeline metadata fixture not found");
+  const metadataPath = join(unicodeDirectory, "原生流程名称保真.hpl");
+  await writeFile(metadataPath, metadataXml);
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(metadataPath);
+  const metadataOpenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const metadataOpenResponse = await metadataOpenPending;
+  const metadataGraph = await metadataOpenResponse.json();
+  if (!metadataOpenResponse.ok() || metadataGraph.name !== metadataName ||
+      metadataGraph.nodes?.length !== graph.nodes.length ||
+      metadataGraph.edges?.length !== graph.edges.length) {
+    throw new Error("Native Hop XML pipeline name was not decoded exactly");
+  }
+  await page.waitForFunction((name) =>
+    document.querySelector(".file-identity")?.getAttribute("data-document-name") === name,
+    metadataName, { timeout: 8000 });
+  const metadataIdentity = page.locator(".file-identity");
+  if (await metadataIdentity.locator("strong").innerText() !== metadataName ||
+      await metadataIdentity.locator("img").count() !== 0 ||
+      unexpectedDialogs.length !== 0) {
+    throw new Error("Untrusted native Hop pipeline name was not rendered as inert text");
+  }
+  const metadataAddPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    /\/api\/pipelines\/[^/]+\/edit\/add$/.test(new URL(response.url()).pathname));
+  await page.locator(".transform-group").getByRole("button", { name: "TableInput" }).click();
+  const metadataAddResponse = await metadataAddPending;
+  const metadataEdited = await metadataAddResponse.json();
+  if (!metadataAddResponse.ok() || metadataEdited.nodes?.length !== graph.nodes.length + 1 ||
+      !metadataEdited.nodes.some((node) => node.pluginId === "TableInput") ||
+      metadataEdited.edges?.length !== graph.edges.length) {
+    throw new Error("Native pipeline metadata edit did not use the real Hop graph");
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const metadataSavePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    /\/api\/pipelines\/[^/]+\/save$/.test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+  const metadataSaveResponse = await metadataSavePending;
+  if (!metadataSaveResponse.ok()) throw new Error("Native metadata disk save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const savedMetadataXml = await readFile(metadataPath, "utf8");
+  if (!savedMetadataXml.includes("&lt;img") || savedMetadataXml.includes("<img src=")) {
+    throw new Error("Native metadata XML lost escaping after semantic save");
+  }
+  const metadataReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const metadataReopenResponse = await metadataReopenPending;
+  const metadataReopened = await metadataReopenResponse.json();
+  if (!metadataReopenResponse.ok() || metadataReopened.name !== metadataName ||
+      metadataReopened.nodes?.length !== graph.nodes.length + 1 ||
+      metadataReopened.edges?.length !== graph.edges.length ||
+      await metadataIdentity.locator("strong").innerText() !== metadataName ||
+      await metadataIdentity.locator("img").count() !== 0 ||
+      unexpectedDialogs.length !== 0) {
+    throw new Error("Native Hop XML pipeline name changed or executed on disk reopen");
+  }
+  console.log("Native pipeline-name proof passed: escaped untrusted Hop XML metadata -> inert Chinese UI -> real TableInput edit -> disk save/reopen.");
+
   const disabledXml = enabledXml.replace("<enabled>Y</enabled>", "<enabled>N</enabled>");
   if (disabledXml === enabledXml) throw new Error("Native enabled Hop fixture not found");
   const disabledPath = join(unicodeDirectory, "停用 Hop 连线.hpl");
