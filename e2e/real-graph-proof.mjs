@@ -528,24 +528,24 @@ try {
       getComputedStyle(inactivePath).strokeDasharray.includes("8"));
   }, [activeLink.id, inactiveLink.id], { timeout: 8000 });
 
-  const branchNode = page.locator('.react-flow__node[data-id="旁路输出"]');
-  await branchNode.waitFor({ state: "visible" });
-  const branchIcon = await branchNode.locator(".transform-node-icon").boundingBox();
-  if (!branchIcon) throw new Error("Native branch transform is not draggable");
+  const sharedSourceNode = page.locator('.react-flow__node[data-id="source"]');
+  await sharedSourceNode.waitFor({ state: "visible" });
+  const sharedSourceIcon = await sharedSourceNode.locator(".transform-node-icon").boundingBox();
+  if (!sharedSourceIcon) throw new Error("Native shared-source transform is not draggable");
   const mixedMovePending = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
     new RegExp("/api/pipelines/[^/]+/move$").test(new URL(response.url()).pathname));
-  await page.mouse.move(branchIcon.x + branchIcon.width / 2, branchIcon.y + branchIcon.height / 2);
+  await page.mouse.move(sharedSourceIcon.x + sharedSourceIcon.width / 2, sharedSourceIcon.y + sharedSourceIcon.height / 2);
   await page.mouse.down();
-  await page.mouse.move(branchIcon.x + branchIcon.width / 2 + 40, branchIcon.y + branchIcon.height / 2 + 24, { steps: 12 });
+  await page.mouse.move(sharedSourceIcon.x + sharedSourceIcon.width / 2 + 40, sharedSourceIcon.y + sharedSourceIcon.height / 2 + 24, { steps: 12 });
   await page.mouse.up();
   const mixedMoveResponse = await mixedMovePending;
   if (!mixedMoveResponse.ok()) throw new Error("Mixed Hop branch semantic move failed");
   const movedMixed = await mixedMoveResponse.json();
-  const movedBranch = movedMixed.nodes?.find((node) => node.id === "旁路输出");
-  const originalBranch = mixedGraph.nodes.find((node) => node.id === "旁路输出");
-  if (!movedBranch || !originalBranch ||
-      (movedBranch.x === originalBranch.x && movedBranch.y === originalBranch.y) ||
+  const movedSource = movedMixed.nodes?.find((node) => node.id === "source");
+  const originalSource = mixedGraph.nodes.find((node) => node.id === "source");
+  if (!movedSource || !originalSource ||
+      (movedSource.x === originalSource.x && movedSource.y === originalSource.y) ||
       !movedMixed.edges?.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
       !movedMixed.edges?.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
     throw new Error("Mixed Hop move changed link identity or enabled flags");
@@ -571,8 +571,8 @@ try {
   const mixedReopenResponse = await mixedReopenPending;
   if (!mixedReopenResponse.ok()) throw new Error("Mixed Hop disk reopen failed");
   const mixedReopened = await mixedReopenResponse.json();
-  const diskBranch = mixedReopened.nodes?.find((node) => node.id === "旁路输出");
-  if (!diskBranch || diskBranch.x !== movedBranch.x || diskBranch.y !== movedBranch.y ||
+  const diskSource = mixedReopened.nodes?.find((node) => node.id === "source");
+  if (!diskSource || diskSource.x !== movedSource.x || diskSource.y !== movedSource.y ||
       mixedReopened.edges?.length !== 2 ||
       !mixedReopened.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
       !mixedReopened.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
