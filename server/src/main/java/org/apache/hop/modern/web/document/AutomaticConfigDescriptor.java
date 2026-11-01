@@ -969,7 +969,23 @@ public final class AutomaticConfigDescriptor {
                       + "this literal substitution path. Preserve SQL text, Boolean flags "
                       + "and the ordered argument list across JSON/HPL editing. This is a "
                       + "source-verified execution and injection-risk diagnostic, not a "
-                      + "draft-save validator; the editor must not execute SQL."));
+                      + "draft-save validator; the editor must not execute SQL."),
+              new RuntimePrecondition(
+                  "EXEC_SQL_FILE_PATH_ALWAYS_RESOLVES_SQL_BODY_VARIABLES_REQUIRE_FLAG",
+                  List.of("/sql", "/sql_from_file", "/replace_variables",
+                      "/execute_each_row"),
+                  "Pinned ExecSqlMeta.getEffectiveSql() resolves Hop variables in "
+                      + "the nonempty sql_from_file path and reads that VFS file as "
+                      + "UTF-8, regardless of replace_variables. A configured SQL "
+                      + "file takes precedence over the retained inline sql; a missing "
+                      + "file throws HopException rather than falling back. The returned "
+                      + "SQL text still contains literal variable expressions. Native "
+                      + "ExecSql.init() resolves expressions in that effective SQL "
+                      + "text only when replace_variables=true, once at initialization, "
+                      + "not once for each input row. Keep the raw inline SQL, file "
+                      + "path, and typed BOOLEAN flag across JSON edits and HPL disk "
+                      + "reopen; diagnose the source and substitution stages without "
+                      + "opening a database or treating this as a draft-save validator."));
       case "org.apache.hop.pipeline.transforms.filterrows.FilterRowsMeta" ->
           List.of(new RuntimePrecondition(
               "FILTER_ROWS_NESTED_CONDITION_FIELDS_REQUIRE_UPSTREAM_FIELDS",
