@@ -1053,4 +1053,169 @@ class GroupByFullPipelineP0Test {
     System.out.println("PROD_P0_GROUPBY_NATIVE_INPUT_FIELD_PICKERS=PASS");
   }
 
+
+  @Test
+  void groupByIgnoredBooleanRowsExcludeOnlyAggregatesAndStillPassThroughAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin groupPlugin = plugins.findPluginWithId(TransformPluginType.class, "GroupBy");
+    assertNotNull(gridPlugin);
+    assertNotNull(groupPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String[] definition : new String[][] {
+        {"流域<&>", "String"}, {"流量", "Integer"}, {"排除聚合", "Boolean"}}) {
+      Object column = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(column, definition[0]);
+      fieldType.getMethod("setType", String.class).invoke(column, definition[1]);
+      columns.add(column);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("黄河<&>", "10", "N"),
+        List.of("黄河<&>", "20", "Y"),
+        List.of("黄河<&>", "30", "N"),
+        List.of("长江", "40", "Y"),
+        List.of("长江", "50", "N"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta group = plugins.loadClass(groupPlugin, ITransformMeta.class);
+    group.setDefault();
+    var diagnostic = AutomaticConfigDescriptor.describe(group.getClass())
+        .runtimePreconditions().stream()
+        .filter(rule -> rule.code().equals(
+            "GROUPBY_IGNORED_ROWS_STILL_DEFINE_GROUPS_AND_PASS_THROUGH"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/ignore_aggregate", "/field_ignore", "/all_rows",
+        "/group/field", "/fields/field"), diagnostic.keyListPointers());
+
+    TransformMeta source = new TransformMeta("DataGrid", "grid-ignored", grid);
+    TransformMeta target = new TransformMeta("GroupBy", "group-ignored", group);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("groupby-ignored-rows-native-engine");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("groupby-ignored-rows.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("group-ignored-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+
+    boolean[] ignoreFlags = {true, true, false};
+    boolean[] allRowsFlags = {false, true, false};
+    for (int scenario = 0; scenario < ignoreFlags.length; scenario++) {
+      var read = resource.read("group-ignored-doc",
+          new PipelineConfigResource.ReadRequest("group-ignored"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("ignore_aggregate", ignoreFlags[scenario]);
+      draft.put("field_ignore", "排除聚合");
+      draft.put("all_rows", allRowsFlags[scenario]);
+      draft.put("give_back_row", false);
+      draft.putObject("group").putArray("field")
+          .addObject().put("name", "流域<&>");
+      var aggregates = draft.putObject("fields").putArray("field");
+      aggregates.addObject().put("aggregate", "有效行数")
+          .put("subject", "").put("type", "COUNT_ANY");
+      aggregates.addObject().put("aggregate", "有效流量")
+          .put("subject", "流量").put("type", "SUM");
+      var write = resource.write("group-ignored-doc",
+          new PipelineConfigResource.WriteRequest("group-ignored", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      assertEquals(2, reopened.nrTransforms());
+      assertEquals(1, reopened.nrPipelineHops());
+      JsonNode wire = ConfigJsonSerializer.toJson(
+          reopened.findTransform("group-ignored").getTransform(), provider);
+      assertTrue(wire.at("/ignore_aggregate").isBoolean());
+      assertEquals(ignoreFlags[scenario], wire.at("/ignore_aggregate").booleanValue());
+      assertEquals("排除聚合", wire.at("/field_ignore").asText());
+      assertTrue(wire.at("/all_rows").isBoolean());
+      assertEquals(allRowsFlags[scenario], wire.at("/all_rows").booleanValue());
+      assertEquals("流域<&>", wire.at("/group/field/0/name").asText());
+      assertEquals(2, wire.at("/fields/field").size());
+      assertEquals("COUNT_ANY", wire.at("/fields/field/0/type").asText());
+      assertEquals("SUM", wire.at("/fields/field/1/type").asText());
+
+      List<Object[]> emitted = new CopyOnWriteArrayList<>();
+      AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+      LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+      engine.setMetadataProvider(provider);
+      try {
+        engine.prepareExecution();
+        ITransform output = engine.getRunThread("group-ignored", 0);
+        assertNotNull(output);
+        output.addRowListener(new RowAdapter() {
+          @Override
+          public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+            outputMeta.set(rowMeta.clone());
+            emitted.add(row.clone());
+          }
+        });
+        engine.startThreads();
+        engine.waitUntilFinished();
+        assertEquals(0, engine.getErrors(),
+            "native GroupBy ignored-row scenario must finish");
+      } finally {
+        if (!engine.isFinishedOrStopped()) engine.stopAll();
+        engine.cleanup();
+      }
+
+      assertNotNull(outputMeta.get());
+      assertEquals("流域<&>", outputMeta.get().getValueMeta(0).getName());
+      if (allRowsFlags[scenario]) {
+        assertEquals(5, outputMeta.get().size());
+        assertEquals(5, emitted.size(), "ignored source rows must still pass through");
+        assertEquals("排除聚合", outputMeta.get().getValueMeta(2).getName());
+        assertEquals("有效行数", outputMeta.get().getValueMeta(3).getName());
+        assertEquals("有效流量", outputMeta.get().getValueMeta(4).getName());
+        assertEquals(Boolean.TRUE, emitted.get(1)[2]);
+        assertEquals(Boolean.TRUE, emitted.get(3)[2]);
+        for (int i = 0; i < emitted.size(); i++) {
+          Object[] row = emitted.get(i);
+          assertEquals(i < 3 ? "黄河<&>" : "长江", row[0]);
+          assertEquals(i < 3 ? 2L : 1L, ((Number) row[3]).longValue());
+          assertEquals(i < 3 ? 40L : 50L, ((Number) row[4]).longValue());
+        }
+      } else {
+        assertEquals(3, outputMeta.get().size());
+        assertEquals(2, emitted.size());
+        assertEquals("有效行数", outputMeta.get().getValueMeta(1).getName());
+        assertEquals("有效流量", outputMeta.get().getValueMeta(2).getName());
+        assertEquals("黄河<&>", emitted.get(0)[0]);
+        assertEquals("长江", emitted.get(1)[0]);
+        long firstCount = ignoreFlags[scenario] ? 2L : 3L;
+        long secondCount = ignoreFlags[scenario] ? 1L : 2L;
+        long firstSum = ignoreFlags[scenario] ? 40L : 60L;
+        long secondSum = ignoreFlags[scenario] ? 50L : 90L;
+        assertEquals(firstCount, ((Number) emitted.get(0)[1]).longValue());
+        assertEquals(secondCount, ((Number) emitted.get(1)[1]).longValue());
+        assertEquals(firstSum, ((Number) emitted.get(0)[2]).longValue());
+        assertEquals(secondSum, ((Number) emitted.get(1)[2]).longValue());
+      }
+    }
+    System.out.println("PROD_P0_GROUPBY_IGNORED_ROWS_NATIVE_ENGINE_JSON_HPL=PASS");
+  }
+
 }
