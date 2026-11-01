@@ -941,7 +941,21 @@ public final class AutomaticConfigDescriptor {
                new RuntimePrecondition(
                    "SCRIPT_VALUE_MOD_LITERAL_ALIAS_COLLISION_AND_EMPTY_NAME_SKIP",
                    List.of("/fields/field"),
-                   "ScriptValuesMeta.getFields() ignores a fields.field[*] entry entirely when name is empty, even if rename is non-empty. For non-replacing entries with non-empty name, a non-empty rename is the literal output field name (without Hop variable resolution), otherwise name is used. RowMeta.addValueMeta() disambiguates aliases colliding with existing or previously appended fields using the first unused numeric suffix. The new field uses the configured type, length and precision; original input fields remain intact. Derive downstream output names and types from the ordered entries; this is not a save-time validator."));
+                   "ScriptValuesMeta.getFields() ignores a fields.field[*] entry entirely when name is empty, even if rename is non-empty. For non-replacing entries with non-empty name, a non-empty rename is the literal output field name (without Hop variable resolution), otherwise name is used. RowMeta.addValueMeta() disambiguates aliases colliding with existing or previously appended fields using the first unused numeric suffix. The new field uses the configured type, length and precision; original input fields remain intact. Derive downstream output names and types from the ordered entries; this is not a save-time validator."),
+               new RuntimePrecondition(
+                   "SCRIPT_VALUE_MOD_CONDITIONAL_OUTPUT_RETAINS_PRIOR_ROW_VALUE",
+                   List.of("/jsScripts/jsScript", "/fields/field"),
+                   "Native ScriptValues.addValuesToContext() creates a Rhino JavaScript "
+                       + "scope on the first input row and reuses that scope for subsequent "
+                       + "rows. ScriptValues.getValueFromJScript() emits null when a "
+                       + "declared result variable has never been assigned in that scope, "
+                       + "but a conditionally assigned result retains its previous row's "
+                       + "value when the current row skips the assignment. This can emit "
+                       + "stale calculated values across records rather than null. Scripts "
+                       + "should assign every declared output on every row, explicitly "
+                       + "using null where appropriate. Preserve the script body and ordered "
+                       + "fields.field declarations through JSON/HPL editing; diagnose "
+                       + "conditional output assignments without rejecting draft saves."));
       case "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta" ->
           List.of(new RuntimePrecondition(
               "EXEC_SQL_INPUT_MODE_REQUIRES_MATCHING_HOP_TOPOLOGY",
