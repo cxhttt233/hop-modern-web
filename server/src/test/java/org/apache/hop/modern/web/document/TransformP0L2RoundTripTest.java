@@ -8535,5 +8535,99 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_GROUPBY_LINE_NUMBER_ACTIVATION_HPL=PASS");
   }
 
+
+  @Test
+  void tableOutputSchemaDdlOptionsRequireMasterSwitchAndSurviveNativeHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "TableOutput");
+    assertNotNull(plugin, "production TableOutput plugin is required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+
+    // DDL switches must be activated by a producer-owned canonical wire pointer.
+    // The master switch is itself editable even when the four DDL options are inactive.
+    assertNull(property(descriptor, "auto_update_table_structure").activationContext());
+    for (String key : List.of("always_drop_and_recreate", "add_columns",
+        "drop_columns", "change_column_types")) {
+      var option = property(descriptor, key);
+      assertEquals(Shape.BOOLEAN, option.shape(), key);
+      assertEquals(new AutomaticConfigDescriptor.ActivationContext(
+          "/auto_update_table_structure", true), option.activationContext(), key);
+      var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(option);
+      assertEquals("/auto_update_table_structure",
+          published.at("/activationContext/flagPointer").asText(), key);
+      assertTrue(published.at("/activationContext/activeWhen").booleanValue(), key);
+    }
+    var ddlRisk = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "TABLE_OUTPUT_SCHEMA_DDL_OPTIONS_REQUIRE_MASTER_SWITCH_AND_STATIC_TARGET"))
+        .findFirst().orElseThrow();
+    assertTrue(ddlRisk.relatedPointers().contains("/auto_update_table_structure"));
+    assertTrue(ddlRisk.relatedPointers().contains("/tablename_in_field"));
+    assertTrue(ddlRisk.relatedPointers().contains("/partitioning_enabled"));
+
+    // Native Hop persists inactive values. A disabled master switch must not
+    // erase a previously selected drop/recreate or drop-columns option.
+    original.getClass().getMethod("setTableName", String.class)
+        .invoke(original, "测试目标表<&雪>");
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("table-output-ddl-options.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("table-output-ddl-options");
+    String node = "表结构选项-<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "TableOutput", node, original));
+    store.save(hpl, pipeline);
+
+    boolean[][] modes = {
+        {false, true, true, true, true},
+        {true, true, false, true, false},
+        {false, true, false, true, false},
+        {true, false, true, false, true}
+    };
+    String[] setters = {"setAutoUpdateTableStructure", "setAlwaysDropAndRecreate",
+        "setAddColumns", "setDropColumns", "setChangeColumnTypes"};
+    String[] pointers = {"/auto_update_table_structure", "/always_drop_and_recreate",
+        "/add_columns", "/drop_columns", "/change_column_types"};
+    for (boolean[] mode : modes) {
+      var reopened = store.open(hpl);
+      var editMeta = reopened.findTransform(node).getTransform();
+      for (int i = 0; i < mode.length; i++) {
+        editMeta.getClass().getMethod(setters[i], boolean.class)
+            .invoke(editMeta, mode[i]);
+      }
+      store.save(hpl, reopened);
+
+      var diskPipeline = store.open(hpl);
+      var diskMeta = diskPipeline.findTransform(node).getTransform();
+      var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      for (int i = 0; i < mode.length; i++) {
+        assertTrue(diskWire.at(pointers[i]).isBoolean(), pointers[i]);
+        assertEquals(mode[i], diskWire.at(pointers[i]).booleanValue(), pointers[i]);
+      }
+      assertEquals("测试目标表<&雪>", diskWire.at("/table").asText());
+
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("table-ddl-options-doc", hpl, diskPipeline));
+      var resource = new PipelineConfigResource(documents, provider);
+      var response = resource.read("table-ddl-options-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, response.getStatus());
+      var body = (PipelineConfigResource.ConfigResponse) response.getEntity();
+      assertEquals(descriptor, body.descriptor());
+      for (int i = 0; i < mode.length; i++) {
+        assertEquals(mode[i], body.config().at(pointers[i]).booleanValue(), pointers[i]);
+      }
+    }
+    // No live JDBC/DDL is performed: this proves descriptor activation and
+    // native Hop XML/JSON persistence, not database schema mutation safety.
+    System.out.println("PROD_P0_TABLEOUTPUT_SCHEMA_DDL_ACTIVATION_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 }
