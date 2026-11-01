@@ -9005,6 +9005,99 @@ class TransformP0L2RoundTripTest {
   }
 
   @Test
+  void httpIdleCloseSettingRemainsPersistedButDoesNotChangeNativeTimeoutInit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Http");
+    assertNotNull(plugin, "production Http plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, "https://example.invalid/idle?station=雪");
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    assertEquals(Shape.STRING, property(descriptor, "closeIdleConnectionsTime").shape());
+    assertEquals(Shape.STRING, property(descriptor, "connectionTimeout").shape());
+    assertEquals(Shape.STRING, property(descriptor, "socketTimeout").shape());
+    var warning = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "HTTP_IDLE_CONNECTION_CLOSE_SETTING_IS_NOT_CONSUMED_BY_NATIVE_HTTP"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/closeIdleConnectionsTime", "/connectionTimeout",
+        "/socketTimeout"), warning.keyListPointers());
+    assertTrue(warning.explanation().contains("never reads"));
+    assertTrue(warning.explanation().contains("idle connection eviction"));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var hpl = tempDir.resolve("http-idle-close-native-init.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("http-idle-close-native-init");
+    String node = "HTTP空闲连接<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Http", node, original));
+    store.save(hpl, pipeline);
+
+    // The idle-close setting is a native serialized STRING but not consumed
+    // by pinned Http.init()/createClientBuilder(). Active timeouts still resolve.
+    String[] idleValues = {"60000", "0", "${HTTP_IDLE_MS}", "not-a-number<&雪>"};
+    for (String idleValue : idleValues) {
+      var loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("http-idle-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("http-idle-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, current.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          current.config()).deepCopy();
+      edited.put("closeIdleConnectionsTime", idleValue);
+      edited.put("connectionTimeout", "${HTTP_CONNECT_MS}");
+      edited.put("socketTimeout", "2500");
+      assertEquals(200, resource.write("http-idle-doc",
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, loaded);
+
+      var reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform(node).getTransform();
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertEquals(idleValue, wire.at("/closeIdleConnectionsTime").asText());
+      assertEquals("${HTTP_CONNECT_MS}", wire.at("/connectionTimeout").asText());
+      assertEquals("2500", wire.at("/socketTimeout").asText());
+
+      ClassLoader loader = diskMeta.getClass().getClassLoader();
+      Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.http.Http");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.http.HttpData");
+      Object data = dataType.getConstructor().newInstance();
+      var constructor = runtimeType.getConstructor(
+          org.apache.hop.pipeline.transform.TransformMeta.class,
+          diskMeta.getClass(), dataType, int.class,
+          org.apache.hop.pipeline.PipelineMeta.class,
+          org.apache.hop.pipeline.Pipeline.class);
+      var engine = org.mockito.Mockito.spy(
+          new org.apache.hop.pipeline.engines.local.LocalPipelineEngine());
+      engine.setVariable("HTTP_CONNECT_MS", "1700");
+      engine.setVariable("HTTP_IDLE_MS", "999");
+      Object nativeHttp = constructor.newInstance(
+          reopened.findTransform(node), diskMeta, data, 0, reopened, engine);
+      runtimeType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class)
+          .invoke(nativeHttp, provider);
+      assertTrue((Boolean) runtimeType.getMethod("init").invoke(nativeHttp));
+      assertEquals(1700, dataType.getField("realConnectionTimeout").getInt(data));
+      assertEquals(2500, dataType.getField("realSocketTimeout").getInt(data));
+    }
+    // The native source establishes absence of an idle-close builder setting;
+    // this test proves HPL/JSON preservation and init-time active timeout parsing.
+    // No HTTP connection or idle-eviction timer is started.
+    System.out.println("PROD_P0_HTTP_IDLE_CLOSE_INERT_NATIVE_INIT_HPL=PASS");
+  }
+
+  @Test
   void httpProxyPortInvalidTextFallsBackTo8080AtNativeInitAfterRealHplReopen(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
     PluginRegistry plugins = PluginRegistry.getInstance();
