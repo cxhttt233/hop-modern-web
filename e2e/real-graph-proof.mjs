@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import { fileURLToPath } from "node:url";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 const pipelinePath = process.env.REAL_HPL_PATH;
@@ -361,6 +361,54 @@ try {
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
   console.log("Recent-file clear proof passed: session shortcuts removed without changing real Hop graph or network requests.");
+
+  // Disabled Hop links are real native .hpl metadata, not React-only state.
+  // The browser must distinguish them from executable links without changing
+  // their identities, issuing edit commands, or entering RAP.
+  const enabledXml = await readFile(pipelinePath, "utf8");
+  const disabledXml = enabledXml.replace("<enabled>Y</enabled>", "<enabled>N</enabled>");
+  if (disabledXml === enabledXml) throw new Error("Native enabled Hop fixture not found");
+  const disabledPath = join(unicodeDirectory, "停用 Hop 连线.hpl");
+  await writeFile(disabledPath, disabledXml);
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(disabledPath);
+  const disabledPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const disabledResponse = await disabledPending;
+  if (!disabledResponse.ok()) throw new Error("Native disabled-Hop .hpl open failed");
+  const disabledGraph = await disabledResponse.json();
+  const disabledEdge = disabledGraph.edges?.find((edge) => edge.source === "source" && edge.target === "sink");
+  if (!disabledEdge || disabledEdge.enabled !== false ||
+      disabledGraph.nodes?.length !== graph.nodes.length) {
+    throw new Error("Hop server did not preserve disabled native connection semantics");
+  }
+  const disabledEdgeElement = page.locator('.react-flow__edge[data-id="' + disabledEdge.id + '"]');
+  await disabledEdgeElement.waitFor({ state: "attached" });
+  await page.waitForFunction((edgeId) => {
+    const edge = [...document.querySelectorAll(".react-flow__edge")]
+      .find((element) => element.getAttribute("data-id") === edgeId);
+    const path = edge?.querySelector(".react-flow__edge-path");
+    return Boolean(edge?.classList.contains("hop-edge-disabled") &&
+      edge.textContent?.includes("已停用") &&
+      path && getComputedStyle(path).strokeDasharray.includes("8"));
+  }, disabledEdge.id, { timeout: 8000 });
+  // Reopening the same real file must preserve the disabled wire flag and
+  // visual status. No graph mutation or disk save is involved.
+  const disabledReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const disabledReopenResponse = await disabledReopenPending;
+  if (!disabledReopenResponse.ok()) throw new Error("Disabled-Hop disk reopen failed");
+  const disabledReopened = await disabledReopenResponse.json();
+  if (!disabledReopened.edges?.some((edge) => edge.id === disabledEdge.id && edge.enabled === false) ||
+      !(await disabledEdgeElement.evaluate((element) => element.classList.contains("hop-edge-disabled")))) {
+    throw new Error("Native disabled-Hop semantics or visual state lost after disk reopen");
+  }
+  console.log("Disabled-Hop visual proof passed: real XML enabled=N -> authoritative Graph JSON -> dashed Chinese React Flow link -> disk reopen.");
 
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
