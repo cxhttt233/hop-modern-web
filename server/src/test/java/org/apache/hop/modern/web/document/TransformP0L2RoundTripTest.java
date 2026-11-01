@@ -8927,5 +8927,82 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_TABLEOUTPUT_BATCH_RUNTIME_GATES_HPL=PASS");
   }
 
+  @Test
+  void httpIgnoreSslNativeTlsBypassRiskSurvivesHttpConfigWriteAndRealHplDiskReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Http");
+    assertNotNull(plugin, "production Http plugin is required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    assertEquals(Shape.BOOLEAN, property(descriptor, "ignoreSsl").shape());
+    var risk = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "HTTP_IGNORE_SSL_DISABLES_CERTIFICATE_AND_HOSTNAME_CHECKS"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/ignoreSsl", "/url", "/urlInField", "/urlField"),
+        risk.keyListPointers());
+    assertTrue(risk.explanation().contains("NoopHostnameVerifier"));
+    assertTrue(risk.explanation().contains("certificate"));
+
+    // The pinned native Http.createClientBuilder() passes ignoreSsl=true to
+    // HttpClientManager, which installs an accepting trust strategy and a
+    // NoopHostnameVerifier. Do not make a real HTTPS request in this test.
+    String literalUrl = "https://example.invalid/api?city=zhengzhou&mode=1";
+    String dynamicField = "请求地址<&雪>";
+    original.getClass().getMethod("setUrl", String.class)
+        .invoke(original, literalUrl);
+    original.getClass().getMethod("setUrlField", String.class)
+        .invoke(original, dynamicField);
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var hpl = tempDir.resolve("http-ignore-ssl-tls-risk.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("http-ignore-ssl-tls-risk");
+    String node = "HTTPS安全开关<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "Http", node, original));
+    store.save(hpl, pipeline);
+
+    boolean[] ignoreSslModes = {true, false, true};
+    boolean[] dynamicUrlModes = {false, true, false};
+    for (int i = 0; i < ignoreSslModes.length; i++) {
+      var loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      String id = "http-ignore-ssl-doc";
+      documents.put(new PipelineDocument(id, hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read(id, new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, current.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          current.config()).deepCopy();
+      edited.put("ignoreSsl", ignoreSslModes[i]);
+      edited.put("urlInField", dynamicUrlModes[i]);
+      assertEquals(200, resource.write(id,
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, loaded);
+
+      var disk = store.open(hpl);
+      var nativeMeta = disk.findTransform(node).getTransform();
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          nativeMeta, provider);
+      assertTrue(wire.at("/ignoreSsl").isBoolean());
+      assertEquals(ignoreSslModes[i], wire.at("/ignoreSsl").booleanValue());
+      assertEquals(dynamicUrlModes[i], wire.at("/urlInField").booleanValue());
+      assertEquals(literalUrl, wire.at("/url").asText());
+      assertEquals(dynamicField, wire.at("/urlField").asText());
+      assertEquals(ignoreSslModes[i],
+          (Boolean) nativeMeta.getClass().getMethod("isIgnoreSsl").invoke(nativeMeta));
+    }
+    // Validates production descriptor + HTTP JSON edit + real XML disk reopen;
+    // no TLS handshake or certificate-validation behavior is executed.
+    System.out.println("PROD_P0_HTTP_IGNORE_SSL_TLS_RISK_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 }
