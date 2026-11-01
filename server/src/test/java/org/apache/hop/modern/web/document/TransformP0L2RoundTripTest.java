@@ -10133,4 +10133,100 @@ class TransformP0L2RoundTripTest {
     // The Cartesian-product behavior is source-verified in MergeJoin.processRow().
     System.out.println("PROD_P0_MERGEJOIN_NULL_KEY_NATIVE_COMPARE_HPL=PASS");
   }
+
+  @Test
+  void filterRowsCompositeOperatorOrderDiffersFromSqlPrecedenceAfterRealHplEdit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "FilterRows");
+    assertNotNull(plugin, "production FilterRows plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+
+    // The exact native Condition tree is A OR B AND C. Hop evaluates this as
+    // (A OR B) AND C, not the SQL interpretation A OR (B AND C).
+    var root = new org.apache.hop.core.Condition();
+    root.addCondition(new org.apache.hop.core.Condition(
+        "水位<&雪>", org.apache.hop.core.Condition.Function.NULL, null, null));
+    root.addCondition(new org.apache.hop.core.Condition(
+        org.apache.hop.core.Condition.Operator.OR, "流量",
+        org.apache.hop.core.Condition.Function.NULL, null, null));
+    root.addCondition(new org.apache.hop.core.Condition(
+        org.apache.hop.core.Condition.Operator.AND, "闸门",
+        org.apache.hop.core.Condition.Function.NULL, null, null));
+    original.getClass().getMethod("setCondition", org.apache.hop.core.Condition.class)
+        .invoke(original, root);
+
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "FILTER_ROWS_COMPOSITE_OPERATOR_ORDER_IS_LEFT_TO_RIGHT"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/compare/condition"), diagnostic.keyListPointers());
+    assertTrue(diagnostic.explanation().contains("(A OR B) AND C"));
+
+    var rowMeta = new org.apache.hop.core.row.RowMeta();
+    for (String name : List.of("水位<&雪>", "流量", "闸门")) {
+      rowMeta.addValueMeta(new org.apache.hop.core.row.value.ValueMetaString(name));
+    }
+    Object[] aTrueBFalseCFalse = {null, "有流量", "开启"};
+    Object[] aFalseBTrueCTrue = {"正常", null, null};
+    assertFalse(root.evaluate(rowMeta, aTrueBFalseCFalse),
+        "native left-to-right evaluation differs from SQL AND precedence");
+    assertTrue(root.evaluate(rowMeta, aFalseBTrueCTrue));
+
+    // Real Hop XML disk reopen, server JSON edit, second disk reopen.
+    var provider = new MemoryMetadataProvider();
+    var variables = new org.apache.hop.core.variables.Variables();
+    var store = new PipelineDocumentStore(provider, variables);
+    var hpl = tempDir.resolve("filterrows-composite-order.hpl");
+    String node = "条件顺序<&雪>";
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("filterrows-composite-order");
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "FilterRows", node, original));
+    store.save(hpl, pipeline);
+    var opened = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("filterrows-operator-order", hpl, opened));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("filterrows-operator-order",
+        new PipelineConfigResource.ReadRequest(node));
+    assertEquals(200, read.getStatus());
+    var config = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals(descriptor, config.descriptor());
+    String childPointer = "/compare/condition/conditions/condition";
+    var children = config.config().at(childPointer);
+    assertTrue(children.isArray(), "native groupKey must own the condition list");
+    assertEquals(3, children.size());
+    assertEquals("水位<&雪>", children.get(0).path("leftvalue").asText());
+    assertEquals("IS NULL", children.get(0).path("function").asText());
+    assertEquals("OR", children.get(1).path("operator").asText());
+    assertEquals("AND", children.get(2).path("operator").asText());
+
+    var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+        config.config()).deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)
+        edited.at(childPointer + "/2")).put("operator", "OR");
+    assertEquals(200, resource.write("filterrows-operator-order",
+        new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+    store.save(hpl, opened);
+
+    var disk = store.open(hpl);
+    var nativeDisk = disk.findTransform(node).getTransform();
+    var diskCondition = (org.apache.hop.core.Condition) nativeDisk.getClass()
+        .getMethod("getCondition").invoke(nativeDisk);
+    assertEquals(3, diskCondition.getChildren().size());
+    assertEquals(org.apache.hop.core.Condition.Operator.OR,
+        diskCondition.getCondition(2).getOperator());
+    assertTrue(diskCondition.evaluate(rowMeta, aTrueBFalseCFalse),
+        "changing the third operator to OR must change native runtime evaluation");
+    assertTrue(diskCondition.evaluate(rowMeta, aFalseBTrueCTrue));
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        nativeDisk, provider);
+    assertEquals("水位<&雪>", wire.at(childPointer + "/0/leftvalue").asText());
+    assertEquals("OR", wire.at(childPointer + "/1/operator").asText());
+    assertEquals("OR", wire.at(childPointer + "/2/operator").asText());
+    System.out.println("PROD_P0_FILTERROWS_COMPOSITE_ORDER_NATIVE_EVAL_HPL=PASS");
+  }
 }
