@@ -9201,6 +9201,97 @@ class TransformP0L2RoundTripTest {
     System.out.println("PROD_P0_SORTROWS_VARIABLE_COMPRESSION_NATIVE_INIT_HPL=PASS");
   }
 
+  @Test
+  void sortRowsSpillThresholdsRespectNativeParsingAndFallbackAfterHplReopen(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "SortRows");
+    assertNotNull(plugin, "production SortRows plugin required");
+    ITransformMeta original = plugins.loadClass(plugin, ITransformMeta.class);
+    original.setDefault();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(original.getClass());
+    assertEquals(Shape.STRING, property(descriptor, "sort_size").shape());
+    assertEquals(Shape.STRING, property(descriptor, "free_memory").shape());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "SORT_ROWS_SPILL_SIZE_AND_FREE_MEMORY_NATIVE_INIT_FALLBACK"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/sort_size", "/free_memory"), diagnostic.keyListPointers());
+    assertTrue(diagnostic.explanation().contains("Const.toIntExpanded"));
+    assertTrue(diagnostic.explanation().contains("Const.toInt("));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(
+        provider, new org.apache.hop.core.variables.Variables());
+    var hpl = tempDir.resolve("sort-spill-thresholds.hpl");
+    var pipeline = new org.apache.hop.pipeline.PipelineMeta();
+    pipeline.setName("sort-spill-thresholds");
+    String node = "排序内存阈值<&雪>";
+    pipeline.addTransform(new org.apache.hop.pipeline.transform.TransformMeta(
+        "SortRows", node, original));
+    store.save(hpl, pipeline);
+
+    String[] sizes = {"120", "0", "not-a-number", "${SORT_SIZE_ROWS}", "-1"};
+    String[] freeMemory = {"not-a-number", "0", "35", "${SORT_FREE_PCT}", "-1"};
+    int[] expectedSizes = {120, 0, -1, 180, -1};
+    int[] expectedFreePct = {-1, 25, 35, -1, 25};
+    for (int i = 0; i < sizes.length; i++) {
+      var loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("sort-spill-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("sort-spill-doc",
+          new PipelineConfigResource.ReadRequest(node));
+      assertEquals(200, read.getStatus());
+      var current = (PipelineConfigResource.ConfigResponse) read.getEntity();
+      assertEquals(descriptor, current.descriptor());
+      var edited = ((com.fasterxml.jackson.databind.node.ObjectNode)
+          current.config()).deepCopy();
+      edited.put("sort_size", sizes[i]);
+      edited.put("free_memory", freeMemory[i]);
+      edited.put("sort_prefix", "溢写<&雪>");
+      assertEquals(200, resource.write("sort-spill-doc",
+          new PipelineConfigResource.WriteRequest(node, edited)).getStatus());
+      store.save(hpl, loaded);
+
+      var reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform(node).getTransform();
+      var diskWire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+          diskMeta, provider);
+      assertEquals(sizes[i], diskWire.at("/sort_size").asText());
+      assertEquals(freeMemory[i], diskWire.at("/free_memory").asText());
+      assertEquals("溢写<&雪>", diskWire.at("/sort_prefix").asText());
+
+      ClassLoader loader = diskMeta.getClass().getClassLoader();
+      Class<?> runtimeType = loader.loadClass("org.apache.hop.pipeline.transforms.sort.SortRows");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.sort.SortRowsData");
+      Object data = dataType.getConstructor().newInstance();
+      var constructor = runtimeType.getConstructor(
+          org.apache.hop.pipeline.transform.TransformMeta.class,
+          diskMeta.getClass(), dataType, int.class,
+          org.apache.hop.pipeline.PipelineMeta.class,
+          org.apache.hop.pipeline.Pipeline.class);
+      var engine = org.mockito.Mockito.spy(
+          new org.apache.hop.pipeline.engines.local.LocalPipelineEngine());
+      engine.setVariable("SORT_SIZE_ROWS", "180");
+      engine.setVariable("SORT_FREE_PCT", "42");
+      Object nativeSort = constructor.newInstance(
+          reopened.findTransform(node), diskMeta, data, 0, reopened, engine);
+      runtimeType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class)
+          .invoke(nativeSort, provider);
+      assertTrue((Boolean) runtimeType.getMethod("init").invoke(nativeSort));
+      assertEquals(expectedSizes[i], dataType.getField("sortSize").getInt(data),
+          "sort_size must use resolved/expanded native integer parsing");
+      assertEquals(expectedFreePct[i],
+          dataType.getField("freeMemoryPctLimit").getInt(data),
+          "free_memory is parsed literally and defaults to 25 only if both limits are nonpositive");
+    }
+    // Native init and persisted Hop JSON/HPL are exercised; no external
+    // spill file or memory-pressure-driven sorting is executed.
+    System.out.println("PROD_P0_SORTROWS_SPILL_THRESHOLD_NATIVE_INIT_HPL=PASS");
+  }
+
   static String canon(String x) throws Exception { return XmlHandler.formatNode(XmlHandler.wrapLoadXmlString(x)); }
 
   @Test
