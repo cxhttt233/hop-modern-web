@@ -353,4 +353,167 @@ class FilterRowsNestedPredicateFullPipelineP0Test {
         outputRows.stream().map(row -> (String) row[0]).toList());
     System.out.println("PROD_P0_FILTERROWS_TWO_NULL_FIELDS_NATIVE_EQUAL_JSON_HPL_ROWS=PASS");
   }
+
+  /**
+   * Native end-to-end proof of the previously published composite-operator
+   * contract. A OR B AND C means (A OR B) AND C in pinned Hop, rather
+   * than SQL's A OR (B AND C). This is an actual DataGrid -> FilterRows ->
+   * SelectValues engine run, not only Condition.evaluate() on an in-memory row.
+   */
+  @Test
+  void filterRowsCompositeLeftToRightChangesNativeOutputAfterRealHplEdit(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin filterPlugin = plugins.findPluginWithId(TransformPluginType.class, "FilterRows");
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(gridPlugin);
+    assertNotNull(filterPlugin);
+    assertNotNull(selectPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> columns = new ArrayList<>();
+    for (String name : List.of("样本<&>", "A<&>", "B", "C")) {
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, name);
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      columns.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, columns);
+    List<Object> lines = new ArrayList<>();
+    // Empty DataGrid cells become native NULL. The first row distinguishes
+    // Hop's left-to-right evaluation from SQL AND-before-OR precedence.
+    for (List<String> values : List.of(
+        List.of("sql-only", "", "set", "set"),
+        List.of("both", "", "set", ""),
+        List.of("bc", "set", "", ""),
+        List.of("none", "set", "set", "set"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta filter = plugins.loadClass(filterPlugin, ITransformMeta.class);
+    filter.setDefault();
+    Condition root = new Condition();
+    root.addCondition(new Condition("A<&>", Condition.Function.NULL, null, null));
+    root.addCondition(new Condition(Condition.Operator.OR,
+        "B", Condition.Function.NULL, null, null));
+    root.addCondition(new Condition(Condition.Operator.AND,
+        "C", Condition.Function.NULL, null, null));
+    filter.getClass().getMethod("setCondition", Condition.class).invoke(filter, root);
+
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+    TransformMeta source = new TransformMeta("DataGrid", "grid-composite", grid);
+    TransformMeta predicate = new TransformMeta("FilterRows", "filter-composite", filter);
+    TransformMeta sink = new TransformMeta("SelectValues", "select-composite", select);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("filter-rows-composite-operator-native-engine");
+    pipeline.addTransform(source);
+    pipeline.addTransform(predicate);
+    pipeline.addTransform(sink);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, predicate));
+    pipeline.addPipelineHop(new PipelineHopMeta(predicate, sink));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("filter-rows-composite-operator.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("filter-composite-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("filter-composite-doc",
+        new PipelineConfigResource.ReadRequest("filter-composite"));
+    assertEquals(200, read.getStatus());
+    JsonNode initial = ((PipelineConfigResource.ConfigResponse) read.getEntity()).config();
+    String childrenPointer = "/compare/condition/conditions/condition";
+    assertEquals(3, initial.at(childrenPointer).size());
+    assertEquals("A<&>", initial.at(childrenPointer + "/0/leftvalue").asText());
+    assertEquals("OR", initial.at(childrenPointer + "/1/operator").asText());
+    assertEquals("AND", initial.at(childrenPointer + "/2/operator").asText());
+
+    var descriptor = AutomaticConfigDescriptor.describe(filter.getClass());
+    var diagnostic = descriptor.runtimePreconditions().stream()
+        .filter(p -> p.code().equals("FILTER_ROWS_COMPOSITE_OPERATOR_ORDER_IS_LEFT_TO_RIGHT"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/compare/condition"), diagnostic.keyListPointers());
+
+    var selectRead = resource.read("filter-composite-doc",
+        new PipelineConfigResource.ReadRequest("select-composite"));
+    assertEquals(200, selectRead.getStatus());
+    ObjectNode selectDraft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) selectRead.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) selectDraft.path("fields");
+    assertTrue(fields.isObject());
+    fields.put("select_unspecified", false);
+    fields.putArray("field").addObject().put("name", "样本<&>").put("rename", "样本<&>");
+    fields.putArray("remove");
+    fields.putArray("meta");
+    assertEquals(200, resource.write("filter-composite-doc",
+        new PipelineConfigResource.WriteRequest("select-composite", selectDraft)).getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta before = store.open(hpl);
+    assertEquals(3, before.nrTransforms());
+    assertEquals(2, before.nrPipelineHops());
+    JsonNode beforeWire = ConfigJsonSerializer.toJson(
+        before.findTransform("filter-composite").getTransform(), provider);
+    assertEquals("AND", beforeWire.at(childrenPointer + "/2/operator").asText());
+    assertEquals(List.of("both", "bc"), executeCompositeOperatorPipeline(before, provider),
+        "A=true, B=false, C=false must be filtered out by Hop's left-to-right AND");
+
+    // Edit only the third operator via the real T3 JSON API. The first
+    // row must now pass: (A OR B) OR C is true when A alone is true.
+    ObjectNode edited = ((ObjectNode) initial).deepCopy();
+    ((ObjectNode) edited.at(childrenPointer + "/2")).put("operator", "OR");
+    assertEquals(200, resource.write("filter-composite-doc",
+        new PipelineConfigResource.WriteRequest("filter-composite", edited)).getStatus());
+    store.save(hpl, loaded);
+    PipelineMeta after = store.open(hpl);
+    JsonNode afterWire = ConfigJsonSerializer.toJson(
+        after.findTransform("filter-composite").getTransform(), provider);
+    assertEquals("A<&>", afterWire.at(childrenPointer + "/0/leftvalue").asText());
+    assertEquals("OR", afterWire.at(childrenPointer + "/1/operator").asText());
+    assertEquals("OR", afterWire.at(childrenPointer + "/2/operator").asText());
+    assertEquals(List.of("sql-only", "both", "bc"),
+        executeCompositeOperatorPipeline(after, provider),
+        "changing AND to OR must change actual native emitted rows after disk reopen");
+    System.out.println("PROD_P0_FILTERROWS_COMPOSITE_ORDER_NATIVE_ENGINE_JSON_HPL_ROWS=PASS");
+  }
+
+  private static List<String> executeCompositeOperatorPipeline(
+      PipelineMeta pipeline, MemoryMetadataProvider provider) throws Exception {
+    List<String> emitted = new CopyOnWriteArrayList<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(pipeline);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("select-composite", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          assertEquals(1, rowMeta.size());
+          assertEquals("样本<&>", rowMeta.getValueMeta(0).getName());
+          emitted.add((String) row[0]);
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors(), "native composite FilterRows pipeline must finish");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+    return List.copyOf(emitted);
+  }
 }
