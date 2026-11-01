@@ -8656,7 +8656,8 @@ class TransformP0L2RoundTripTest {
       assertFalse(published.at("/activationContext/additionalConditions/0/activeWhen")
           .booleanValue(), key);
     }
-    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/tablename_in_field", true),
+    assertEquals(new AutomaticConfigDescriptor.ActivationContext("/tablename_in_field", true,
+        List.of(new AutomaticConfigDescriptor.ActivationCondition("/specify_fields", false))),
         property(descriptor, "tablename_in_table").activationContext());
     assertNull(property(descriptor, "partitioning_enabled").activationContext());
 
@@ -8682,17 +8683,19 @@ class TransformP0L2RoundTripTest {
     // Switching either master flag off must not erase the saved daily/monthly
     // values or the dynamic target column inclusion preference.
     boolean[][] modes = {
-        // dynamic, partition-enabled, daily, monthly, include-table-name-column
-        {false, true, true, false, true},
-        {true, true, true, false, false},
-        {true, false, true, false, true},
-        {false, false, true, false, false},
-        {false, true, false, true, true}
+        // dynamic, partition-enabled, daily, monthly, include-name, explicit-fields
+        {false, true, true, false, true, false},
+        {true, true, true, false, false, false},
+        {true, false, true, false, true, true},
+        {false, false, true, false, false, false},
+        {false, true, false, true, true, false}
     };
     String[] setters = {"setTableNameInField", "setPartitioningEnabled",
-        "setPartitioningDaily", "setPartitioningMonthly", "setTableNameInTable"};
+        "setPartitioningDaily", "setPartitioningMonthly", "setTableNameInTable",
+        "setSpecifyFields"};
     String[] pointers = {"/tablename_in_field", "/partitioning_enabled",
-        "/partitioning_daily", "/partitioning_monthly", "/tablename_in_table"};
+        "/partitioning_daily", "/partitioning_monthly", "/tablename_in_table",
+        "/specify_fields"};
     for (boolean[] mode : modes) {
       var reopened = store.open(hpl);
       var nativeMeta = reopened.findTransform(node).getTransform();
