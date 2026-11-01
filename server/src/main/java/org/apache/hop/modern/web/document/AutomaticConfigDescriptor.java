@@ -1786,6 +1786,24 @@ public final class AutomaticConfigDescriptor {
                       + "and error-hop semantics must be checked before execution. "
                       + "This is a runtime diagnostic, not a draft-save validator."),
               new RuntimePrecondition(
+                  "TABLE_OUTPUT_PARTITION_DATE_FIELD_AND_DAILY_PRECEDENCE",
+                  List.of("/partitioning_enabled", "/partitioning_field",
+                      "/partitioning_daily", "/partitioning_monthly",
+                      "/tablename_in_field", "/table"),
+                  "Native TableOutput.processRow() selects a row-driven table name first "
+                      + "when tablename_in_field=true. Otherwise date partitioning requires "
+                      + "partitioning_enabled=true, at least one of partitioning_daily or "
+                      + "partitioning_monthly, and a nonempty partitioning_field. It resolves "
+                      + "that input field against the row schema, requires a non-null DATE "
+                      + "value, and appends yyyyMMdd when daily=true (even if monthly=true), "
+                      + "otherwise yyyyMM, to the resolved base table. With partitioning_enabled "
+                      + "true but neither period flag or an empty field, native init() does not "
+                      + "initialize its static table name and processRow() falls through to an "
+                      + "empty target instead of writing to the base table. Preserve inactive "
+                      + "flags and the field across JSON/HPL mode switches; diagnose date "
+                      + "type, source-field availability and conflicting period flags before "
+                      + "execution without blocking draft saves or contacting a database."),
+              new RuntimePrecondition(
                   "TABLE_OUTPUT_TRUNCATE_EMPTY_INPUT_CAN_CLEAR_STATIC_TABLE",
                   List.of("/truncate", "/only_when_have_rows",
                       "/tablename_in_field", "/partitioning_enabled"),
