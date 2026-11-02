@@ -942,6 +942,18 @@ public final class AutomaticConfigDescriptor {
                       + "disable this structural check. This depends on input data "
                       + "and is an execution diagnostic, not a draft-save validator."),
               new RuntimePrecondition(
+                  "JSON_INPUT_LIMIT_IS_POST_EMIT_AND_ROWNUM_STARTS_AT_ZERO",
+                  List.of("/limit", "/rownum", "/rownum_field", "/fields/field"),
+                  "Pinned JsonInput.getOneOutputRow() writes the current data.rownr "
+                      + "into an enabled rownum_field before incrementing the counter. "
+                      + "JsonInput.writeOutputRowIfPossible() then emits the row, increments "
+                      + "rownr, and stops only when rownr > a positive limit. When enough "
+                      + "JSONPath results exist, limit=1 therefore emits two rows with "
+                      + "INTEGER row numbers 0 and 1, not one row numbered 1. "
+                      + "Preserve the native numeric limit and BOOLEAN rownum settings "
+                      + "through config JSON and HPL; this is a runtime compatibility "
+                      + "warning, not a save-time validator."),
+              new RuntimePrecondition(
                   "JSON_INPUT_SOURCE_REMOVAL_AND_AUXILIARY_OUTPUT_COLUMNS",
                   List.of("/IsInFields", "/removeSourceField", "/valueField", "/fields/field", "/include", "/include_field", "/rownum", "/rownum_field"),
                   "JsonInputMeta.getFields() removes the incoming valueField column only when IsInFields and removeSourceField are true and that field exists. It then appends fields.field[*] output columns in declaration order using JsonInputField.toValueMeta(), which resolves output names and propagates declared type, length, precision and formatting. If include is true it appends a variable-resolved STRING include_field of length 250; if rownum is true it appends a variable-resolved INTEGER rownum_field. Auxiliary fields follow the JSONPath fields. This describes the native downstream row schema and does not validate or reject draft saves."));
