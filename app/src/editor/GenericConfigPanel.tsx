@@ -83,6 +83,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
   // Field navigation is presentation-only: never search or expose configuration values.
   const [fieldQuery, setFieldQuery] = useState("");
+  // Only presentation state: collapsing a group never drops its native Hop draft.
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const configFormRef = useRef<HTMLFormElement>(null);
   const nextFieldMatch = useRef(0);
   // Resize only the visible editor: no graph/config write, persistence or schema change.
@@ -212,8 +214,22 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     </div>
     {fileSqlSelected && <p className="config-sql-source-notice" role="status">SQL 来源提示：当前草稿指定了 SQL 文件；运行时文件内容优先，内联 SQL 会保留但不会执行。</p>}
     {visibleGroups.length === 0 && <p className="config-search-empty" role="status">没有匹配的配置字段，请更换关键词。</p>}
-    {visibleGroups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
-      <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
+    {visibleGroups.map(([group, properties], index) => {
+      // Search always reveals matching controls; clearing it restores each user's
+      // collapse choice. Hidden inputs stay mounted so unsaved edits are preserved.
+      const expanded = Boolean(normalizedFieldQuery) || !collapsedGroups[group];
+      const groupLabel = GROUP_LABELS[group] ?? group;
+      const groupId = `config-group-${index}`;
+      return <fieldset key={group} className="config-field-group">
+        <legend><button type="button" className="config-group-toggle" aria-label={`${groupLabel}配置分组`}
+          aria-expanded={expanded} aria-controls={groupId} disabled={Boolean(normalizedFieldQuery)}
+          onClick={() => setCollapsedGroups((current) => ({ ...current, [group]: expanded }))}>
+          <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>{groupLabel}<small>{properties.length} 项</small>
+        </button></legend>
+        <div id={groupId} className="config-group-fields" hidden={!expanded}>{properties.map((p) =>
+          <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</div>
+      </fieldset>;
+    })}
     <footer>{changedFieldCount > 0 && <div className="config-change-review">
       <small className="config-change-count" role="status" aria-live="polite">已修改 {changedFieldCount} 项（未保存）</small>
       <details>
