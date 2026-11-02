@@ -154,7 +154,21 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
           setPanelWidth((width) => Math.max(480, Math.min(800, width + (event.key === "ArrowLeft" ? 24 : -24))));
         }
       }} />
-    <header><strong>转换配置{transformName ? `：${transformName}` : ""}</strong><small>{transformId ? `节点：${transformId} · ` : ""}{descriptor.className}</small></header>
+    <header>
+      <strong>转换配置{transformName ? `：${transformName}` : ""}</strong>
+      <details className="config-developer-details">
+        <summary>开发者信息</summary>
+        <div className="config-developer-content">
+          {transformId && <p><span>节点 ID</span><code>{transformId}</code></p>}
+          <p><span>Java 元数据类</span><code>{descriptor.className}</code></p>
+          <details className="config-property-keys">
+            <summary>原始字段键（{descriptor.properties.length}）</summary>
+            <ul>{descriptor.properties.map((property, index) =>
+              <li key={`${property.key}-${index}`}><span>{label(property)}</span><code>{property.key}</code></li>)}</ul>
+          </details>
+        </div>
+      </details>
+    </header>
     <div className="config-field-search">
       <input type="search" aria-label="查找配置字段" placeholder="查找字段名称或分组" value={fieldQuery}
         onChange={(event) => setFieldQuery(event.target.value)}
