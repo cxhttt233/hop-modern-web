@@ -109,7 +109,7 @@ export const sortRowsConfigSchema: HopConfigSchema = {
       control: "EditableTable",
       valueType: "object[]",
       columns: [
-        { key: "name", label: "Field", valueType: "string" },
+        { key: "name", label: "Field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
         { key: "ascending", label: "Ascending", valueType: "boolean" },
         { key: "case_sensitive", label: "Case sensitive", valueType: "boolean" },
         { key: "collator_enabled", label: "Use collator", valueType: "boolean" },
