@@ -87,6 +87,38 @@ try {
   const sqlField = panel.locator(`#config-${sqlDescriptor.javaField}`);
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
   if (await sqlField.inputValue() !== "SELECT id, name FROM customers") throw new Error("Authoritative SQL not visible");
+  // Search only descriptor labels/keys: real Hop values and secrets must never
+  // enter search suggestions. Filtering must not submit or discard an unsaved draft.
+  const fieldFinder = panel.getByRole("searchbox", { name: "查找配置字段" });
+  const finderWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeFinder = finderWrites();
+  await fieldFinder.fill("sql");
+  if (!await sqlField.isVisible() || await connection.isVisible() ||
+      !(await panel.locator(".config-field-search").innerText()).includes("显示 1 /")) {
+    throw new Error("Real TableInput SQL field finder did not narrow the configuration form");
+  }
+  await fieldFinder.press("Enter");
+  if (finderWrites() !== writesBeforeFinder) throw new Error("Pressing Enter in field finder submitted a Hop write");
+  const temporaryDraft = "SELECT id FROM customers /* 未保存的字段查找草稿 */";
+  await sqlField.fill(temporaryDraft);
+  await fieldFinder.fill("连接");
+  if (!await connection.isVisible() || await sqlField.isVisible()) {
+    throw new Error("Chinese field search did not switch visible configuration fields");
+  }
+  await fieldFinder.fill("__no_such_config_field__");
+  if (!await panel.getByRole("status", { name: "没有匹配的配置字段，请更换关键词。" }).isVisible() ||
+      await panel.locator("fieldset").count() !== 0) {
+    throw new Error("Unmatched config field query must show a safe empty state");
+  }
+  await panel.getByRole("button", { name: "清除字段查找" }).click();
+  if (!await sqlField.isVisible() || !await connection.isVisible() ||
+      await sqlField.inputValue() !== temporaryDraft) {
+    throw new Error("Clearing field search lost the unsaved real Hop SQL draft");
+  }
+  await sqlField.fill("SELECT id, name FROM customers");
+  if (finderWrites() !== writesBeforeFinder) throw new Error("Field search/draft navigation wrote Hop configuration");
+  console.log("V4 config field finder proof passed: Chinese search, empty/clear, draft preservation, Enter no-write.");
   // A malformed LIST JSON draft must fail closed in the real Hop editor:
   // no config/write, no enabled Save, and Cancel must restore server state.
   // This tests the existing JSON fallback, not unverified typed LIST editing.
