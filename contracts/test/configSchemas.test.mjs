@@ -30,6 +30,10 @@ test("Table Input uses a metadata picker without inventing storeWithName semanti
   assert.equal(schema.fields.find(({ key }) => key === "sql")?.control, "MonacoEditor");
   assert.equal(schema.fields.find(({ key }) => key === "sql_from_file")?.control, "VfsPicker");
   assert.equal(schema.fields.find(({ key }) => key === "fields.field")?.control, "EditableTable");
+  const outputFields = schema.fields.find(({ key }) => key === "fields.field");
+  assert.equal(outputFields?.columns?.find(({ key }) => key === "type")?.valueType, "integer",
+    "TableInputField.type is an int on ConfigJsonSerializer wire; do not send a type-name string");
+
 });
 
 test("Database Connection marks password transport as sensitive", () => {
