@@ -116,3 +116,27 @@ test("SelectValues metadata table covers every native SelectMetadataChange wire 
       `${key} is a native STRING; preserve unknown historical values`);
   }
 });
+
+test("TableInput layout preserves every native field exactly once and reuses flat fallback", () => {
+  const schema = findConfigSchema("transform", "TableInput");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.tabs.map(({ key }) => key), ["query", "output"]);
+  const grouped = schema.tabs.flatMap((tab) => tab.groups.flatMap((group) => group.fields));
+  assert.deepEqual(grouped.map(({ key }) => key), [
+    "connection", "sql", "sql_from_file", "lookup",
+    "limit", "execute_each_row", "variables_active", "use_named_parameters",
+    "specify_fields", "fields.field", "validate_specified_fields",
+  ]);
+  assert.equal(new Set(grouped.map(({ key }) => key)).size, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(({ key }) => key === field.key),
+      "layout must reuse the same native field descriptor as the flat fallback");
+  }
+  const declared = schema.fields.find(({ key }) => key === "fields.field");
+  const validate = schema.fields.find(({ key }) => key === "validate_specified_fields");
+  assert.deepEqual(declared?.activation, { flagKey: "specify_fields", activeWhen: true });
+  assert.deepEqual(validate?.activation, { flagKey: "specify_fields", activeWhen: true });
+  assert.equal(schema.fields.find(({ key }) => key === "specify_fields")?.activation, undefined);
+  assert.match(schema.fields.find(({ key }) => key === "sql_from_file")?.description ?? "",
+    /instead of inline SQL/, "native file SQL takes precedence but inline draft must be retained");
+});
