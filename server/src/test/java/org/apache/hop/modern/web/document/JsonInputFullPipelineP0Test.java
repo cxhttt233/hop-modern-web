@@ -480,4 +480,131 @@ class JsonInputFullPipelineP0Test {
     System.out.println("PROD_P0_JSONINPUT_WILDCARD_ALIGNED_ARRAY_ROWS_JSON_HPL=PASS");
   }
 
+
+  @Test
+  void jsonInputUnequalNonemptyWildcardListsFailNativeEngineAfterRealHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    // This is not a missing-path test: both JSONPath results exist, but their
+    // nonempty cardinalities disagree. FastJsonReader must not silently align them.
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin jsonPlugin = plugins.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(gridPlugin);
+    assertNotNull(jsonPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader gridLoader = grid.getClass().getClassLoader();
+    Class<?> gridFieldType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> gridLineType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    Object gridField = gridFieldType.getConstructor().newInstance();
+    gridFieldType.getMethod("setName", String.class).invoke(gridField, "payload");
+    gridFieldType.getMethod("setType", String.class).invoke(gridField, "String");
+    grid.getClass().getMethod("setDataGridFields", List.class)
+        .invoke(grid, List.of(gridField));
+    Object line = gridLineType.getConstructor().newInstance();
+    gridLineType.getMethod("setDatalines", List.class).invoke(line,
+        List.of("{\"stations\":[\"黄河<&>\",\"渭河\"],\"flows\":[42]}"));
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, List.of(line));
+
+    ITransformMeta json = plugins.loadClass(jsonPlugin, ITransformMeta.class);
+    json.setDefault();
+    Class<?> fieldType = json.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField");
+    Object station = fieldType.getConstructor(String.class).newInstance("测站<&>");
+    fieldType.getMethod("setPath", String.class).invoke(station, "$.legacyStation");
+    fieldType.getMethod("setType", int.class).invoke(station, IValueMeta.TYPE_STRING);
+    Object flow = fieldType.getConstructor(String.class).newInstance("流量");
+    fieldType.getMethod("setPath", String.class).invoke(flow, "$.legacyFlow");
+    fieldType.getMethod("setType", int.class).invoke(flow, IValueMeta.TYPE_INTEGER);
+    json.getClass().getMethod("setInputFields", List.class)
+        .invoke(json, List.of(station, flow));
+
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("JsonInput", "json-node", json);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("jsoninput-unequal-nonempty-wildcards");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("jsoninput-unequal-wildcards.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    assertEquals(1, loaded.nrPipelineHops());
+
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("json-unequal-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("json-unequal-doc",
+        new PipelineConfigResource.ReadRequest("json-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("IsInFields", true);
+    draft.put("IsAFile", false);
+    draft.put("valueField", "payload");
+    draft.put("removeSourceField", true);
+    draft.put("ignoreMissingPath", true);
+    draft.put("defaultPathLeafToNull", false);
+    ArrayNode paths = (ArrayNode) draft.path("fields").path("field");
+    assertEquals(2, paths.size());
+    ((ObjectNode) paths.get(0)).put("path", "$.stations[*]");
+    ((ObjectNode) paths.get(1)).put("path", "$.flows[*]");
+    var write = resource.write("json-unequal-doc",
+        new PipelineConfigResource.WriteRequest("json-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("json-node").getTransform(), provider);
+    assertTrue(wire.at("/ignoreMissingPath").booleanValue());
+    assertFalse(wire.at("/defaultPathLeafToNull").booleanValue());
+    assertEquals("payload", wire.at("/valueField").asText());
+    assertEquals(2, wire.at("/fields/field").size());
+    assertEquals("测站<&>", wire.at("/fields/field/0/name").asText());
+    assertEquals("$.stations[*]", wire.at("/fields/field/0/path").asText());
+    assertEquals("流量", wire.at("/fields/field/1/name").asText());
+    assertEquals("$.flows[*]", wire.at("/fields/field/1/path").asText());
+
+    var contract = AutomaticConfigDescriptor.describe(
+        reopened.findTransform("json-node").getTransform().getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals(
+            "JSON_INPUT_UNEQUAL_NONEMPTY_WILDCARD_ARRAYS_FAIL_RUNTIME"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/fields/field", "/ignoreMissingPath",
+        "/defaultPathLeafToNull"), contract.keyListPointers());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("json-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertTrue(engine.getErrors() > 0,
+          "unequal nonempty JSONPath result lists must fail native FastJsonReader");
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+    assertTrue(emitted.isEmpty(),
+        "a mismatched JSONPath document must not produce a padded partial row");
+    System.out.println("PROD_P0_JSONINPUT_UNEQUAL_NONEMPTY_WILDCARDS_NATIVE_ERROR_HPL=PASS");
+  }
+
 }

@@ -930,6 +930,18 @@ public final class AutomaticConfigDescriptor {
                       + "disk reopen; this is an execution compatibility diagnostic, "
                       + "not a draft-save validator."),
               new RuntimePrecondition(
+                  "JSON_INPUT_UNEQUAL_NONEMPTY_WILDCARD_ARRAYS_FAIL_RUNTIME",
+                  List.of("/fields/field", "/ignoreMissingPath", "/defaultPathLeafToNull"),
+                  "Native FastJsonReader.evalCombinedResult() compares the lengths of "
+                      + "consecutive nonempty JSONPath result lists. If two ordered "
+                      + "fields.field[*].path expressions yield different positive "
+                      + "lengths for the same input JSON document (for example two "
+                      + "stations but one flow), the reader raises JsonInputException "
+                      + "for an invalid JSON structure instead of padding the shorter "
+                      + "nonempty list with nulls. ignoreMissingPath=true does not "
+                      + "disable this structural check. This depends on input data "
+                      + "and is an execution diagnostic, not a draft-save validator."),
+              new RuntimePrecondition(
                   "JSON_INPUT_SOURCE_REMOVAL_AND_AUXILIARY_OUTPUT_COLUMNS",
                   List.of("/IsInFields", "/removeSourceField", "/valueField", "/fields/field", "/include", "/include_field", "/rownum", "/rownum_field"),
                   "JsonInputMeta.getFields() removes the incoming valueField column only when IsInFields and removeSourceField are true and that field exists. It then appends fields.field[*] output columns in declaration order using JsonInputField.toValueMeta(), which resolves output names and propagates declared type, length, precision and formatting. If include is true it appends a variable-resolved STRING include_field of length 250; if rownum is true it appends a variable-resolved INTEGER rownum_field. Auxiliary fields follow the JSONPath fields. This describes the native downstream row schema and does not validate or reject draft saves."));
