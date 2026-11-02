@@ -223,6 +223,49 @@ export const execSqlConfigSchema: HopConfigSchema = {
 };
 
 /**
+ * P0 Http uses two independent ordered native lookup LISTs whose rows both
+ * contain name/parameter leaves. Preserve the /lookup/arg and /lookup/header
+ * containers and the encrypted password transport; do not flatten by leaf key.
+ */
+export const httpConfigSchema: HopConfigSchema = {
+  pluginId: "Http",
+  pluginType: "transform",
+  title: "HTTP client",
+  tier: "T1",
+  fields: [
+    { key: "urlInField", label: "Read URL from incoming row", control: "VariableInput", valueType: "boolean" },
+    { key: "url", label: "URL", control: "VariableInput", valueType: "string", variable: true,
+      activation: { flagPointer: "/urlInField", activeWhen: false } },
+    { key: "urlField", label: "URL input field", control: "VariableInput", valueType: "string",
+      pickerHint: "UPSTREAM_FIELD_PICKER",
+      activation: { flagPointer: "/urlInField", activeWhen: true } },
+    { key: "lookup.arg", label: "Query parameters", control: "EditableTable", valueType: "object[]",
+      columns: [
+        { key: "name", label: "Incoming field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
+        { key: "parameter", label: "Query parameter", valueType: "string" },
+      ] },
+    { key: "lookup.header", label: "Request headers", control: "EditableTable", valueType: "object[]",
+      columns: [
+        { key: "name", label: "Incoming field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
+        { key: "parameter", label: "Header name", valueType: "string" },
+      ] },
+    { key: "encoding", label: "Response encoding", control: "VariableInput", valueType: "string" },
+    { key: "socketTimeout", label: "Socket timeout", control: "VariableInput", valueType: "string", variable: true },
+    { key: "connectionTimeout", label: "Connection timeout", control: "VariableInput", valueType: "string", variable: true },
+    { key: "closeIdleConnectionsTime", label: "Close idle connections after", control: "VariableInput", valueType: "string", variable: true },
+    { key: "ignoreSsl", label: "Ignore SSL certificate errors", control: "VariableInput", valueType: "boolean" },
+    { key: "proxyHost", label: "Proxy host", control: "VariableInput", valueType: "string", variable: true },
+    { key: "proxyPort", label: "Proxy port", control: "VariableInput", valueType: "string", variable: true },
+    { key: "httpLogin", label: "HTTP login", control: "VariableInput", valueType: "string", variable: true },
+    { key: "httpPassword", label: "HTTP password", control: "VariableInput", valueType: "string", sensitive: true },
+    { key: "result.name", label: "Response body field", control: "VariableInput", valueType: "string" },
+    { key: "result.code", label: "Status code field", control: "VariableInput", valueType: "string" },
+    { key: "result.response_time", label: "Response time field", control: "VariableInput", valueType: "string" },
+    { key: "result.response_header", label: "Response headers field", control: "VariableInput", valueType: "string" },
+  ],
+};
+
+/**
  * First real Metadata contract. DatabaseMeta stores its database implementation under `rdbms`;
  * standard connection fields below are BaseDatabaseMeta metadata properties. Password is marked
  * sensitive so browser/server transport can preserve Hop's encrypted representation.
@@ -393,6 +436,30 @@ execSqlConfigSchema.tabs = bindLayout(execSqlConfigSchema, [
   ] },
 ]);
 
+// Http query parameters and headers have identical leaf names but different
+// canonical Hop wire containers. Grouping only reuses native field objects.
+httpConfigSchema.tabs = bindLayout(httpConfigSchema, [
+  { key: "request", label: "Request URL", groups: [
+    { key: "url", label: "URL source", keys: ["urlInField", "url", "urlField"] },
+  ] },
+  { key: "parameters", label: "Request data", groups: [
+    { key: "query", label: "Query parameters", keys: ["lookup.arg"] },
+    { key: "headers", label: "Request headers", keys: ["lookup.header"] },
+  ] },
+  { key: "connection", label: "Connection settings", groups: [
+    { key: "timeouts", label: "Timeouts",
+      keys: ["socketTimeout", "connectionTimeout", "closeIdleConnectionsTime"] },
+    { key: "transport", label: "Transport and proxy",
+      keys: ["encoding", "ignoreSsl", "proxyHost", "proxyPort"] },
+    { key: "credentials", label: "HTTP authentication",
+      keys: ["httpLogin", "httpPassword"] },
+  ] },
+  { key: "response", label: "Response fields", groups: [
+    { key: "fields", label: "Output names",
+      keys: ["result.name", "result.code", "result.response_time", "result.response_header"] },
+  ] },
+]);
+
 const configSchemas: readonly HopConfigSchema[] = [
   tableInputConfigSchema,
   selectValuesConfigSchema,
@@ -401,6 +468,7 @@ const configSchemas: readonly HopConfigSchema[] = [
   stringCutConfigSchema,
   replaceStringConfigSchema,
   execSqlConfigSchema,
+  httpConfigSchema,
   databaseConnectionConfigSchema,
 ];
 
