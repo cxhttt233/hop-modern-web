@@ -44,7 +44,8 @@ export type HopConfigValueType =
   | "object[]";
 
 export interface HopConfigOption {
-  value: string;
+  /** Native Hop enum/type options may use STRING names or NUMBER codes. */
+  value: string | number;
   label: string;
 }
 
