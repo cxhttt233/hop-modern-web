@@ -87,6 +87,43 @@ try {
   const sqlField = panel.locator(`#config-${sqlDescriptor.javaField}`);
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
   if (await sqlField.inputValue() !== "SELECT id, name FROM customers") throw new Error("Authoritative SQL not visible");
+
+  // Developer-only identifiers must not crowd the Chinese configuration heading.
+  // This is a disclosure of schema keys, never of the native Hop configuration values.
+  const developerDetails = panel.locator("details.config-developer-details");
+  const developerSummary = developerDetails.locator(":scope > summary");
+  const javaClass = developerDetails.locator("code").filter({ hasText: initial.descriptor.className }).first();
+  const developerWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeDeveloper = developerWrites();
+  if (await developerDetails.evaluate(element => element.open) || await javaClass.isVisible()) {
+    throw new Error("Raw Hop class details must be collapsed by default");
+  }
+  await developerSummary.click();
+  if (!await javaClass.isVisible() ||
+      !await developerDetails.getByText("table-input", { exact: true }).isVisible()) {
+    throw new Error("Developer disclosure did not reveal real Hop class and node identity");
+  }
+  const rawKeys = developerDetails.locator("details.config-property-keys");
+  await rawKeys.locator("summary").click();
+  const displayedKeys = await rawKeys.locator("code").allTextContents();
+  if (displayedKeys.length !== initial.descriptor.properties.length ||
+      !displayedKeys.includes("sql") || displayedKeys.includes("Warehouse") ||
+      displayedKeys.some(key => key.includes("SELECT id, name FROM customers"))) {
+    throw new Error("Developer disclosure must list only authoritative descriptor keys, never Hop values");
+  }
+  const developerDraft = "SELECT id FROM customers /* 开发者详情草稿 */";
+  await sqlField.fill(developerDraft);
+  await developerSummary.focus();
+  await developerSummary.press("Enter");
+  if (await developerDetails.evaluate(element => element.open) ||
+      await sqlField.inputValue() !== developerDraft ||
+      developerWrites() !== writesBeforeDeveloper) {
+    throw new Error("Keyboard developer disclosure changed a real Hop draft or wrote configuration");
+  }
+  await sqlField.fill("SELECT id, name FROM customers");
+  console.log("V4 developer disclosure proof passed: collapsed raw identifiers, keyboard toggle, key-only metadata, draft preserved, no Hop write.");
+
   // Search only descriptor labels/keys: real Hop values and secrets must never
   // enter search suggestions. Filtering must not submit or discard an unsaved draft.
   const fieldFinder = panel.getByRole("searchbox", { name: "查找配置字段" });
