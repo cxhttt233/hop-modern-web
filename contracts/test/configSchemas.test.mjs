@@ -27,6 +27,15 @@ test("Table Input uses a metadata picker without inventing storeWithName semanti
     },
     { control: "MetadataPicker", metadataType: "DatabaseMeta", storeWithName: undefined },
   );
+  const lookup = schema.fields.find(({ key }) => key === "lookup");
+  assert.equal(lookup?.valueType, "string");
+  assert.equal(lookup?.pickerHint, "INFO_STREAM_TRANSFORM_PICKER",
+    "TableInput.lookup selects a pipeline INFO transform, not a database connection");
+  assert.equal(lookup?.control, "VariableInput",
+    "until React implements the picker, the native transform name remains editable");
+  assert.equal(lookup?.metadataType, undefined);
+  assert.equal(lookup?.variable, undefined,
+    "the INFO transform name is literal, not a variable expression");
   assert.equal(schema.fields.find(({ key }) => key === "sql")?.control, "MonacoEditor");
   assert.equal(schema.fields.find(({ key }) => key === "sql_from_file")?.control, "VfsPicker");
   assert.equal(schema.fields.find(({ key }) => key === "fields.field")?.control, "EditableTable");
