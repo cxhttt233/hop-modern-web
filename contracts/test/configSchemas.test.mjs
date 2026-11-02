@@ -1,7 +1,7 @@
 // V4 contract regression: this file intentionally validates only browser/server transport shape.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findConfigSchema, listConfigSchemas } from "../dist/index.js";
+import { concatFieldsConfigSchema, findConfigSchema, listConfigSchemas } from "../dist/index.js";
 
 test("registry exposes the first real config targets", () => {
   assert.deepEqual(
@@ -540,6 +540,8 @@ test("SetVariable T1 keeps native ordered assignments, upstream references and s
 test("ConcatFields T1 preserves native ordered sources and capitalized target OBJECT", () => {
   const schema = findConfigSchema("transform", "ConcatFields");
   assert.ok(schema?.tabs);
+  assert.strictEqual(schema, concatFieldsConfigSchema,
+    "public contracts export must resolve the exact registered production schema");
   assert.deepEqual(schema.fields.map(field => field.key), [
     "fields.field", "ConcatFields.targetFieldName",
     "ConcatFields.targetFieldLength", "ConcatFields.removeSelectedFields",
