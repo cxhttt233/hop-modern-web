@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 export type ConfigShape = "STRING" | "NUMBER" | "BOOLEAN" | "ENUM" | "OBJECT" | "LIST";
 export interface ConfigPropertyDescriptor {
@@ -81,6 +81,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const [draft, setDraft] = useState<Record<string, unknown>>(() => Object.fromEntries(
     descriptor.properties.filter((p) => !p.sensitive).map((p) => [p.key, read(config, p.key)])));
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
+  const [invalidFocusKey, setInvalidFocusKey] = useState<string | null>(null);
   // Field navigation is presentation-only: never search or expose configuration values.
   const [fieldQuery, setFieldQuery] = useState("");
   // Only presentation state: collapsing a group never drops its native Hop draft.
@@ -119,6 +120,25 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     return !(Object.is(value, original) || JSON.stringify(value) === JSON.stringify(original));
   });
   const changedFieldCount = changedFields.length;
+  const invalidProperties = descriptor.properties.filter((property) => invalid[property.key]);
+  // Error navigation changes presentation only; it never reads or sends native values.
+  useEffect(() => {
+    if (!invalidFocusKey) return;
+    const labels = configFormRef.current?.querySelectorAll<HTMLLabelElement>("label[data-config-key]");
+    const target = Array.from(labels ?? []).find((element) => element.dataset.configKey === invalidFocusKey);
+    const control = target?.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select");
+    if (!control || control.closest("[hidden]")) return;
+    control.focus();
+    control.scrollIntoView({ block: "nearest" });
+    setInvalidFocusKey(null);
+  }, [invalidFocusKey, collapsedGroups, fieldQuery]);
+  const locateInvalidField = () => {
+    const property = invalidProperties[0];
+    if (!property || disabled) return;
+    const group = property.groupKey?.trim() || "General";
+    setCollapsedGroups((current) => ({ ...current, [group]: false }));
+    setInvalidFocusKey(property.key);
+  };
   // Native TableInput gives a non-empty SQL file priority over inline SQL.
   // This notice describes the current unsaved draft; it never rewrites either source.
   const fileSqlSelected = descriptor.className.endsWith(".TableInputMeta") &&
@@ -237,6 +257,9 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
         <ul aria-label="未保存字段清单">{changedFields.map((property) =>
           <li key={property.key}>{label(property)}</li>)}</ul>
       </details>
+    </div>}{invalidProperties.length > 0 && <div className="config-invalid-summary" role="status" aria-live="polite">
+      <span>有 {invalidProperties.length} 项 JSON 格式错误，暂不能保存</span>
+      <button type="button" disabled={disabled} onClick={locateInvalidField}>定位错误字段</button>
     </div>}<button type="button" aria-label="取消配置（Cancel）" onClick={onCancel}>取消</button><button type="submit" aria-label="保存配置（Save）" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
   </form>;
 }
