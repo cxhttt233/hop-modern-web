@@ -562,6 +562,36 @@ button { cursor: pointer; }
 }
 .generic-config > header strong { font-size: 15px; color: #212b40; }
 .generic-config > header small { color: #9ca4b2; font-size: 10px; word-break: break-all; }
+/* Native Hop identifiers are available on demand, not competing with the Chinese form title. */
+.generic-config .config-developer-details { font-size: 11px; color: #657188; }
+.generic-config .config-developer-details summary { cursor: pointer; width: fit-content; }
+.generic-config .config-developer-details > summary { font-weight: 600; }
+.generic-config .config-developer-content {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #e6ebf3;
+  border-radius: 8px;
+  background: #f8fafd;
+}
+.generic-config .config-developer-content p {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 0 7px;
+}
+.generic-config .config-developer-content code { overflow-wrap: anywhere; color: #34415b; font-size: 11px; }
+.generic-config .config-property-keys { margin-top: 7px; }
+.generic-config .config-property-keys ul {
+  display: grid;
+  gap: 5px;
+  max-height: 145px;
+  overflow-y: auto;
+  margin: 8px 0 0;
+  padding-left: 17px;
+}
+.generic-config .config-property-keys li { overflow-wrap: anywhere; }
+.generic-config .config-property-keys li span { margin-right: 7px; }
+
 .config-field-search {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
