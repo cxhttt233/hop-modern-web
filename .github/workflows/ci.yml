@@ -92,6 +92,12 @@ jobs:
       - name: Install frontend dependencies for L3 renderer classification
         working-directory: modern
         run: npm install
+      - name: Build T3 declarative contract for native P0 comparison
+        working-directory: modern
+        run: npm run build -w @hop-modern/contracts
+      - name: Verify T3 P0 T1 schemas against installed native Hop descriptors
+        working-directory: modern
+        run: node e2e/t3-p0-native-schema-compat.mjs
       - name: Classify all production P0 transforms through GenericConfigPanel
         working-directory: modern
         run: node e2e/l3-p0-classification.mjs docs/p0-transform-descriptors.generated.json docs/p0-l3-classification.generated.json
