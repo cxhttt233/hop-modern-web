@@ -27,8 +27,8 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.modern.web.document.PipelineOpenResource;
-import org.glassfish.grizzly.http.server.HttpServer;
-import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
+import org.eclipse.jetty.server.Server;
+import org.glassfish.jersey.jetty.JettyHttpContainerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -54,7 +54,7 @@ class PipelineHttpJsonBoundaryABTest {
       port = socket.getLocalPort();
     }
     URI base = URI.create("http://127.0.0.1:" + port + "/");
-    HttpServer server = GrizzlyHttpServerFactory.createHttpServer(
+    Server server = JettyHttpContainerFactory.createServer(
         base, ModernWebServer.createResourceConfig().register(JsonEchoResource.class));
     try {
       HttpClient client = HttpClient.newHttpClient();
@@ -66,11 +66,11 @@ class PipelineHttpJsonBoundaryABTest {
           echo.statusCode(), opened.statusCode(), body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
           echo.headers().firstValue("Content-Type").orElse("missing"),
           opened.headers().firstValue("Content-Type").orElse("missing"));
-      assertAll("Both handlers must accept identical JSON on one Grizzly/Jersey listener",
+      assertAll("Both handlers must accept identical JSON on one production Jetty/Jersey listener",
           () -> assertEquals(200, echo.statusCode(), "record echo: " + echo.body()),
           () -> assertEquals(200, opened.statusCode(), "pipeline open: " + opened.body()));
     } finally {
-      server.shutdownNow();
+      server.stop();
     }
   }
 
