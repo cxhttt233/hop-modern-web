@@ -69,3 +69,126 @@ for (const pluginId of ["CheckSum", "StringCut", "ReplaceString"]) {
   }
 }
 console.log("PROD_P0_T1_NATIVE_SCHEMA_COMPAT=PASS");
+
+
+/**
+ * Priority T1 native coverage: unlike the simple root LIST transforms above,
+ * SelectValues nests three independently ordered lists inside a native OBJECT.
+ * Validate those native JSON paths, typed columns, source stages and conditional
+ * fields against the installed Hop descriptors. A green standalone TypeScript
+ * schema test cannot prove that the pinned Java metadata still matches.
+ */
+function flattenNativeProperties(properties, parent = "") {
+  const entries = [];
+  for (const property of properties) {
+    const key = [parent, property.groupKey, property.key].filter(Boolean).join(".");
+    if (property.shape === "OBJECT" && property.children?.length) {
+      entries.push(...flattenNativeProperties(property.children, key));
+    } else {
+      entries.push([key, property]);
+    }
+  }
+  return entries;
+}
+
+function assertNativeValueType(valueType, property, context) {
+  switch (property.shape) {
+    case "STRING":
+      assert.equal(valueType, "string", context);
+      break;
+    case "BOOLEAN":
+      assert.equal(valueType, "boolean", context);
+      break;
+    case "NUMBER":
+      assert.ok(["integer", "number"].includes(valueType), context);
+      break;
+    case "ENUM":
+      assert.equal(valueType, "string", context);
+      break;
+    default:
+      assert.fail(context + ": unsupported native shape " + property.shape);
+  }
+}
+
+const nativePickerHints = new Set([
+  "UPSTREAM_FIELD_PICKER", "STAGED_FIELD_PICKER",
+  "VALUE_META_CODE_PICKER", "VALUE_META_TYPE_PICKER",
+]);
+for (const pluginId of ["TableInput", "SelectValues", "SortRows"]) {
+  const descriptor = byId.get(pluginId);
+  const schema = findConfigSchema("transform", pluginId);
+  assert.ok(descriptor?.properties, pluginId + ": installed native descriptor missing");
+  assert.ok(schema?.tabs, pluginId + ": T1 layout missing");
+
+  const nativeEntries = flattenNativeProperties(descriptor.properties);
+  const native = new Map(nativeEntries);
+  assert.equal(native.size, nativeEntries.length, pluginId + ": duplicate native paths");
+  assert.deepEqual(schema.fields.map(field => field.key).sort(), [...native.keys()].sort(),
+    pluginId + ": T1 paths must match all native scalar/LIST properties");
+
+  for (const field of schema.fields) {
+    const property = native.get(field.key);
+    const context = pluginId + "." + field.key;
+    assert.ok(property, context + ": native property missing");
+    if (property.shape === "LIST") {
+      assert.equal(field.control, "EditableTable", context);
+      assert.equal(field.valueType, "object[]", context);
+      const nativeColumns = property.elementProperties ?? [];
+      assert.deepEqual((field.columns ?? []).map(column => column.key).sort(),
+        nativeColumns.map(column => column.key).sort(),
+        context + ": native LIST column coverage");
+      const byColumn = new Map(nativeColumns.map(column => [column.key, column]));
+      for (const column of field.columns ?? []) {
+        const child = byColumn.get(column.key);
+        const columnContext = context + "." + column.key;
+        assertNativeValueType(column.valueType, child, columnContext);
+        if (nativePickerHints.has(child.widgetHint) || column.pickerHint) {
+          assert.equal(column.pickerHint, child.widgetHint, columnContext + ": native picker");
+        }
+        if (child.fieldSourceStage != null || column.fieldSourceStage != null) {
+          assert.equal(column.fieldSourceStage, child.fieldSourceStage,
+            columnContext + ": native staged field source");
+        }
+      }
+      const listPointer = "/" + field.key.replaceAll(".", "/");
+      const wire = descriptor.wireLists?.find(entry => entry.listPointer === listPointer);
+      assert.ok(wire, context + ": canonical native wire LIST pointer missing");
+      assert.equal(wire.itemPointerTemplate, listPointer + "/{index}",
+        context + ": indexed JSON Pointer template");
+    } else {
+      assertNativeValueType(field.valueType, property, context);
+      if (field.activation) {
+        assert.equal(property.activationContext?.flagPointer, field.activation.flagPointer,
+          context + ": native activation flag path");
+        assert.equal(property.activationContext?.activeWhen, field.activation.activeWhen,
+          context + ": native activation Boolean");
+      }
+      if (field.sqlSourceContext) {
+        const source = property.sqlSourceContext;
+        assert.ok(source, context + ": native SQL source contract missing");
+        for (const [key, value] of Object.entries(field.sqlSourceContext)) {
+          assert.equal(source[key], value, context + ": native SQL " + key);
+        }
+      }
+    }
+  }
+
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length, pluginId + ": layout field count");
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(candidate => candidate.key === field.key),
+      pluginId + ": tabs must reuse the original T1 native fields");
+  }
+  if (pluginId === "TableInput") {
+    assert.equal(native.get("connection").widgetHint, "METADATA_PICKER");
+    assert.equal(native.get("sql_from_file").widgetHint, "VFS_PICKER");
+    assert.equal(native.get("lookup").widgetHint, "INFO_STREAM_TRANSFORM_PICKER");
+    assert.equal(schema.fields.find(field => field.key === "sql_from_file").control, "VfsPicker");
+  }
+  if (pluginId === "SortRows") {
+    assert.equal(native.get("directory").widgetHint, "LOCAL_DIRECTORY_PICKER");
+    assert.equal(schema.fields.find(field => field.key === "directory").pickerHint,
+      "LOCAL_DIRECTORY_PICKER");
+  }
+}
+console.log("PROD_P0_T1_NATIVE_PRIORITY_SCHEMA_COMPAT=PASS");
