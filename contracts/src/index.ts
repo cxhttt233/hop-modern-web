@@ -150,10 +150,12 @@ export interface HopMetadataSummary {
 }
 
 export {
+  checkSumConfigSchema,
   databaseConnectionConfigSchema,
   findConfigSchema,
   listConfigSchemas,
   selectValuesConfigSchema,
   sortRowsConfigSchema,
+  stringCutConfigSchema,
   tableInputConfigSchema,
 } from "./configSchemas.js";
