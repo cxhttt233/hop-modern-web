@@ -59,6 +59,18 @@ export interface HopEditableTableColumn {
   options?: HopConfigOption[];
 }
 
+/**
+ * Native Hop SQL file override semantics.  These are producer-owned JSON
+ * Pointers, not dotted UI field keys.  A file source supersedes the inline
+ * SQL at runtime without deleting the editable inline draft.
+ */
+export interface HopSqlSourceContext {
+  inlineSqlPointer: string;
+  fileSqlPointer: string;
+  precedence: "FILE_WHEN_NONEMPTY";
+  inlineReadOnlyWhenFileSelected: boolean;
+}
+
 export interface HopConfigField {
   /** Stable property path used by the server adapter to read/write Hop Meta. */
   key: string;
@@ -68,6 +80,9 @@ export interface HopConfigField {
   required?: boolean;
   readOnly?: boolean;
   description?: string;
+  /** SQL source precedence and read-only editor behavior; preserve both native drafts. */
+  sqlSourceContext?: HopSqlSourceContext;
+
   /** Canonical JSON Pointer for conditional editor activation; never delete inactive native values. */
   activation?: { flagPointer: string; activeWhen: boolean };
 
