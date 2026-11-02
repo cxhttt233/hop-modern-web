@@ -331,6 +331,37 @@ try {
       configWriteCount() !== writesBeforeInvalid) {
     throw new Error("Malformed LIST JSON must disable Save without sending config/write");
   }
+  // A collapsed group must not trap an invalid native LIST JSON draft.
+  // The recovery control reveals and focuses the real field without config/write.
+  const invalidSummary = panel.locator(".config-invalid-summary[role=status]");
+  const invalidToggle = listField.locator("xpath=ancestor::fieldset[1]").locator(".config-group-toggle");
+  if (!await invalidSummary.isVisible() ||
+      !(await invalidSummary.innerText()).includes("有 1 项 JSON 格式错误")) {
+    throw new Error("Invalid native LIST JSON must show an actionable Chinese error summary");
+  }
+  await invalidToggle.click();
+  if (await listField.isVisible() || await invalidToggle.getAttribute("aria-expanded") !== "false") {
+    throw new Error("Invalid LIST JSON group did not collapse before recovery");
+  }
+  await invalidSummary.getByRole("button", { name: "定位错误字段" }).click();
+  await listField.waitFor({ state: "visible" });
+  await page.waitForFunction(id => document.activeElement?.id === id, await listField.getAttribute("id"));
+  if (await invalidToggle.getAttribute("aria-expanded") !== "true" ||
+      configWriteCount() !== writesBeforeInvalid) {
+    throw new Error("Error navigation must reveal and focus the invalid field without writing Hop");
+  }
+  await listField.fill(originalListText);
+  if (await invalidSummary.count() !== 0 ||
+      !await panel.getByRole("button", { name: "Save" }).isEnabled() ||
+      configWriteCount() !== writesBeforeInvalid) {
+    throw new Error("Correcting native LIST JSON must clear the error summary without Hop writes");
+  }
+  await listField.fill('[{"name":');
+  if (!await invalidSummary.isVisible() ||
+      await panel.getByRole("button", { name: "Save" }).isEnabled()) {
+    throw new Error("A second malformed LIST draft must still fail closed");
+  }
+  console.log("V4 invalid JSON recovery proof passed: collapsed field reveal, keyboard focus, correction, no Hop write.");
   await panel.getByRole("button", { name: "Cancel" }).click();
   const invalidRecoveryPending = page.waitForResponse(r => match(r, "/config/read"));
   await node.click();
