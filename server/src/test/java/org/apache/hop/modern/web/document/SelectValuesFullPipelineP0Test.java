@@ -1535,4 +1535,93 @@ class SelectValuesFullPipelineP0Test {
     assertEquals(roundedOutputs.keySet(), outputStations);
     System.out.println("PROD_P0_SELECTVALUES_INTEGER_NUMBER_BINARY64_PRECISION_LOSS=PASS");
   }
+
+  /**
+   * The declarative metadata table must not drop native advanced properties
+   * when a row is edited. Check typed booleans and literal strings through
+   * config/write and a real Hop XML disk reopen, not a JSON-only echo.
+   */
+  @Test
+  void selectValuesAdvancedMetadataColumnsSurviveJsonEditAndRealHplDiskReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin selectPlugin = plugins.findPluginWithId(TransformPluginType.class, "SelectValues");
+    assertNotNull(selectPlugin);
+    ITransformMeta select = plugins.loadClass(selectPlugin, ITransformMeta.class);
+    select.setDefault();
+
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("select-values-advanced-metadata-columns");
+    pipeline.addTransform(new TransformMeta("SelectValues", "select-node", select));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("select-values-advanced-metadata.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("select-advanced-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("select-advanced-doc",
+        new PipelineConfigResource.ReadRequest("select-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    ObjectNode fields = (ObjectNode) draft.path("fields");
+    assertTrue(fields.isObject(), "native SelectValues fields must be a nested object");
+    ArrayNode metadata = fields.putArray("meta");
+    metadata.addObject()
+        .put("name", "黄河<&>水位")
+        .put("type", "String")
+        .put("storage_type", "None")
+        .put("date_format_lenient", false)
+        .put("lenient_string_to_number", true)
+        .put("roundingType", "half_even");
+    metadata.addObject()
+        .put("name", "长江水位")
+        .put("type", "Number")
+        .put("storage_type", "None")
+        .put("date_format_lenient", true)
+        .put("lenient_string_to_number", false)
+        .put("roundingType", "half_up");
+
+    var write = resource.write("select-advanced-doc",
+        new PipelineConfigResource.WriteRequest("select-node", draft));
+    assertEquals(200, write.getStatus(), "advanced typed fields must be writable");
+    store.save(hpl, loaded);
+    PipelineMeta reopened = store.open(hpl);
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("select-node").getTransform(), provider);
+    assertEquals(2, wire.at("/fields/meta").size(), "ordered native list must survive disk");
+    for (int index = 0; index < 2; index++) {
+      JsonNode row = wire.at("/fields/meta/" + index);
+      assertTrue(row.path("date_format_lenient").isBoolean());
+      assertTrue(row.path("lenient_string_to_number").isBoolean());
+      assertTrue(row.path("storage_type").isTextual());
+      assertTrue(row.path("roundingType").isTextual());
+      assertEquals("None", row.path("storage_type").asText());
+    }
+    assertEquals("黄河<&>水位", wire.at("/fields/meta/0/name").asText());
+    assertFalse(wire.at("/fields/meta/0/date_format_lenient").booleanValue());
+    assertTrue(wire.at("/fields/meta/0/lenient_string_to_number").booleanValue());
+    assertEquals("half_even", wire.at("/fields/meta/0/roundingType").asText());
+    assertEquals("长江水位", wire.at("/fields/meta/1/name").asText());
+    assertTrue(wire.at("/fields/meta/1/date_format_lenient").booleanValue());
+    assertFalse(wire.at("/fields/meta/1/lenient_string_to_number").booleanValue());
+    assertEquals("half_up", wire.at("/fields/meta/1/roundingType").asText());
+
+    var reopenedMeta = (org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta)
+        reopened.findTransform("select-node").getTransform();
+    var nativeRows = reopenedMeta.getSelectOption().getMeta();
+    assertEquals(2, nativeRows.size());
+    assertEquals("黄河<&>水位", nativeRows.get(0).getName());
+    assertFalse(nativeRows.get(0).isDateFormatLenient());
+    assertTrue(nativeRows.get(0).isLenientStringToNumber());
+    assertEquals("half_even", nativeRows.get(0).getRoundingType());
+    assertTrue(nativeRows.get(1).isDateFormatLenient());
+    assertFalse(nativeRows.get(1).isLenientStringToNumber());
+    assertEquals("half_up", nativeRows.get(1).getRoundingType());
+    System.out.println("PROD_P0_SELECTVALUES_ADVANCED_META_COLUMNS_JSON_HPL=PASS");
+  }
 }
