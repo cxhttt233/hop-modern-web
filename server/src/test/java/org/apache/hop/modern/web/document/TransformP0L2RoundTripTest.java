@@ -2841,7 +2841,7 @@ class TransformP0L2RoundTripTest {
             "JSON_INPUT_FIELD_SOURCE_REQUIRES_INCOMING_HOP_AND_NAME",
             "JSON_INPUT_MISSING_AND_EXPLICIT_NULL_PATHS_KEEP_TYPED_ROWS",
             "JSON_INPUT_UNEQUAL_NONEMPTY_WILDCARD_ARRAYS_FAIL_RUNTIME",
-            "JSON_INPUT_LIMIT_IS_POST_EMIT_AND_ROWNUM_STARTS_AT_ZERO",
+            "JSON_INPUT_LIMIT_COUNTS_EXPANDED_ROWS_WITH_ONE_BASED_ROWNUM",
             "JSON_INPUT_SOURCE_REMOVAL_AND_AUXILIARY_OUTPUT_COLUMNS"),
         descriptor.runtimePreconditions().stream().map(p -> p.code()).toList());
     assertEquals(List.of("/fields/field"),
