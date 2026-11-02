@@ -19,11 +19,11 @@ export const tableInputConfigSchema: HopConfigSchema = {
     { key: "variables_active", label: "Replace variables", control: "VariableInput", valueType: "boolean" },
     { key: "use_named_parameters", label: "Use named parameters", control: "VariableInput", valueType: "boolean" },
     { key: "specify_fields", label: "Specify output fields", control: "VariableInput", valueType: "boolean" },
-    { key: "validate_specified_fields", label: "Validate specified fields", control: "VariableInput", valueType: "boolean", activation: { flagKey: "specify_fields", activeWhen: true } },
+    { key: "validate_specified_fields", label: "Validate specified fields", control: "VariableInput", valueType: "boolean", activation: { flagPointer: "/specify_fields", activeWhen: true } },
     {
       key: "fields.field",
       label: "Output fields",
-      activation: { flagKey: "specify_fields", activeWhen: true },
+      activation: { flagPointer: "/specify_fields", activeWhen: true },
       control: "EditableTable",
       valueType: "object[]",
       columns: [

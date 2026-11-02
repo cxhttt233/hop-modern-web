@@ -68,8 +68,8 @@ export interface HopConfigField {
   required?: boolean;
   readOnly?: boolean;
   description?: string;
-  /** Conditional editor activation only; inactive native values must be retained on save. */
-  activation?: { flagKey: string; activeWhen: boolean };
+  /** Canonical JSON Pointer for conditional editor activation; never delete inactive native values. */
+  activation?: { flagPointer: string; activeWhen: boolean };
 
   /** MetadataPicker: Hop metadata interface/type and named-reference semantics. */
   metadataType?: string;

@@ -134,8 +134,8 @@ test("TableInput layout preserves every native field exactly once and reuses fla
   }
   const declared = schema.fields.find(({ key }) => key === "fields.field");
   const validate = schema.fields.find(({ key }) => key === "validate_specified_fields");
-  assert.deepEqual(declared?.activation, { flagKey: "specify_fields", activeWhen: true });
-  assert.deepEqual(validate?.activation, { flagKey: "specify_fields", activeWhen: true });
+  assert.deepEqual(declared?.activation, { flagPointer: "/specify_fields", activeWhen: true });
+  assert.deepEqual(validate?.activation, { flagPointer: "/specify_fields", activeWhen: true });
   assert.equal(schema.fields.find(({ key }) => key === "specify_fields")?.activation, undefined);
   assert.match(schema.fields.find(({ key }) => key === "sql_from_file")?.description ?? "",
     /instead of inline SQL/, "native file SQL takes precedence but inline draft must be retained");
