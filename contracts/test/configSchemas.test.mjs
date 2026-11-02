@@ -140,3 +140,40 @@ test("TableInput layout preserves every native field exactly once and reuses fla
   assert.match(schema.fields.find(({ key }) => key === "sql_from_file")?.description ?? "",
     /instead of inline SQL/, "native file SQL takes precedence but inline draft must be retained");
 });
+
+test("SelectValues layout preserves ordered native stages without duplicating wire fields", () => {
+  const schema = findConfigSchema("transform", "SelectValues");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.tabs.map(({ key }) => key), ["select", "remove", "metadata"]);
+  const grouped = schema.tabs.flatMap((tab) => tab.groups.flatMap((group) => group.fields));
+  assert.deepEqual(grouped.map(({ key }) => key), [
+    "fields.field", "fields.select_unspecified", "fields.remove", "fields.meta",
+  ], "select, remove and metadata are distinct native LIST stages");
+  assert.equal(new Set(grouped.map(({ key }) => key)).size, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(({ key }) => key === field.key),
+      "tabs must not clone or rewrite the original Hop wire field");
+  }
+  assert.equal(schema.fields.find(({ key }) => key === "fields.meta")?.columns
+    ?.find(({ key }) => key === "type")?.pickerHint, "VALUE_META_TYPE_PICKER");
+});
+
+test("SortRows layout separates ordered keys from memory and local spill settings", () => {
+  const schema = findConfigSchema("transform", "SortRows");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.tabs.map(({ key }) => key), ["fields", "performance"]);
+  const grouped = schema.tabs.flatMap((tab) => tab.groups.flatMap((group) => group.fields));
+  assert.deepEqual(grouped.map(({ key }) => key), [
+    "fields.field", "unique_rows", "sort_size", "free_memory",
+    "directory", "sort_prefix", "compress", "compress_variables",
+  ]);
+  assert.equal(new Set(grouped.map(({ key }) => key)).size, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(({ key }) => key === field.key),
+      "layout must share the original field instance and preserve wire values");
+  }
+  const spill = schema.tabs[1].groups[1].fields;
+  assert.equal(spill.find(({ key }) => key === "directory")?.pickerHint,
+    "LOCAL_DIRECTORY_PICKER");
+  assert.equal(spill.find(({ key }) => key === "compress_variables")?.variable, true);
+});
