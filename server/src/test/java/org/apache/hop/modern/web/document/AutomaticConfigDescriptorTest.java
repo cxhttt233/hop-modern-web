@@ -23,6 +23,62 @@ import org.junit.jupiter.api.Test;
 
 class AutomaticConfigDescriptorTest {
   @Test
+  void selectValuesNativeTypePickerPublishesActualStringWireOptions() throws Exception {
+    // ValueMetaFactory enumerates installed Hop value-meta plugins; do not
+    // fabricate numeric IValueMeta codes or enum names for a STRING wire field.
+    org.apache.hop.core.HopClientEnvironment.init();
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(SelectValuesMeta.class);
+    Property fields = property(descriptor.properties(), "fields");
+    Property meta = property(fields.children(), "meta");
+    Property type = property(meta.elementProperties(), "type");
+    assertEquals(Shape.STRING, type.shape());
+    assertEquals("java.lang.String", type.javaType());
+    assertEquals(WidgetHint.VALUE_META_TYPE_PICKER, type.widgetHint());
+    assertEquals("/fields/meta", descriptor.wireLists().get(2).listPointer());
+
+    String unchanged = org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
+        org.apache.hop.core.row.IValueMeta.TYPE_NONE);
+    String decimal = org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
+        org.apache.hop.core.row.IValueMeta.TYPE_BIGNUMBER);
+    String string = org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
+        org.apache.hop.core.row.IValueMeta.TYPE_STRING);
+    assertTrue(type.options().stream().anyMatch(o ->
+        o.label().equals(unchanged) && o.value().equals(unchanged)));
+    assertTrue(type.options().stream().anyMatch(o ->
+        o.label().equals(decimal) && o.value().equals(decimal)));
+    assertTrue(type.options().stream().anyMatch(o ->
+        o.label().equals(string) && o.value().equals(string)));
+    assertTrue(type.options().stream().allMatch(o -> o.label().equals(o.value())));
+
+    var change = new org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange();
+    change.setName("水位<&>");
+    change.setType(decimal);
+    SelectValuesMeta nativeMeta = new SelectValuesMeta();
+    nativeMeta.getSelectOption().getMeta().add(change);
+    var provider = new org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider();
+    var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        nativeMeta, provider);
+    assertTrue(wire.at("/fields/meta/0/type").isTextual());
+    assertEquals(decimal, wire.at("/fields/meta/0/type").asText());
+
+    var edited = wire.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) edited.at("/fields/meta/0"))
+        .put("type", string);
+    var restored = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.fromJson(
+        edited, SelectValuesMeta.class, provider);
+    var roundTripped = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(
+        restored, provider);
+    assertTrue(roundTripped.at("/fields/meta/0/type").isTextual());
+    assertEquals(string, roundTripped.at("/fields/meta/0/type").asText());
+    assertEquals("水位<&>", roundTripped.at("/fields/meta/0/name").asText());
+
+    var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(type);
+    assertEquals("STRING", published.path("shape").asText());
+    assertEquals("VALUE_META_TYPE_PICKER", published.path("widgetHint").asText());
+    assertTrue(published.path("options").isArray());
+  }
+
+  @Test
   void discoversNestedSelectValuesMetadataWithoutPluginDescriptor() {
     Descriptor descriptor = AutomaticConfigDescriptor.describe(SelectValuesMeta.class);
     Property fields = property(descriptor.properties(), "fields");
