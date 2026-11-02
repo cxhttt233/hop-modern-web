@@ -75,6 +75,37 @@ test("Database Connection marks password transport as sensitive", () => {
   assert.equal(password?.sensitive, true);
 });
 
+
+test("DatabaseMeta T1 layout preserves native paths and sensitive credential semantics", () => {
+  const schema = findConfigSchema("metadata", "DatabaseMeta");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.tabs.map(({ key }) => key),
+    ["identity", "endpoint", "credentials"]);
+  const grouped = schema.tabs.flatMap((tab) => tab.groups.flatMap((group) => group.fields));
+  assert.deepEqual(grouped.map(({ key }) => key), [
+    "name", "rdbms.hostname", "rdbms.port", "rdbms.databaseName",
+    "rdbms.manualUrl", "rdbms.username", "rdbms.password",
+  ], "do not invent JDBC fields or silently omit native DatabaseMeta properties");
+  assert.equal(grouped.length, schema.fields.length);
+  assert.equal(new Set(grouped.map(({ key }) => key)).size, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(({ key }) => key === field.key),
+      "metadata layout must reuse the flat native field, not clone or rewrite values");
+  }
+  const credentialGroup = schema.tabs[2].groups[0];
+  assert.deepEqual(credentialGroup.fields.map(({ key }) => key),
+    ["rdbms.username", "rdbms.password"]);
+  const password = credentialGroup.fields[1];
+  assert.equal(password.sensitive, true, "grouping must not drop secret transport markers");
+  assert.equal(password.valueType, "string");
+  assert.equal(password.metadataType, undefined);
+  const manualUrl = schema.fields.find(({ key }) => key === "rdbms.manualUrl");
+  assert.equal(manualUrl?.variable, true,
+    "native manual JDBC URLs may retain Hop variable expressions");
+  assert.equal(manualUrl?.activation, undefined,
+    "do not discard host/database drafts when a manual JDBC URL is present");
+});
+
 test("typed table picker hints match native Hop wire formats", () => {
   const table = findConfigSchema("transform", "TableInput");
   const select = findConfigSchema("transform", "SelectValues");
