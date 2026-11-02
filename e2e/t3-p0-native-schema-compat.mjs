@@ -189,3 +189,60 @@ for (const pluginId of ["TableInput", "SelectValues"]) {
   }
 }
 console.log("PROD_P0_T1_NATIVE_PRIORITY_SCHEMA_COMPAT=PASS");
+
+/** ExecSql has an ordered native arguments LIST and two independent SQL sources. */
+{
+  const pluginId = "ExecSql";
+  const descriptor = byId.get(pluginId);
+  const schema = findConfigSchema("transform", pluginId);
+  assert.ok(descriptor?.properties, "ExecSql installed native descriptor missing");
+  assert.ok(schema?.tabs, "ExecSql production T1 schema missing");
+  const entries = flattenNativeProperties(descriptor.properties);
+  const native = new Map(entries);
+  assert.equal(native.size, entries.length, "ExecSql native keys must be unique");
+  assert.deepEqual(schema.fields.map(field => field.key).sort(), [...native.keys()].sort(),
+    "ExecSql T1 must cover all native properties without changing their wire names");
+  for (const field of schema.fields) {
+    const property = native.get(field.key);
+    const context = "ExecSql." + field.key;
+    assert.ok(property, context + ": missing native property");
+    if (property.shape === "LIST") {
+      assert.equal(field.control, "EditableTable", context);
+      assert.equal(field.valueType, "object[]", context);
+      assert.deepEqual((field.columns ?? []).map(column => column.key),
+        (property.elementProperties ?? []).map(column => column.key), context + ": list columns");
+      for (const column of field.columns ?? []) {
+        const child = property.elementProperties.find(item => item.key === column.key);
+        assertNativeValueType(column.valueType, child, context + "." + column.key);
+        assert.equal(column.pickerHint, child.widgetHint, context + ": input field picker");
+      }
+    } else {
+      assertNativeValueType(field.valueType, property, context);
+    }
+    if (field.activation) {
+      assert.deepEqual(property.activationContext, field.activation,
+        context + ": native multi-flag activation");
+    }
+    if (field.sqlSourceContext) {
+      assert.deepEqual(property.sqlSourceContext, field.sqlSourceContext,
+        context + ": native SQL precedence");
+    }
+  }
+  const argumentsWire = descriptor.wireLists?.find(entry =>
+    entry.listPointer === "/arguments/argument");
+  assert.ok(argumentsWire, "ExecSql native ordered arguments pointer missing");
+  assert.equal(argumentsWire.itemPointerTemplate, "/arguments/argument/{index}");
+  assert.equal(schema.fields.find(field => field.key === "connection")?.metadataType, "DatabaseMeta");
+  assert.equal(native.get("connection").widgetHint, "METADATA_PICKER");
+  assert.equal(native.get("sql_from_file").widgetHint, "VFS_PICKER");
+  assert.equal(native.get("sql").textEditorHint, "SQL");
+  for (const key of ["insert_field", "update_field", "delete_field", "read_field"]) {
+    assert.equal(native.get(key).widgetHint, "NONE", key + " must remain an output name");
+  }
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(item => item.key === field.key));
+  }
+}
+console.log("PROD_P0_T1_EXECSQL_NATIVE_SCHEMA_COMPAT=PASS");
