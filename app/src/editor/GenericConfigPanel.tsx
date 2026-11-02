@@ -116,6 +116,12 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     const original = read(config, property.key);
     return count + (Object.is(value, original) || JSON.stringify(value) === JSON.stringify(original) ? 0 : 1);
   }, 0);
+  // Native TableInput gives a non-empty SQL file priority over inline SQL.
+  // This notice describes the current unsaved draft; it never rewrites either source.
+  const fileSqlSelected = descriptor.className.endsWith(".TableInputMeta") &&
+    descriptor.properties.some((property) => property.key === "sql") &&
+    descriptor.properties.some((property) => property.key === "sql_from_file") &&
+    typeof draft.sql_from_file === "string" && draft.sql_from_file.trim().length > 0;
   const set = (key: string, value: unknown) => setDraft((old) => ({ ...old, [key]: value }));
   const label = (p: ConfigPropertyDescriptor) => localLabel(p.key);
   // Focus only visible descriptor-owned controls. Never inspect configuration values
@@ -203,6 +209,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
       {fieldQuery && <button type="button" onClick={() => { nextFieldMatch.current = 0; setFieldQuery(""); }} aria-label="清除字段查找">清除</button>}
       <small aria-live="polite">显示 {visibleFieldCount} / {totalFieldCount} 项</small>
     </div>
+    {fileSqlSelected && <p className="config-sql-source-notice" role="status">SQL 来源提示：当前草稿指定了 SQL 文件；运行时文件内容优先，内联 SQL 会保留但不会执行。</p>}
     {visibleGroups.length === 0 && <p className="config-search-empty" role="status">没有匹配的配置字段，请更换关键词。</p>}
     {visibleGroups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
       <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
