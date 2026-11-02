@@ -291,6 +291,14 @@ class RestRedirectP0Test {
       assertTrue(wire.at("/non_preemptive_basic_auth").isBoolean());
       assertFalse(wire.at("/non_preemptive_basic_auth").booleanValue());
       assertEquals("响应正文_雪<&>", wire.at("/result/name").asText());
+      var contract = AutomaticConfigDescriptor.describe(diskMeta.getClass())
+          .runtimePreconditions().stream()
+          .filter(p -> p.code().equals(
+              "REST_STATIC_BASIC_AUTH_CROSS_ORIGIN_REDIRECT_NOT_FOLLOWED"))
+          .findFirst().orElseThrow();
+      assertEquals(List.of("/url", "/urlInField", "/httpLogin", "/httpPassword",
+          "/non_preemptive_basic_auth", "/method", "/result/code"),
+          contract.keyListPointers());
 
       ClassLoader loader = diskMeta.getClass().getClassLoader();
       Class<?> restType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
