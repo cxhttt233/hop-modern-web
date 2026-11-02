@@ -66,11 +66,13 @@ class TableInputNativeValueMetaTypeP0Test {
     var first = new TableInputField();
     first.setName("流量<&>甲");
     first.setType(IValueMeta.TYPE_NUMBER);
+    first.setFormat("0.00 '初始<&>'");
     first.setLength(18);
     first.setPrecision(3);
     var second = new TableInputField();
     second.setName("站点乙");
     second.setType(IValueMeta.TYPE_STRING);
+    second.setFormat("yyyy-MM-dd");
     second.setLength(64);
     var nativeMeta = new TableInputMeta();
     nativeMeta.setDefault();
@@ -99,8 +101,12 @@ class TableInputNativeValueMetaTypeP0Test {
     assertTrue(draft.at("/fields/field/0/type").isIntegralNumber());
     assertEquals(IValueMeta.TYPE_NUMBER, draft.at("/fields/field/0/type").intValue());
     assertEquals(IValueMeta.TYPE_STRING, draft.at("/fields/field/1/type").intValue());
+    assertEquals("0.00 '初始<&>'", draft.at("/fields/field/0/format").asText());
+    assertEquals("yyyy-MM-dd", draft.at("/fields/field/1/format").asText());
     ((ObjectNode) draft.at("/fields/field/0")).put("type", IValueMeta.TYPE_INTEGER);
     ((ObjectNode) draft.at("/fields/field/1")).put("type", IValueMeta.TYPE_BIGNUMBER);
+    ((ObjectNode) draft.at("/fields/field/0")).put("format", "0.000 '黄河<&>'");
+    ((ObjectNode) draft.at("/fields/field/1")).put("format", "yyyy/MM/dd HH:mm:ss");
 
     var write = resource.write("table-type-doc",
         new PipelineConfigResource.WriteRequest("table-node", draft));
@@ -118,8 +124,17 @@ class TableInputNativeValueMetaTypeP0Test {
     assertEquals(IValueMeta.TYPE_BIGNUMBER, reopenedMeta.getFields().get(1).getType());
     assertEquals("流量<&>甲", wire.at("/fields/field/0/name").asText());
     assertEquals("站点乙", wire.at("/fields/field/1/name").asText());
+    assertEquals("0.000 '黄河<&>'", wire.at("/fields/field/0/format").asText());
+    assertEquals("yyyy/MM/dd HH:mm:ss", wire.at("/fields/field/1/format").asText());
+    assertEquals("0.000 '黄河<&>'", reopenedMeta.getFields().get(0).getFormat());
+    assertEquals("yyyy/MM/dd HH:mm:ss", reopenedMeta.getFields().get(1).getFormat());
+    assertEquals("0.000 '黄河<&>'",
+        reopenedMeta.getFields().get(0).toValueMeta("table-node", new Variables()).getConversionMask());
+    assertEquals("yyyy/MM/dd HH:mm:ss",
+        reopenedMeta.getFields().get(1).toValueMeta("table-node", new Variables()).getConversionMask());
     assertEquals(18, wire.at("/fields/field/0/length").intValue());
     assertEquals(3, wire.at("/fields/field/0/precision").intValue());
     System.out.println("PROD_P0_TABLEINPUT_NUMERIC_VALUE_META_PICKER_JSON_HPL=PASS");
+    System.out.println("PROD_P0_TABLEINPUT_FORMAT_MASK_JSON_HPL=PASS");
   }
 }
