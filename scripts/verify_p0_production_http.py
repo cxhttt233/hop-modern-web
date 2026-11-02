@@ -68,6 +68,7 @@ def verify(base, fixture, manifest):
         if not isinstance(document_id, str) or len(document_id) != 64:
             raise AssertionError("real .hpl open did not return an opaque document ID")
         root = "/api/pipelines/" + quote(document_id, safe="")
+        expected_config = {}
         for plugin_id in sorted(P0_IDS):
             node_id = "packaged-" + plugin_id
             graph = post(base, root + "/edit/add", {
@@ -82,11 +83,45 @@ def verify(base, fixture, manifest):
                     or not isinstance(config.get("config"), dict)
                     or not isinstance(config.get("descriptor"), dict)):
                 raise AssertionError(f"{plugin_id}: authoritative config or descriptor missing")
+            # Real HTTP config writes must survive both an immediate read and disk reopen.
+            written = post(base, root + "/config/write", {
+                "nodeId": node_id, "config": config["config"],
+            })
+            if (written.get("nodeId") != node_id or written.get("pluginId") != plugin_id
+                    or not isinstance(written.get("config"), dict)):
+                raise AssertionError(f"{plugin_id}: config write response invalid")
+            reread = post(base, root + "/config/read", {"nodeId": node_id})
+            if reread.get("config") != written["config"]:
+                raise AssertionError(f"{plugin_id}: HTTP write/read config mismatch")
+            expected_config[plugin_id] = reread["config"]
             print(f"PRODUCTION_P0_HTTP_PLUGIN={plugin_id} status=PASS", flush=True)
         if hashlib.sha256(copy.read_bytes()).hexdigest() != original_sha:
             raise AssertionError("in-memory HTTP editing unexpectedly changed the disk fixture")
+        print("PRODUCTION_P0_HTTP_DISK_UNCHANGED_BEFORE_SAVE=PASS", flush=True)
+
+        saved = post(base, root + "/save", {})
+        if not all(any(node.get("id") == "packaged-" + plugin_id
+                       for node in saved.get("nodes", [])) for plugin_id in P0_IDS):
+            raise AssertionError("save response lost one or more P0 transforms")
+        if hashlib.sha256(copy.read_bytes()).hexdigest() == original_sha:
+            raise AssertionError("save did not persist the 20 added P0 transforms")
+        reopened = post(base, "/api/pipelines/open", {"path": str(copy)})
+        reopened_id = reopened.get("id")
+        if not isinstance(reopened_id, str) or len(reopened_id) != 64:
+            raise AssertionError("disk reopen did not return a document ID")
+        reopened_root = "/api/pipelines/" + quote(reopened_id, safe="")
+        for plugin_id in sorted(P0_IDS):
+            node_id = "packaged-" + plugin_id
+            if not any(node.get("id") == node_id and node.get("pluginId") == plugin_id
+                       for node in reopened.get("nodes", [])):
+                raise AssertionError(f"{plugin_id}: persisted node missing after disk reopen")
+            reread = post(base, reopened_root + "/config/read", {"nodeId": node_id})
+            if reread.get("pluginId") != plugin_id or reread.get("config") != expected_config[plugin_id]:
+                raise AssertionError(f"{plugin_id}: persisted config differs after disk reopen")
+            print(f"PRODUCTION_P0_HTTP_PERSISTED_PLUGIN={plugin_id} status=PASS", flush=True)
     print("PRODUCTION_P0_HTTP_OPEN_ADD_CONFIG=20/20 PASS", flush=True)
-    print("PRODUCTION_P0_HTTP_DISK_UNCHANGED=PASS", flush=True)
+    print("PRODUCTION_P0_HTTP_CONFIG_WRITE_READ=20/20 PASS", flush=True)
+    print("PRODUCTION_P0_HTTP_SAVE_REOPEN_CONFIG=20/20 PASS", flush=True)
 
 
 def main(argv):
