@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 
 export type ConfigShape = "STRING" | "NUMBER" | "BOOLEAN" | "ENUM" | "OBJECT" | "LIST";
 export interface ConfigPropertyDescriptor {
@@ -81,6 +81,14 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const [draft, setDraft] = useState<Record<string, unknown>>(() => Object.fromEntries(
     descriptor.properties.filter((p) => !p.sensitive).map((p) => [p.key, read(config, p.key)])));
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
+  // Resize only the visible editor: no graph/config write, persistence or schema change.
+  const [panelWidth, setPanelWidth] = useState(600);
+  const resizeStart = useRef<{ pointerId: number; x: number; width: number } | null>(null);
+  const stopResize = (target: HTMLDivElement, pointerId: number) => {
+    if (resizeStart.current?.pointerId !== pointerId) return;
+    resizeStart.current = null;
+    if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+  };
   const groups = useMemo(() => {
     const result = new Map<string, ConfigPropertyDescriptor[]>();
     descriptor.properties.forEach((p) => { const group = p.groupKey?.trim() || "General"; result.set(group, [...(result.get(group) ?? []), p]); });
@@ -111,7 +119,30 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
       placeholder={p.sensitive ? "留空以保留现有值" : undefined} onChange={(e) => set(p.key, e.target.value)} />;
   };
 
-  return <form className="config-panel generic-config" onSubmit={(e) => { e.preventDefault(); if (!Object.values(invalid).some(Boolean)) void onSave(applyGenericConfigDraft(config, descriptor, draft)); }}>
+  return <form className="config-panel generic-config" style={{ "--config-panel-width": `${panelWidth}px` } as CSSProperties} onSubmit={(e) => { e.preventDefault(); if (!Object.values(invalid).some(Boolean)) void onSave(applyGenericConfigDraft(config, descriptor, draft)); }}>
+    <div className="config-resize-grip" role="separator" aria-label="调整配置面板宽度" aria-orientation="vertical"
+      aria-valuemin={480} aria-valuemax={800} aria-valuenow={panelWidth} tabIndex={0}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        resizeStart.current = { pointerId: event.pointerId, x: event.clientX, width: panelWidth };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        const start = resizeStart.current;
+        if (start?.pointerId === event.pointerId) {
+          setPanelWidth(Math.max(480, Math.min(800, start.width + start.x - event.clientX)));
+        }
+      }}
+      onPointerUp={(event) => stopResize(event.currentTarget, event.pointerId)}
+      onPointerCancel={(event) => stopResize(event.currentTarget, event.pointerId)}
+      onLostPointerCapture={() => { resizeStart.current = null; }}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          setPanelWidth((width) => Math.max(480, Math.min(800, width + (event.key === "ArrowLeft" ? 24 : -24))));
+        }
+      }} />
     <header><strong>转换配置{transformName ? `：${transformName}` : ""}</strong><small>{transformId ? `节点：${transformId} · ` : ""}{descriptor.className}</small></header>
     {groups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
       <label key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
