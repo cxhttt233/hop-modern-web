@@ -198,12 +198,12 @@ class RestRedirectP0Test {
 
   /**
    * Static REST Basic credentials are scoped to the original request origin.
-   * Redirects to a different loopback port must not replay Authorization.
-   * This verifies actual HttpClient5 redirect behavior, not just the origin
-   * check performed before the first request.
+   * Unlike same-origin 302/307, native HttpClient5 does not follow a redirect
+   * to a different loopback port when the original request is authenticated.
+   * Verify this at the HTTP boundary, not merely through an auth-origin check.
    */
   @Test
-  void restStaticBasicAuthorizationIsNotForwardedAcrossOriginsOn302And307AfterHplReopen(
+  void restStaticBasicAuthorizationDoesNotFollowCrossOrigin302Or307AfterHplReopen(
       @TempDir Path tempDir) throws Exception {
     String expectedAuth = "Basic " + java.util.Base64.getEncoder().encodeToString(
         "fixture-user:fixture-password".getBytes(StandardCharsets.UTF_8));
@@ -321,20 +321,22 @@ class RestRedirectP0Test {
               new LinkedHashMap<String, String>());
           var finalStatus = exchange.getClass().getDeclaredField("status");
           finalStatus.setAccessible(true);
-          assertEquals(200, finalStatus.getInt(exchange));
+          assertEquals(status, finalStatus.getInt(exchange),
+              "native REST must expose the cross-origin redirect rather than follow it");
           var finalBody = exchange.getClass().getDeclaredField("body");
           finalBody.setAccessible(true);
-          assertEquals("redirect-target-雪", finalBody.get(exchange));
+          assertNotEquals("redirect-target-雪", finalBody.get(exchange),
+              "target origin must not have supplied a response body");
         }
       } finally {
         restType.getMethod("dispose").invoke(rest);
       }
       assertEquals(2, sourceRequests.get(), "both redirects must be exercised");
       assertEquals(2, sourceAuthorized.get(), "Basic credentials must reach original origin");
-      assertEquals(2, targetRequests.get(), "both redirects must reach the other origin");
+      assertEquals(0, targetRequests.get(), "cross-origin redirects must not be followed");
       assertEquals(0, targetAuthHeaders.get(),
-          "Authorization must not be replayed across origins");
-      System.out.println("PROD_P0_REST_BASIC_CROSS_ORIGIN_REDIRECT_AUTH_SCOPE_HPL=PASS");
+          "Authorization must not reach the other origin");
+      System.out.println("PROD_P0_REST_CROSS_ORIGIN_REDIRECT_NOT_FOLLOWED_BASIC_SCOPE_HPL=PASS");
     } finally {
       source.stop(0);
       target.stop(0);
