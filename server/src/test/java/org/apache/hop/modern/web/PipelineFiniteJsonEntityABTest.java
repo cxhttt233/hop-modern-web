@@ -28,8 +28,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import org.apache.hop.modern.web.document.PipelineOpenResource;
-import org.glassfish.grizzly.http.server.HttpServer;
-import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
+import org.eclipse.jetty.server.Server;
+import org.glassfish.jersey.jetty.JettyHttpContainerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -37,7 +37,7 @@ import org.junit.jupiter.api.Timeout;
  * Same-listener A/B: Jersey record binding versus finite byte[] entity binding.
  * This test-only endpoint does not modify production resources or HTTP framing.
  * A bounded byte[] allows Jackson to check trailing tokens without reading the
- * Grizzly socket for EOF. Whether Jersey supplies that finite body is the test.
+ * request socket for EOF. Production Jetty/Jersey must supply a finite body.
  */
 class PipelineFiniteJsonEntityABTest {
 
@@ -49,7 +49,7 @@ class PipelineFiniteJsonEntityABTest {
       port = socket.getLocalPort();
     }
     URI base = URI.create("http://127.0.0.1:" + port + "/");
-    HttpServer server = GrizzlyHttpServerFactory.createHttpServer(
+    Server server = JettyHttpContainerFactory.createServer(
         base, ModernWebServer.createResourceConfig()
             .register(PipelineHttpJsonBoundaryABTest.JsonEchoResource.class)
             .register(FiniteJsonProbeResource.class));
@@ -81,6 +81,7 @@ class PipelineFiniteJsonEntityABTest {
 
       assertAll("Finite JSON entity must parse strictly and preserve subsequent requests",
           () -> assertEquals(200, recordValid.statusCode(), recordValid.body()),
+          () -> assertEquals(400, recordConcat.statusCode(), recordConcat.body()),
           () -> assertEquals(200, rawValid.statusCode(), rawValid.body()),
           () -> assertEquals(400, rawConcat.statusCode(), rawConcat.body()),
           () -> assertEquals(400, rawGarbage.statusCode(), rawGarbage.body()),
@@ -89,7 +90,7 @@ class PipelineFiniteJsonEntityABTest {
           () -> assertEquals(400, rawEmpty.statusCode(), rawEmpty.body()),
           () -> assertEquals(200, rawAfter.statusCode(), rawAfter.body()));
     } finally {
-      server.shutdownNow();
+      server.stop();
     }
   }
 
