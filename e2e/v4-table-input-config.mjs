@@ -88,6 +88,36 @@ try {
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
   if (await sqlField.inputValue() !== "SELECT id, name FROM customers") throw new Error("Authoritative SQL not visible");
 
+  // Count only actual unsaved field changes, independently of search filtering.
+  // Never show native Hop values or send a config/write until the user saves.
+  const changeSummary = panel.locator(".config-change-count[role=status]");
+  const countWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeCount = countWrites();
+  if (await changeSummary.count() !== 0) throw new Error("Fresh native Hop config must not show unsaved changes");
+  await sqlField.fill("SELECT id FROM customers /* 未保存计数 */");
+  if (await changeSummary.innerText() !== "已修改 1 项（未保存）") {
+    throw new Error("First edited native SQL field was not counted");
+  }
+  await connection.fill("Warehouse_临时");
+  if (await changeSummary.innerText() !== "已修改 2 项（未保存）") {
+    throw new Error("Second edited native connection field was not counted");
+  }
+  await panel.getByRole("searchbox", { name: "查找配置字段" }).fill("sql");
+  if (await connection.isVisible() || await changeSummary.innerText() !== "已修改 2 项（未保存）") {
+    throw new Error("Filtering fields must not hide unsaved changes outside the search");
+  }
+  await panel.getByRole("button", { name: "清除字段查找" }).click();
+  await connection.fill("Warehouse");
+  if (await changeSummary.innerText() !== "已修改 1 项（未保存）") {
+    throw new Error("Restoring native connection did not clear its unsaved count");
+  }
+  await sqlField.fill("SELECT id, name FROM customers");
+  if (await changeSummary.count() !== 0 || countWrites() !== writesBeforeCount) {
+    throw new Error("Restored native SQL draft must clear the count without writing Hop");
+  }
+  console.log("V4 unsaved config count proof passed: actual field differences, filtered draft retention, revert, no values or Hop write.");
+
   // Developer-only identifiers must not crowd the Chinese configuration heading.
   // This is a disclosure of schema keys, never of the native Hop configuration values.
   const developerDetails = panel.locator("details.config-developer-details");
@@ -222,6 +252,7 @@ try {
   const reread = await rereadResponse.json();
   if (!rereadResponse.ok() || reread.config?.sql !== sql) throw new Error("Authoritative re-read mismatch");
   if (await sqlField.inputValue() !== sql) throw new Error("Authoritative re-read not visible");
+  if (await changeSummary.count() !== 0) throw new Error("Saved authoritative SQL must clear the unsaved field count");
   if (await page.evaluate(() => Object.prototype.hasOwnProperty.call(window, "__hopModernXss"))) {
     throw new Error("SQL-like HTML escaped from the configuration textarea into executable script");
   }
