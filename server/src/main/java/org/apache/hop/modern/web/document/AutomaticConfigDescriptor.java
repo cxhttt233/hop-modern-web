@@ -40,7 +40,7 @@ public final class AutomaticConfigDescriptor {
             ? describe(itemType, depth + 1, new HashSet<>(ancestors)).properties() : List.of();
         List<Option> options = shape == Shape.ENUM
             ? enumOptions(field.getType(), metadata.storeWithCode())
-            : nativeStringOptions(type, key, shape);
+            : nativeValueMetaOptions(type, key, shape);
         WidgetHint hint = widgetHint(type, key, shape, metadata);
         properties.add(new Property(key, field.getName(), shape, field.getType().getName(),
             metadata.groupKey(), metadata.password(), metadata.storeWithName(), metadata.storeWithCode(),
@@ -188,25 +188,29 @@ public final class AutomaticConfigDescriptor {
   }
 
   /**
-   * SelectValues stores the metadata-change type as a native STRING value-meta
-   * plugin name, not as a Java enum or a numeric IValueMeta code. Supply the
-   * initialized Hop registry's actual wire values to the browser; preserve
-   * unknown imported values instead of rejecting an editable draft.
+   * Native ValueMeta choices have two different wire representations.
+   * SelectValues metadata changes store plugin names (STRING), whereas
+   * TableInputField.type is a Java int with a Hop XML intCodeConverter.
+   * ConfigJsonSerializer transports that TableInput field as a NUMBER.
+   * Keep the option values typed accordingly; never send a type name to
+   * the numeric JSON field or silently coerce an imported unknown code.
    */
-  private static List<Option> nativeStringOptions(Class<?> owner, String key, Shape shape) {
-    if (shape != Shape.STRING || !key.equals("type")
-        || !owner.getName().equals(
-            "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange")) {
-      return List.of();
-    }
+  private static List<Option> nativeValueMetaOptions(Class<?> owner, String key, Shape shape) {
+    boolean selectValues = shape == Shape.STRING && owner.getName().equals(
+        "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange");
+    boolean tableInput = shape == Shape.NUMBER && owner.getName().equals(
+        "org.apache.hop.pipeline.transforms.tableinput.TableInputField");
+    if (!key.equals("type") || (!selectValues && !tableInput)) return List.of();
+
     String unchanged = ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_NONE);
     List<Option> options = new ArrayList<>();
-    options.add(new Option(unchanged, unchanged));
+    options.add(new Option(unchanged, tableInput ? IValueMeta.TYPE_NONE : unchanged));
     java.util.Arrays.stream(ValueMetaFactory.getValueMetaNames())
         .filter(name -> name != null && !name.isBlank() && !name.equalsIgnoreCase(unchanged))
         .distinct()
         .sorted(String.CASE_INSENSITIVE_ORDER)
-        .forEach(name -> options.add(new Option(name, name)));
+        .forEach(name -> options.add(new Option(
+            name, tableInput ? ValueMetaFactory.getIdForValueMeta(name) : name)));
     return List.copyOf(options);
   }
 
@@ -225,6 +229,11 @@ public final class AutomaticConfigDescriptor {
   /** Browser editor hints are derived from Hop annotations, not from field-name guesses. */
   private static WidgetHint widgetHint(
       Class<?> owner, String key, Shape shape, HopMetadataProperty metadata) {
+    // Hop XML converts this int to a value-meta name, but JSON transport does not.
+    if (shape == Shape.NUMBER && key.equals("type") && owner.getName().equals(
+        "org.apache.hop.pipeline.transforms.tableinput.TableInputField")) {
+      return WidgetHint.VALUE_META_CODE_PICKER;
+    }
     if (shape != Shape.STRING) return WidgetHint.NONE;
     // SelectValues fields.meta[*].type is a native value-meta plugin name,
     // not an enum code. Its producer-owned choices are in Property.options.
@@ -2048,7 +2057,7 @@ public final class AutomaticConfigDescriptor {
     NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER, LOCAL_DIRECTORY_PICKER,
     DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, DATABASE_COLUMN_PICKER, UPSTREAM_FIELD_PICKER,
     INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER, STAGED_FIELD_PICKER,
-    VALUE_META_TYPE_PICKER
+    VALUE_META_TYPE_PICKER, VALUE_META_CODE_PICKER
   }
   public enum FieldSourceStage { AFTER_SELECT, AFTER_REMOVE }
   /** A second or later flag in a compound activation; all conditions must match. */
@@ -2104,7 +2113,8 @@ public final class AutomaticConfigDescriptor {
     }
   }
   public record RuntimePrecondition(String code, List<String> keyListPointers, String explanation) {}
-  public record Option(String label, String value) {}
+  /** The wire value is a STRING for native enums/SelectValues, INTEGER for TableInput types. */
+  public record Option(String label, Object value) {}
   public record LayoutHint(int order, String group, Presentation presentation) {}
   /** File-path override and read-only inline-editor semantics, not a SQL parser. */
   public record SqlSourceContext(String inlineSqlPointer, String fileSqlPointer,
