@@ -329,12 +329,17 @@ try {
     const configPanel = page.locator("form.generic-config");
     await configPanel.waitFor({ state: "visible" });
     const heading = (await configPanel.locator("header strong").innerText()).trim();
-    const detail = (await configPanel.locator("header small").innerText()).trim();
+    const developerDetails = configPanel.locator("details.config-developer-details");
+    if (await developerDetails.evaluate(element => element.open)) {
+      throw new Error("Technical node identity must not be shown as the primary Chinese heading");
+    }
+    await developerDetails.locator(":scope > summary").click();
+    const identities = await developerDetails.locator(".config-developer-content > p code").allTextContents();
     if (heading !== `转换配置：${visibleName}` ||
-        !detail.startsWith(`节点：${node.id} · `) ||
-        !detail.includes(config.descriptor.className)) {
-      throw new Error("Config panel mislabeled selected TableInput identity: " +
-        JSON.stringify({ nodeId: node.id, heading, detail }));
+        !identities.includes(node.id) ||
+        !identities.includes(config.descriptor.className)) {
+      throw new Error("Config developer details mislabeled selected TableInput identity: " +
+        JSON.stringify({ nodeId: node.id, heading, identityMatches: identities.length }));
     }
     await configPanel.getByRole("button", { name: "取消配置（Cancel）", exact: true }).click();
     await configPanel.waitFor({ state: "hidden" });
