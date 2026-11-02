@@ -12,7 +12,18 @@ export const tableInputConfigSchema: HopConfigSchema = {
   fields: [
     { key: "connection", label: "Connection", control: "MetadataPicker", valueType: "string", metadataType: "DatabaseMeta", required: true, variable: true },
     { key: "lookup", label: "SQL parameter source", control: "VariableInput", valueType: "string", pickerHint: "INFO_STREAM_TRANSFORM_PICKER", description: "Named pipeline INFO-stream transform supplying SQL parameter rows; preserve the literal transform name, not a database metadata reference." },
-    { key: "sql", label: "SQL", control: "MonacoEditor", valueType: "string", language: "sql", variable: true },
+    {
+      key: "sql", label: "SQL", control: "MonacoEditor", valueType: "string",
+      language: "sql", variable: true,
+      // Native TableInput.getEffectiveSql() reads a nonempty VFS file first.
+      // Keep both wire values; the editor is read-only only while file mode is active.
+      sqlSourceContext: {
+        inlineSqlPointer: "/sql",
+        fileSqlPointer: "/sql_from_file",
+        precedence: "FILE_WHEN_NONEMPTY",
+        inlineReadOnlyWhenFileSelected: true,
+      },
+    },
     { key: "sql_from_file", label: "SQL from file", control: "VfsPicker", valueType: "string", vfsMode: "file", variable: true, description: "When nonempty, native TableInput reads SQL from this HopVfs file instead of inline SQL; retain the inline SQL draft when switching back." },
     { key: "limit", label: "Row limit", control: "VariableInput", valueType: "string", variable: true },
     { key: "execute_each_row", label: "Execute for each row", control: "VariableInput", valueType: "boolean" },
