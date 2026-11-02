@@ -128,6 +128,50 @@ export const sortRowsConfigSchema: HopConfigSchema = {
 };
 
 /**
+ * P0 CheckSum uses a grouped native input-field LIST and two code-backed enums.
+ * Keep enum values as the Hop wire codes; the installed runtime descriptor supplies
+ * the actual allowed options, not this static T1 layout.
+ */
+export const checkSumConfigSchema: HopConfigSchema = {
+  pluginId: "CheckSum",
+  pluginType: "transform",
+  title: "Add a checksum",
+  tier: "T1",
+  fields: [
+    { key: "fields.field", label: "Fields to checksum", control: "EditableTable", valueType: "object[]",
+      columns: [{ key: "name", label: "Input field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" }] },
+    { key: "resultfieldName", label: "Result field name", control: "VariableInput", valueType: "string", variable: true, required: true },
+    { key: "checksumtype", label: "Checksum algorithm", control: "VariableInput", valueType: "string",
+      description: "Native CheckSumType code; use the runtime descriptor's code-backed ENUM options, not localized labels." },
+    { key: "resultType", label: "Result encoding", control: "VariableInput", valueType: "string",
+      description: "Native ResultType code; preserve the runtime descriptor's code-backed ENUM values." },
+    { key: "separator", label: "Field separator", control: "VariableInput", valueType: "string", variable: true },
+    { key: "prefix", label: "Prefix", control: "VariableInput", valueType: "string", variable: true },
+    { key: "suffix", label: "Suffix", control: "VariableInput", valueType: "string", variable: true },
+  ],
+};
+
+/**
+ * P0 StringCut stores cut bounds as STRING expressions, not JSON numbers.
+ * The native runtime resolves variables before parsing them into integer offsets.
+ */
+export const stringCutConfigSchema: HopConfigSchema = {
+  pluginId: "StringCut",
+  pluginType: "transform",
+  title: "String cut",
+  tier: "T1",
+  fields: [
+    { key: "fields.field", label: "Cut rules", control: "EditableTable", valueType: "object[]",
+      columns: [
+        { key: "in_stream_name", label: "Input field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
+        { key: "out_stream_name", label: "Output field", valueType: "string", variable: true },
+        { key: "cut_from", label: "Cut from", valueType: "string", variable: true },
+        { key: "cut_to", label: "Cut to", valueType: "string", variable: true },
+      ] },
+  ],
+};
+
+/**
  * First real Metadata contract. DatabaseMeta stores its database implementation under `rdbms`;
  * standard connection fields below are BaseDatabaseMeta metadata properties. Password is marked
  * sensitive so browser/server transport can preserve Hop's encrypted representation.
@@ -253,6 +297,8 @@ const configSchemas: readonly HopConfigSchema[] = [
   tableInputConfigSchema,
   selectValuesConfigSchema,
   sortRowsConfigSchema,
+  checkSumConfigSchema,
+  stringCutConfigSchema,
   databaseConnectionConfigSchema,
 ];
 
