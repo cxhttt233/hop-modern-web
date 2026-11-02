@@ -562,6 +562,27 @@ button { cursor: pointer; }
 }
 .generic-config > header strong { font-size: 15px; color: #212b40; }
 .generic-config > header small { color: #9ca4b2; font-size: 10px; word-break: break-all; }
+.config-field-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 8px;
+}
+.config-field-search input[type="search"] { min-width: 0; }
+.config-field-search button {
+  border: 1px solid #d5dbe6;
+  border-radius: 7px;
+  background: #fff;
+  color: #445066;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.config-field-search small {
+  grid-column: 1 / -1;
+  color: #64748b;
+  font-size: 11px;
+}
+.config-search-empty { color: #64748b; font-size: 12px; margin: 10px 0; }
 .generic-config fieldset {
   display: grid;
   gap: 11px;
