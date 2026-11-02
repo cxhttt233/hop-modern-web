@@ -137,4 +137,76 @@ class TableInputNativeValueMetaTypeP0Test {
     System.out.println("PROD_P0_TABLEINPUT_NUMERIC_VALUE_META_PICKER_JSON_HPL=PASS");
     System.out.println("PROD_P0_TABLEINPUT_FORMAT_MASK_JSON_HPL=PASS");
   }
+  @Test
+  void nativeInfoStreamLookupRetargetsAcrossConfigWriteAndHplDiskReopen(
+      @TempDir Path tempDir) throws Exception {
+    var descriptor = AutomaticConfigDescriptor.describe(TableInputMeta.class);
+    var lookupProperty = descriptor.properties().stream()
+        .filter(p -> p.key().equals("lookup")).findFirst().orElseThrow();
+    assertEquals(AutomaticConfigDescriptor.Shape.STRING, lookupProperty.shape());
+    assertEquals(AutomaticConfigDescriptor.WidgetHint.INFO_STREAM_TRANSFORM_PICKER,
+        lookupProperty.widgetHint());
+    assertNull(lookupProperty.metadataClassName(),
+        "INFO-stream transform references must not be confused with database metadata");
+
+    String originalSourceName = "参数源甲<&>";
+    String selectedSourceName = "参数源乙<&雪>";
+    var sourceA = new TableInputMeta();
+    sourceA.setDefault();
+    sourceA.setConnection("Warehouse");
+    sourceA.setSql("SELECT 1");
+    var sourceB = new TableInputMeta();
+    sourceB.setDefault();
+    sourceB.setConnection("Warehouse");
+    sourceB.setSql("SELECT 2");
+    var target = new TableInputMeta();
+    target.setDefault();
+    target.setConnection("Warehouse");
+    target.setSql("SELECT ? AS level_value");
+    target.setExecuteEachInputRow(true);
+    target.setLookup(originalSourceName);
+
+    var pipeline = new PipelineMeta();
+    pipeline.setName("tableinput-info-source-lookup");
+    pipeline.addTransform(new TransformMeta("TableInput", originalSourceName, sourceA));
+    pipeline.addTransform(new TransformMeta("TableInput", selectedSourceName, sourceB));
+    pipeline.addTransform(new TransformMeta("TableInput", "query-node", target));
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("tableinput-info-lookup.hpl");
+    store.save(hpl, pipeline);
+    var loaded = store.open(hpl);
+    var registry = new PipelineDocumentRegistry();
+    registry.put(new PipelineDocument("table-info-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(registry, provider);
+    var read = resource.read("table-info-doc",
+        new PipelineConfigResource.ReadRequest("query-node"));
+    assertEquals(200, read.getStatus());
+    var initial = (PipelineConfigResource.ConfigResponse) read.getEntity();
+    assertEquals(originalSourceName, initial.config().path("lookup").asText());
+    assertTrue(initial.config().path("execute_each_row").booleanValue());
+
+    ObjectNode edited = ((ObjectNode) initial.config()).deepCopy();
+    edited.put("lookup", selectedSourceName);
+    var write = resource.write("table-info-doc",
+        new PipelineConfigResource.WriteRequest("query-node", edited));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    var reopened = store.open(hpl);
+    var reopenedTarget = (TableInputMeta) reopened.findTransform("query-node").getTransform();
+    var wire = ConfigJsonSerializer.toJson(reopenedTarget, provider);
+    assertEquals(selectedSourceName, wire.path("lookup").asText());
+    assertEquals(selectedSourceName, reopenedTarget.getLookup());
+    assertEquals("SELECT ? AS level_value", reopenedTarget.getSql());
+    assertTrue(reopenedTarget.isExecuteEachInputRow());
+    var infoStream = reopenedTarget.getTransformIOMeta().getInfoStreams().get(0);
+    assertEquals(selectedSourceName, infoStream.getSubject());
+    reopenedTarget.searchInfoAndTargetTransforms(reopened.getTransforms());
+    assertNotNull(infoStream.getTransformMeta(),
+        "native INFO-stream lookup must resolve the renamed source in the reopened graph");
+    assertEquals(selectedSourceName, infoStream.getTransformMeta().getName());
+    System.out.println("PROD_P0_TABLEINPUT_INFO_STREAM_LOOKUP_JSON_HPL_GRAPH=PASS");
+  }
+
 }
