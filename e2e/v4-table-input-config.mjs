@@ -94,8 +94,10 @@ try {
     method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
   const writesBeforeFinder = finderWrites();
   await fieldFinder.fill("sql");
+  const sqlMatches = await panel.locator("fieldset label").count();
+  // TableInput exposes both sql and sql_from_file; the match count is not one.
   if (!await sqlField.isVisible() || await connection.isVisible() ||
-      !(await panel.locator(".config-field-search").innerText()).includes("显示 1 /")) {
+      sqlMatches === 0 || sqlMatches >= initial.descriptor.properties.length) {
     throw new Error("Real TableInput SQL field finder did not narrow the configuration form");
   }
   await fieldFinder.press("Enter");
