@@ -363,3 +363,59 @@ console.log("PROD_P0_T1_HTTP_NATIVE_SCHEMA_COMPAT=PASS");
   }
 }
 console.log("PROD_P0_T1_SETVARIABLE_NATIVE_SCHEMA_COMPAT=PASS");
+
+/**
+ * ConcatFields is the first T1 layout here with both an ordered native LIST
+ * and a capitalized nested OBJECT. Compare to the installed plugin, not to a
+ * second hand-maintained list of annotation keys or inferred leaf names.
+ */
+{
+  const pluginId = "ConcatFields";
+  const descriptor = byId.get(pluginId);
+  const schema = findConfigSchema("transform", pluginId);
+  assert.ok(descriptor?.properties, "ConcatFields installed native descriptor missing");
+  assert.ok(schema?.tabs, "ConcatFields production T1 layout missing");
+  const entries = flattenNativeProperties(descriptor.properties);
+  const native = new Map(entries);
+  assert.equal(native.size, entries.length, "ConcatFields native paths must be unique");
+  assert.deepEqual(schema.fields.map(field => field.key).sort(), [...native.keys()].sort(),
+    "ConcatFields T1 must cover every native LIST, OBJECT child and scalar path");
+  const object = descriptor.properties.find(property => property.key === "ConcatFields");
+  assert.equal(object?.shape, "OBJECT", "target settings must remain a native nested OBJECT");
+  assert.deepEqual((object.children ?? []).map(child => child.key),
+    ["targetFieldName", "targetFieldLength", "removeSelectedFields"]);
+  const list = native.get("fields.field");
+  const table = schema.fields.find(field => field.key === "fields.field");
+  assert.equal(list?.shape, "LIST");
+  assert.equal(table?.control, "EditableTable");
+  assert.equal(table?.valueType, "object[]");
+  const nativeColumns = list.elementProperties ?? [];
+  assert.deepEqual(table.columns.map(column => column.key),
+    nativeColumns.map(column => column.key), "ConcatField native column order and coverage");
+  for (const column of table.columns) {
+    const property = nativeColumns.find(item => item.key === column.key);
+    assert.ok(property, "ConcatField." + column.key + ": native column missing");
+    assertNativeValueType(column.valueType, property, "ConcatField." + column.key);
+    const expectedPicker = property.widgetHint === "UPSTREAM_FIELD_PICKER" ||
+      property.widgetHint === "VALUE_META_TYPE_PICKER" ? property.widgetHint : undefined;
+    assert.equal(column.pickerHint, expectedPicker,
+      "ConcatField." + column.key + ": native source/type picker");
+  }
+  const wire = descriptor.wireLists?.find(item => item.listPointer === "/fields/field");
+  assert.ok(wire, "ConcatFields native ordered source LIST pointer missing");
+  assert.equal(wire.itemPointerTemplate, "/fields/field/{index}");
+  for (const field of schema.fields.filter(item => item.key !== "fields.field")) {
+    assertNativeValueType(field.valueType, native.get(field.key),
+      "ConcatFields." + field.key);
+  }
+  assert.equal(native.get("ConcatFields.targetFieldName").shape, "STRING");
+  assert.equal(native.get("ConcatFields.targetFieldLength").shape, "NUMBER");
+  assert.equal(native.get("ConcatFields.removeSelectedFields").shape, "BOOLEAN");
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(item => item.key === field.key),
+      "ConcatFields T1 groups must reuse native fields without changing JSON wire shape");
+  }
+}
+console.log("PROD_P0_T1_CONCATFIELDS_NATIVE_SCHEMA_COMPAT=PASS");
