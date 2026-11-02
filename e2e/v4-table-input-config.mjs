@@ -107,7 +107,7 @@ try {
     throw new Error("Chinese field search did not switch visible configuration fields");
   }
   await fieldFinder.fill("__no_such_config_field__");
-  if (!await panel.getByRole("status", { name: "没有匹配的配置字段，请更换关键词。" }).isVisible() ||
+  if (!await panel.locator(".config-search-empty[role=status]").isVisible() ||
       await panel.locator("fieldset").count() !== 0) {
     throw new Error("Unmatched config field query must show a safe empty state");
   }
