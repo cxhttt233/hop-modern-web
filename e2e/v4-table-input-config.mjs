@@ -107,16 +107,30 @@ try {
   if (await connection.isVisible() || await changeSummary.innerText() !== "已修改 2 项（未保存）") {
     throw new Error("Filtering fields must not hide unsaved changes outside the search");
   }
+  // A user can review exactly which native fields are unsaved even when the
+  // field finder hides one of them. Never render values or write Hop data.
+  const review = panel.locator(".config-change-review");
+  await review.locator("summary").click();
+  const changedNames = await review.locator('ul[aria-label="未保存字段清单"] li').allInnerTexts();
+  if (JSON.stringify(changedNames) !== JSON.stringify(["连接", "SQL"]) ||
+      (await review.innerText()).includes("Warehouse_临时") ||
+      (await review.innerText()).includes("SELECT id FROM customers") ||
+      countWrites() !== writesBeforeCount) {
+    throw new Error("Unsaved field review must list only native field labels, including filtered fields");
+  }
   await panel.getByRole("button", { name: "清除字段查找" }).click();
   await connection.fill("Warehouse");
-  if (await changeSummary.innerText() !== "已修改 1 项（未保存）") {
-    throw new Error("Restoring native connection did not clear its unsaved count");
+  if (await changeSummary.innerText() !== "已修改 1 项（未保存）" ||
+      JSON.stringify(await review.locator("li").allInnerTexts()) !== JSON.stringify(["SQL"])) {
+    throw new Error("Restoring native connection did not remove it from unsaved field review");
   }
   await sqlField.fill("SELECT id, name FROM customers");
-  if (await changeSummary.count() !== 0 || countWrites() !== writesBeforeCount) {
-    throw new Error("Restored native SQL draft must clear the count without writing Hop");
+  if (await changeSummary.count() !== 0 || await review.count() !== 0 ||
+      countWrites() !== writesBeforeCount) {
+    throw new Error("Restored native SQL draft must clear review and count without writing Hop");
   }
   console.log("V4 unsaved config count proof passed: actual field differences, filtered draft retention, revert, no values or Hop write.");
+  console.log("V4 unsaved field review proof passed: labels only, filtered fields retained, live revert, no Hop write.");
 
   // Native TableInput prioritizes a nonempty HopVfs SQL file, but both sources
   // must remain untouched until the user explicitly saves the configuration.
