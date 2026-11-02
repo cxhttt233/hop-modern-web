@@ -74,7 +74,7 @@ export interface HopConfigField {
   storeWithName?: boolean;
 
   /** Optional producer-owned native picker semantics; unsupported UIs may use text fallback. */
-  pickerHint?: "INFO_STREAM_TRANSFORM_PICKER";
+  pickerHint?: "INFO_STREAM_TRANSFORM_PICKER" | "LOCAL_DIRECTORY_PICKER";
 
   /** VariableInput: preserve Hop variable expressions; resolution remains server-side. */
   variable?: boolean;
