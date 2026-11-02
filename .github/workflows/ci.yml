@@ -148,12 +148,13 @@ jobs:
           npm run dev -w @hop-modern/app -- --host 127.0.0.1 >/tmp/hop-modern-vite.log 2>&1 &
           echo $! >/tmp/hop-modern-vite.pid
           for i in {1..60}; do
-            if curl -fsS http://127.0.0.1:5173 >/dev/null && curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/pipelines/open >/tmp/server-status 2>/dev/null; then
+            if curl -fsS http://127.0.0.1:5173 >/dev/null && [ "$(curl -fsS http://127.0.0.1:8080/api/ready 2>/dev/null)" = ready ]; then
               break
             fi
             sleep 2
           done
           curl -fsS http://127.0.0.1:5173 >/dev/null || { cat /tmp/hop-modern-vite.log; exit 1; }
+          curl -fsS http://127.0.0.1:8080/api/ready | grep -qx ready || { cat /tmp/hop-modern-server.log; exit 1; }
           kill -0 "$(cat /tmp/hop-modern-server.pid)" || { cat /tmp/hop-modern-server.log; exit 1; }
       - name: Prove real .hpl to React Flow
         working-directory: modern
