@@ -487,7 +487,47 @@ class FilterRowsNestedPredicateFullPipelineP0Test {
     assertEquals(List.of("sql-only", "both", "bc"),
         executeCompositeOperatorPipeline(after, provider),
         "changing AND to OR must change actual native emitted rows after disk reopen");
+
+    // A standalone NOT operator on a non-first composite child is a native
+    // no-op, not the unary negation implied by its human-readable label.
+    // This differs from AND NOT / OR NOT, which are real combination operators.
+    ObjectNode ignoredNot = edited.deepCopy();
+    ((ObjectNode) ignoredNot.at(childrenPointer + "/2")).put("operator", "NOT");
+    assertEquals(200, resource.write("filter-composite-doc",
+        new PipelineConfigResource.WriteRequest("filter-composite", ignoredNot)).getStatus());
+    store.save(hpl, loaded);
+    PipelineMeta ignoredNotReopened = store.open(hpl);
+    JsonNode ignoredNotWire = ConfigJsonSerializer.toJson(
+        ignoredNotReopened.findTransform("filter-composite").getTransform(), provider);
+    assertEquals("NOT", ignoredNotWire.at(childrenPointer + "/2/operator").asText());
+    assertEquals("A<&>", ignoredNotWire.at(childrenPointer + "/0/leftvalue").asText());
+    assertEquals(List.of("sql-only", "both", "bc"),
+        executeCompositeOperatorPipeline(ignoredNotReopened, provider),
+        "NOT must skip the third child, leaving the first two children combined by OR");
+
+    // Edit exactly the same child to the native AND NOT operator: unlike NOT,
+    // it must now exclude the rows where the C predicate is true.
+    ObjectNode andNot = ignoredNot.deepCopy();
+    ((ObjectNode) andNot.at(childrenPointer + "/2")).put("operator", "AND NOT");
+    assertEquals(200, resource.write("filter-composite-doc",
+        new PipelineConfigResource.WriteRequest("filter-composite", andNot)).getStatus());
+    store.save(hpl, loaded);
+    PipelineMeta andNotReopened = store.open(hpl);
+    JsonNode andNotWire = ConfigJsonSerializer.toJson(
+        andNotReopened.findTransform("filter-composite").getTransform(), provider);
+    assertEquals("AND NOT", andNotWire.at(childrenPointer + "/2/operator").asText());
+    assertEquals(List.of("sql-only"),
+        executeCompositeOperatorPipeline(andNotReopened, provider),
+        "(A OR B) AND NOT C must remove both rows where C is true");
+
+    var ignoredOperatorContract = AutomaticConfigDescriptor.describe(filter.getClass())
+        .runtimePreconditions().stream()
+        .filter(p -> p.code().equals("FILTER_ROWS_NONFIRST_NOT_OPERATOR_IS_IGNORED"))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/compare/condition"), ignoredOperatorContract.keyListPointers());
+    assertTrue(ignoredOperatorContract.explanation().contains("AND NOT"));
     System.out.println("PROD_P0_FILTERROWS_COMPOSITE_ORDER_NATIVE_ENGINE_JSON_HPL_ROWS=PASS");
+    System.out.println("PROD_P0_FILTERROWS_IGNORED_NOT_VS_AND_NOT_NATIVE_ENGINE_JSON_HPL=PASS");
   }
 
   private static List<String> executeCompositeOperatorPipeline(
