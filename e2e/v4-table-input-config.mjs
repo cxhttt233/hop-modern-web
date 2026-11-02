@@ -151,10 +151,25 @@ try {
     throw new Error("File source guidance discarded an unsaved inline SQL draft");
   }
   await sqlField.fill(originalInlineSql);
-  await sqlFileField.fill(originalSqlFile);
+  // The native fixture omits sql_from_file: its undefined wire value displays
+  // as an empty input, but filling "" is not a wire-level revert. Cancel/reopen
+  // proves the authoritative original is retained without changing that contract.
+  await panel.getByRole("button", { name: "Cancel" }).click();
+  const sourceRecoveryPending = page.waitForResponse(r => match(r, "/config/read"));
+  await node.click();
+  await page.getByRole("button", { name: "Configure" }).click();
+  const sourceRecoveryResponse = await sourceRecoveryPending;
+  const sourceRecovered = await sourceRecoveryResponse.json();
+  if (!sourceRecoveryResponse.ok() ||
+      JSON.stringify(sourceRecovered.config) !== JSON.stringify(initial.config)) {
+    throw new Error("Canceling SQL file source draft changed authoritative Hop config");
+  }
+  await panel.waitFor({ state: "visible" });
   if ((await sourceNotice.count() > 0) !== (originalSqlFile.trim().length > 0) ||
+      await sqlFileField.inputValue() !== originalSqlFile ||
+      await sqlField.inputValue() !== originalInlineSql ||
       await changeSummary.count() !== 0 || countWrites() !== writesBeforeSource) {
-    throw new Error("Reverting SQL source drafts did not restore native Hop editor state");
+    throw new Error("Cancel/reopen failed to restore original SQL sources without Hop writes");
   }
   console.log("V4 native SQL source notice proof passed: whitespace, file precedence, inline draft retained, no value leak or Hop write.");
 
