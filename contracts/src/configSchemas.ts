@@ -293,6 +293,28 @@ databaseConnectionConfigSchema.tabs = bindLayout(databaseConnectionConfigSchema,
   ] },
 ]);
 
+// CheckSum has a native ordered source-field LIST followed by output and
+// formatting options. These tabs share the flat fallback's original objects.
+checkSumConfigSchema.tabs = bindLayout(checkSumConfigSchema, [
+  { key: "source", label: "Input fields", groups: [
+    { key: "fields", label: "Checksum source", keys: ["fields.field"] },
+  ] },
+  { key: "result", label: "Checksum result", groups: [
+    { key: "output", label: "Output column and encoding",
+      keys: ["resultfieldName", "checksumtype", "resultType"] },
+    { key: "format", label: "Input formatting",
+      keys: ["separator", "prefix", "suffix"] },
+  ] },
+]);
+
+// StringCut is a single native LIST of ordered cut rules; do not invent
+// separate root-level cut_from/cut_to properties or coerce expressions.
+stringCutConfigSchema.tabs = bindLayout(stringCutConfigSchema, [
+  { key: "rules", label: "Cut rules", groups: [
+    { key: "fields", label: "Input and output field ranges", keys: ["fields.field"] },
+  ] },
+]);
+
 const configSchemas: readonly HopConfigSchema[] = [
   tableInputConfigSchema,
   selectValuesConfigSchema,
