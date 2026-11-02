@@ -508,6 +508,28 @@ button { cursor: pointer; }
   border-left: 1px solid #e1e5ec;
   box-shadow: -16px 0 42px rgb(28 38 61 / 11%);
 }
+/* Only the generic editor is adjustable. The native Hop configuration remains server-owned. */
+.generic-config { width: min(var(--config-panel-width, 600px), calc(100% - 248px)); }
+.config-resize-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 14px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+.config-resize-grip::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 24px);
+  left: 4px;
+  width: 4px;
+  height: 48px;
+  border-radius: 4px;
+  background: #c7d1e2;
+}
 .config-heading { display: flex; align-items: flex-start; justify-content: space-between; }
 .config-heading > div { display: grid; gap: 3px; }
 .config-heading strong { font-size: 14px; color: #222c42; }
@@ -627,6 +649,7 @@ button { cursor: pointer; }
     max-width: calc(100vw - 212px);
   }
   .config-panel { width: min(420px, calc(100% - 184px)); padding: 14px; }
+  .config-resize-grip { display: none; }
 }
 
 /* On narrow handsets, prioritize controls and let configuration use the full
