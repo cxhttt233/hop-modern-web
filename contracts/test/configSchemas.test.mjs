@@ -49,6 +49,36 @@ test("Table Input uses a metadata picker without inventing storeWithName semanti
 
 });
 
+test("TableInput SQL source precedence is a machine-readable native wire contract", () => {
+  const schema = findConfigSchema("transform", "TableInput");
+  assert.ok(schema?.tabs);
+  const sql = schema.fields.find(({ key }) => key === "sql");
+  const sqlFile = schema.fields.find(({ key }) => key === "sql_from_file");
+  assert.deepEqual(sql?.sqlSourceContext, {
+    inlineSqlPointer: "/sql",
+    fileSqlPointer: "/sql_from_file",
+    precedence: "FILE_WHEN_NONEMPTY",
+    inlineReadOnlyWhenFileSelected: true,
+  }, "native TableInput loads nonempty HopVfs SQL first; T4 must not guess precedence");
+  assert.equal(sql?.control, "MonacoEditor");
+  assert.equal(sql?.language, "sql");
+  assert.equal(sql?.variable, true);
+  assert.equal(sql?.readOnly, undefined,
+    "inline SQL remains an editable draft when file mode is later disabled");
+  assert.equal(sql?.activation, undefined,
+    "do not hide or delete the inline SQL when a file is selected");
+  assert.equal(sqlFile?.control, "VfsPicker");
+  assert.equal(sqlFile?.vfsMode, "file");
+  assert.equal(sqlFile?.sqlSourceContext, undefined,
+    "the source selection contract belongs to the inline SQL field");
+  const layoutSql = schema.tabs.flatMap(tab => tab.groups)
+    .flatMap(group => group.fields).find(({ key }) => key === "sql");
+  assert.strictEqual(layoutSql, sql,
+    "T1 layout must share the same source semantics as flat T0 fallback");
+  assert.deepEqual(JSON.parse(JSON.stringify(sql.sqlSourceContext)), sql.sqlSourceContext,
+    "the handoff must remain plain JSON without runtime-only objects");
+});
+
 test("SortRows spill directory is server-local, not a remote HopVfs picker", () => {
   const sort = findConfigSchema("transform", "SortRows");
   const table = findConfigSchema("transform", "TableInput");
