@@ -55,3 +55,45 @@ test("Database Connection marks password transport as sensitive", () => {
   const password = schema.fields.find(({ key }) => key === "rdbms.password");
   assert.equal(password?.sensitive, true);
 });
+
+test("typed table picker hints match native Hop wire formats", () => {
+  const table = findConfigSchema("transform", "TableInput");
+  const select = findConfigSchema("transform", "SelectValues");
+  assert.ok(table && select);
+  const tableType = table.fields.find(({ key }) => key === "fields.field")
+    ?.columns?.find(({ key }) => key === "type");
+  const selectType = select.fields.find(({ key }) => key === "fields.meta")
+    ?.columns?.find(({ key }) => key === "type");
+  assert.deepEqual(
+    { valueType: tableType?.valueType, pickerHint: tableType?.pickerHint },
+    { valueType: "integer", pickerHint: "VALUE_META_CODE_PICKER" },
+    "TableInputField.type uses native numeric codes, not SelectValues type names");
+  assert.deepEqual(
+    { valueType: selectType?.valueType, pickerHint: selectType?.pickerHint },
+    { valueType: "string", pickerHint: "VALUE_META_TYPE_PICKER" },
+    "SelectMetadataChange.type uses the native value-meta plugin name");
+  assert.equal(tableType?.options, undefined);
+  assert.equal(selectType?.options, undefined,
+    "registered Hop type options come from the runtime descriptor, not a stale static list");
+});
+
+test("SelectValues metadata table covers every native SelectMetadataChange wire property", () => {
+  const schema = findConfigSchema("transform", "SelectValues");
+  assert.ok(schema);
+  const meta = schema.fields.find(({ key }) => key === "fields.meta");
+  assert.equal(meta?.valueType, "object[]");
+  assert.deepEqual(meta?.columns?.map(({ key }) => key), [
+    "name", "rename", "type", "length", "precision", "storage_type",
+    "conversion_mask", "date_format_lenient", "date_format_locale",
+    "date_format_timezone", "lenient_string_to_number", "decimal_symbol",
+    "grouping_symbol", "currency_symbol", "encoding", "roundingType",
+  ], "do not omit native advanced fields when rendering or rewriting an editable row");
+  for (const key of ["date_format_lenient", "lenient_string_to_number"]) {
+    assert.equal(meta?.columns?.find((column) => column.key === key)?.valueType, "boolean",
+      `${key} is a native BOOLEAN, not a text value`);
+  }
+  for (const key of ["storage_type", "roundingType"]) {
+    assert.equal(meta?.columns?.find((column) => column.key === key)?.valueType, "string",
+      `${key} is a native STRING; preserve unknown historical values`);
+  }
+});
