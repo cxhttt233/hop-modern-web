@@ -194,6 +194,34 @@ export const replaceStringConfigSchema: HopConfigSchema = {
   ],
 };
 
+/** P0 ExecSql: keep ordered argument references, VFS SQL override and literal-quote mode separate. */
+export const execSqlConfigSchema: HopConfigSchema = {
+  pluginId: "ExecSql",
+  pluginType: "transform",
+  title: "Execute SQL script",
+  tier: "T1",
+  fields: [
+    { key: "connection", label: "Connection", control: "MetadataPicker", valueType: "string", metadataType: "DatabaseMeta", required: true, variable: true },
+    { key: "sql", label: "SQL", control: "MonacoEditor", valueType: "string", language: "sql", variable: true,
+      sqlSourceContext: { inlineSqlPointer: "/sql", fileSqlPointer: "/sql_from_file",
+        precedence: "FILE_WHEN_NONEMPTY", inlineReadOnlyWhenFileSelected: true } },
+    { key: "sql_from_file", label: "SQL from file", control: "VfsPicker", valueType: "string", vfsMode: "file", variable: true },
+    { key: "execute_each_row", label: "Execute for each input row", control: "VariableInput", valueType: "boolean" },
+    { key: "single_statement", label: "Execute as single statement", control: "VariableInput", valueType: "boolean" },
+    { key: "replace_variables", label: "Replace SQL variables", control: "VariableInput", valueType: "boolean" },
+    { key: "set_params", label: "Bind parameters", control: "VariableInput", valueType: "boolean" },
+    { key: "quoteString", label: "Quote substituted string arguments", control: "VariableInput", valueType: "boolean",
+      activation: { flagPointer: "/execute_each_row", activeWhen: true,
+        additionalConditions: [{ flagPointer: "/set_params", activeWhen: false }] } },
+    { key: "arguments.argument", label: "Ordered input arguments", control: "EditableTable", valueType: "object[]",
+      columns: [{ key: "name", label: "Incoming field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" }] },
+    { key: "insert_field", label: "Inserted row count field", control: "VariableInput", valueType: "string" },
+    { key: "update_field", label: "Updated row count field", control: "VariableInput", valueType: "string" },
+    { key: "delete_field", label: "Deleted row count field", control: "VariableInput", valueType: "string" },
+    { key: "read_field", label: "Read row count field", control: "VariableInput", valueType: "string" },
+  ],
+};
+
 /**
  * First real Metadata contract. DatabaseMeta stores its database implementation under `rdbms`;
  * standard connection fields below are BaseDatabaseMeta metadata properties. Password is marked
@@ -346,6 +374,25 @@ replaceStringConfigSchema.tabs = bindLayout(replaceStringConfigSchema, [
   ] },
 ]);
 
+// ExecSql uses a VFS SQL file before inline SQL. The quoteString switch only
+// affects per-row literal substitution without JDBC parameter binding; never
+// erase the inactive Boolean or ordered argument list when changing modes.
+execSqlConfigSchema.tabs = bindLayout(execSqlConfigSchema, [
+  { key: "sql", label: "SQL source", groups: [
+    { key: "source", label: "Connection and SQL", keys: ["connection", "sql", "sql_from_file"] },
+  ] },
+  { key: "execution", label: "Execution", groups: [
+    { key: "options", label: "Execution mode",
+      keys: ["execute_each_row", "single_statement", "replace_variables"] },
+    { key: "arguments", label: "Parameter binding and input arguments",
+      keys: ["set_params", "quoteString", "arguments.argument"] },
+  ] },
+  { key: "results", label: "Result counters", groups: [
+    { key: "output", label: "Optional output fields",
+      keys: ["insert_field", "update_field", "delete_field", "read_field"] },
+  ] },
+]);
+
 const configSchemas: readonly HopConfigSchema[] = [
   tableInputConfigSchema,
   selectValuesConfigSchema,
@@ -353,6 +400,7 @@ const configSchemas: readonly HopConfigSchema[] = [
   checkSumConfigSchema,
   stringCutConfigSchema,
   replaceStringConfigSchema,
+  execSqlConfigSchema,
   databaseConnectionConfigSchema,
 ];
 
