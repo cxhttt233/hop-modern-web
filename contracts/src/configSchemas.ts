@@ -11,6 +11,7 @@ export const tableInputConfigSchema: HopConfigSchema = {
   tier: "T1",
   fields: [
     { key: "connection", label: "Connection", control: "MetadataPicker", valueType: "string", metadataType: "DatabaseMeta", required: true, variable: true },
+    { key: "lookup", label: "SQL parameter source", control: "VariableInput", valueType: "string", pickerHint: "INFO_STREAM_TRANSFORM_PICKER", description: "Named pipeline INFO-stream transform supplying SQL parameter rows; preserve the literal transform name, not a database metadata reference." },
     { key: "sql", label: "SQL", control: "MonacoEditor", valueType: "string", language: "sql", variable: true },
     { key: "sql_from_file", label: "SQL from file", control: "VfsPicker", valueType: "string", vfsMode: "file", variable: true },
     { key: "limit", label: "Row limit", control: "VariableInput", valueType: "string", variable: true },
