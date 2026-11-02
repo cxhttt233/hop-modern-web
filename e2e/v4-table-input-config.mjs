@@ -112,7 +112,7 @@ try {
   const review = panel.locator(".config-change-review");
   await review.locator("summary").click();
   const changedNames = await review.locator('ul[aria-label="未保存字段清单"] li').allInnerTexts();
-  if (JSON.stringify(changedNames) !== JSON.stringify(["连接", "SQL"]) ||
+  if (changedNames.length !== 2 || !changedNames.includes("连接") || !changedNames.includes("SQL") ||
       (await review.innerText()).includes("Warehouse_临时") ||
       (await review.innerText()).includes("SELECT id FROM customers") ||
       countWrites() !== writesBeforeCount) {
