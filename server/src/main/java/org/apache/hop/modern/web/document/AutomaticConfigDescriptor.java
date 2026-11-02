@@ -9,6 +9,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import org.apache.hop.core.row.IValueMeta;
+import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.IEnumHasCodeAndDescription;
 
@@ -36,7 +38,9 @@ public final class AutomaticConfigDescriptor {
             ? describe(field.getType(), depth + 1, new HashSet<>(ancestors)).properties() : List.of();
         List<Property> itemProperties = itemType != null && shape(itemType) == Shape.OBJECT
             ? describe(itemType, depth + 1, new HashSet<>(ancestors)).properties() : List.of();
-        List<Option> options = shape == Shape.ENUM ? enumOptions(field.getType(), metadata.storeWithCode()) : List.of();
+        List<Option> options = shape == Shape.ENUM
+            ? enumOptions(field.getType(), metadata.storeWithCode())
+            : nativeStringOptions(type, key, shape);
         WidgetHint hint = widgetHint(type, key, shape, metadata);
         properties.add(new Property(key, field.getName(), shape, field.getType().getName(),
             metadata.groupKey(), metadata.password(), metadata.storeWithName(), metadata.storeWithCode(),
@@ -183,6 +187,29 @@ public final class AutomaticConfigDescriptor {
     return List.copyOf(options);
   }
 
+  /**
+   * SelectValues stores the metadata-change type as a native STRING value-meta
+   * plugin name, not as a Java enum or a numeric IValueMeta code. Supply the
+   * initialized Hop registry's actual wire values to the browser; preserve
+   * unknown imported values instead of rejecting an editable draft.
+   */
+  private static List<Option> nativeStringOptions(Class<?> owner, String key, Shape shape) {
+    if (shape != Shape.STRING || !key.equals("type")
+        || !owner.getName().equals(
+            "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange")) {
+      return List.of();
+    }
+    String unchanged = ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_NONE);
+    List<Option> options = new ArrayList<>();
+    options.add(new Option(unchanged, unchanged));
+    java.util.Arrays.stream(ValueMetaFactory.getValueMetaNames())
+        .filter(name -> name != null && !name.isBlank() && !name.equalsIgnoreCase(unchanged))
+        .distinct()
+        .sorted(String.CASE_INSENSITIVE_ORDER)
+        .forEach(name -> options.add(new Option(name, name)));
+    return List.copyOf(options);
+  }
+
   private static String enumCode(Enum<?> value) {
     if (value instanceof IEnumHasCodeAndDescription coded) {
       return coded.getCode() == null ? value.name() : coded.getCode();
@@ -199,6 +226,11 @@ public final class AutomaticConfigDescriptor {
   private static WidgetHint widgetHint(
       Class<?> owner, String key, Shape shape, HopMetadataProperty metadata) {
     if (shape != Shape.STRING) return WidgetHint.NONE;
+    // SelectValues fields.meta[*].type is a native value-meta plugin name,
+    // not an enum code. Its producer-owned choices are in Property.options.
+    if (owner.getName().equals(
+            "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange")
+        && key.equals("type")) return WidgetHint.VALUE_META_TYPE_PICKER;
     return switch (metadata.hopMetadataPropertyType()) {
       case RDBMS_CONNECTION, REST_CONNECTION -> WidgetHint.METADATA_PICKER;
       // These pinned annotations identify target database columns, not input row fields.
@@ -2015,7 +2047,8 @@ public final class AutomaticConfigDescriptor {
   public enum WidgetHint {
     NONE, METADATA_PICKER, VFS_PICKER, LOCAL_FILE_PICKER, LOCAL_DIRECTORY_PICKER,
     DATABASE_SCHEMA_PICKER, DATABASE_TABLE_PICKER, DATABASE_COLUMN_PICKER, UPSTREAM_FIELD_PICKER,
-    INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER, STAGED_FIELD_PICKER
+    INFO_STREAM_TRANSFORM_PICKER, INFO_STREAM_FIELD_PICKER, STAGED_FIELD_PICKER,
+    VALUE_META_TYPE_PICKER
   }
   public enum FieldSourceStage { AFTER_SELECT, AFTER_REMOVE }
   /** A second or later flag in a compound activation; all conditions must match. */
