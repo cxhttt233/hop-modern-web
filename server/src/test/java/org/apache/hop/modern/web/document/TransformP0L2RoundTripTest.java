@@ -46,14 +46,22 @@ class TransformP0L2RoundTripTest {
       ITransformMeta meta = PluginRegistry.getInstance().loadClass(plugin, ITransformMeta.class);
       meta.setDefault();
       Class<?> itemClass = meta.getClass().getClassLoader().loadClass(sample.itemClass());
-      Object item = itemClass.getConstructor().newInstance();
-      itemClass.getMethod("setName", String.class).invoke(item, "测站<&雪>");
+      Object item = sample.id().equals("JsonInput")
+          ? itemClass.getConstructor(String.class).newInstance("测站<&雪>")
+          : itemClass.getConstructor().newInstance();
+      if (!sample.id().equals("JsonInput")) {
+        itemClass.getMethod("setName", String.class).invoke(item, "测站<&雪>");
+      } else {
+        itemClass.getMethod("setPath", String.class).invoke(item, "$.level");
+      }
       if (sample.numericWire()) {
         itemClass.getMethod("setType", int.class).invoke(item, typeCode);
       } else {
         itemClass.getMethod("setType", String.class).invoke(item, typeName);
       }
-      metadataField(meta.getClass(), sample.listField()).set(meta, List.of(item));
+      String setter = "set" + Character.toUpperCase(sample.listField().charAt(0))
+          + sample.listField().substring(1);
+      meta.getClass().getMethod(setter, List.class).invoke(meta, List.of(item));
 
       Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
       Property type = property(descriptor, "field", "type");
@@ -76,7 +84,8 @@ class TransformP0L2RoundTripTest {
 
       var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(meta, provider);
       var nativeType = wire.at("/fields/field/0/type");
-      assertEquals("测站<&雪>", wire.at("/fields/field/0/name").asText());
+      assertEquals("测站<&雪>", wire.at("/fields/field/0/name").asText(),
+          sample.id() + " native wire=" + wire.toString());
       if (sample.numericWire()) {
         assertTrue(nativeType.isIntegralNumber(), sample.id() + " JSON type must be NUMBER");
         assertEquals(typeCode, nativeType.intValue());
@@ -487,7 +496,9 @@ class TransformP0L2RoundTripTest {
     Property concatInput = property(concat, "field", "name");
     assertEquals(Shape.STRING, concatInput.shape());
     assertEquals(WidgetHint.UPSTREAM_FIELD_PICKER, concatInput.widgetHint());
-    for (String formatting : List.of("type", "format", "nullif", "trim_type")) {
+    assertEquals(WidgetHint.VALUE_META_TYPE_PICKER,
+        property(concat, "field", "type").widgetHint());
+    for (String formatting : List.of("format", "nullif", "trim_type")) {
       assertEquals(WidgetHint.NONE,
           property(concat, "field", formatting).widgetHint(), formatting);
     }
