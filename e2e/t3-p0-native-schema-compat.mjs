@@ -315,3 +315,51 @@ console.log("PROD_P0_T1_EXECSQL_NATIVE_SCHEMA_COMPAT=PASS");
   }
 }
 console.log("PROD_P0_T1_HTTP_NATIVE_SCHEMA_COMPAT=PASS");
+
+/**
+ * SetVariable stores an ordered assignment LIST under /fields/field, while the
+ * formatting flag is a root BOOLEAN. Match the actual installed Hop descriptor:
+ * variable_type is a STRING code, not an annotated ENUM, and only field_name
+ * is an incoming row reference.
+ */
+{
+  const pluginId = "SetVariable";
+  const descriptor = byId.get(pluginId);
+  const schema = findConfigSchema("transform", pluginId);
+  assert.ok(descriptor?.properties, "SetVariable installed native descriptor missing");
+  assert.ok(schema?.tabs, "SetVariable production T1 layout missing");
+  const entries = flattenNativeProperties(descriptor.properties);
+  const native = new Map(entries);
+  assert.equal(native.size, entries.length, "SetVariable native property paths must be unique");
+  assert.deepEqual(schema.fields.map(field => field.key).sort(), [...native.keys()].sort(),
+    "SetVariable T1 must cover every native field without inventing wire properties");
+  const nativeList = native.get("fields.field");
+  const table = schema.fields.find(field => field.key === "fields.field");
+  assert.equal(nativeList.shape, "LIST");
+  assert.equal(table.control, "EditableTable");
+  assert.equal(table.valueType, "object[]");
+  const nativeColumns = nativeList.elementProperties ?? [];
+  assert.deepEqual(table.columns.map(column => column.key),
+    nativeColumns.map(column => column.key), "native ordered assignment columns");
+  for (const column of table.columns) {
+    const property = nativeColumns.find(item => item.key === column.key);
+    assertNativeValueType(column.valueType, property, "SetVariable." + column.key);
+    assert.equal(column.pickerHint,
+      property.widgetHint === "UPSTREAM_FIELD_PICKER" ? "UPSTREAM_FIELD_PICKER" : undefined,
+      column.key + ": native field-source semantics");
+  }
+  assert.equal(nativeColumns.find(column => column.key === "variable_type").shape, "STRING",
+    "native variable scope is a string code, not an annotated enum");
+  assert.equal(table.columns.find(column => column.key === "variable_type").options, undefined);
+  const wire = descriptor.wireLists?.find(item => item.listPointer === "/fields/field");
+  assert.ok(wire, "SetVariable canonical ordered assignment LIST missing");
+  assert.equal(wire.itemPointerTemplate, "/fields/field/{index}");
+  assert.equal(native.get("use_formatting").shape, "BOOLEAN");
+  assert.equal(schema.fields.find(field => field.key === "use_formatting").valueType, "boolean");
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(item => item.key === field.key));
+  }
+}
+console.log("PROD_P0_T1_SETVARIABLE_NATIVE_SCHEMA_COMPAT=PASS");

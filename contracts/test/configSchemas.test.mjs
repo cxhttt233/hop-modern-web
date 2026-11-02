@@ -501,3 +501,36 @@ test("Http T1 preserves independent native query/header LISTs and sensitive URL 
   assert.deepEqual(transported.fields.filter(field => field.key.startsWith("lookup."))
     .map(field => field.key), ["lookup.arg", "lookup.header"]);
 });
+
+test("SetVariable T1 keeps native ordered assignments, upstream references and string scope codes", () => {
+  const schema = findConfigSchema("transform", "SetVariable");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.fields.map(field => field.key), ["fields.field", "use_formatting"]);
+  assert.deepEqual(schema.tabs.map(tab => tab.key), ["assignments", "formatting"]);
+  const list = schema.fields.find(field => field.key === "fields.field");
+  assert.equal(list?.control, "EditableTable");
+  assert.equal(list?.valueType, "object[]");
+  assert.deepEqual(list?.columns?.map(column => column.key),
+    ["field_name", "variable_name", "variable_type", "default_value"]);
+  assert.deepEqual(list.columns.map(column => column.valueType),
+    ["string", "string", "string", "string"]);
+  assert.equal(list.columns[0].pickerHint, "UPSTREAM_FIELD_PICKER");
+  for (const column of list.columns.slice(1)) {
+    assert.equal(column.pickerHint, undefined,
+      "target names, scope codes and defaults are not upstream field references");
+  }
+  assert.equal(list.columns[2].options, undefined,
+    "VariableItem.variable_type is a native STRING, not a descriptor ENUM");
+  assert.equal(schema.fields.find(field => field.key === "use_formatting")?.valueType, "boolean");
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(item => item.key === field.key),
+      "T1 layout must reuse the original native wire field objects");
+  }
+  const transported = JSON.parse(JSON.stringify(schema));
+  assert.deepEqual(transported.fields[0].columns.map(column => column.key),
+    ["field_name", "variable_name", "variable_type", "default_value"]);
+  assert.equal(transported.fields[0].columns[2].valueType, "string");
+  assert.equal(transported.fields[1].valueType, "boolean");
+});

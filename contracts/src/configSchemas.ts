@@ -227,6 +227,30 @@ export const execSqlConfigSchema: HopConfigSchema = {
  * contain name/parameter leaves. Preserve the /lookup/arg and /lookup/header
  * containers and the encrypted password transport; do not flatten by leaf key.
  */
+
+/**
+ * P0 SetVariable uses a single ordered native assignment LIST. The scope is a
+ * STRING code in pinned Hop VariableItem, not an annotated ENUM; do not
+ * synthesize localized options or coerce it to a number. Only field_name
+ * references an upstream row column; variable_name is a user-authored target.
+ */
+export const setVariableConfigSchema: HopConfigSchema = {
+  pluginId: "SetVariable",
+  pluginType: "transform",
+  title: "Set variables",
+  tier: "T1",
+  fields: [
+    { key: "fields.field", label: "Variable assignments", control: "EditableTable", valueType: "object[]",
+      columns: [
+        { key: "field_name", label: "Incoming field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
+        { key: "variable_name", label: "Variable name", valueType: "string" },
+        { key: "variable_type", label: "Native scope code", valueType: "string" },
+        { key: "default_value", label: "Default value", valueType: "string" },
+      ] },
+    { key: "use_formatting", label: "Use incoming field formatting", control: "VariableInput", valueType: "boolean" },
+  ],
+};
+
 export const httpConfigSchema: HopConfigSchema = {
   pluginId: "Http",
   pluginType: "transform",
@@ -436,6 +460,16 @@ execSqlConfigSchema.tabs = bindLayout(execSqlConfigSchema, [
   ] },
 ]);
 
+// Preserve the native ordered variable assignments independently of formatting.
+setVariableConfigSchema.tabs = bindLayout(setVariableConfigSchema, [
+  { key: "assignments", label: "Variable assignments", groups: [
+    { key: "fields", label: "Input fields and target variables", keys: ["fields.field"] },
+  ] },
+  { key: "formatting", label: "Formatting", groups: [
+    { key: "options", label: "Value formatting", keys: ["use_formatting"] },
+  ] },
+]);
+
 // Http query parameters and headers have identical leaf names but different
 // canonical Hop wire containers. Grouping only reuses native field objects.
 httpConfigSchema.tabs = bindLayout(httpConfigSchema, [
@@ -469,6 +503,7 @@ const configSchemas: readonly HopConfigSchema[] = [
   replaceStringConfigSchema,
   execSqlConfigSchema,
   httpConfigSchema,
+  setVariableConfigSchema,
   databaseConnectionConfigSchema,
 ];
 

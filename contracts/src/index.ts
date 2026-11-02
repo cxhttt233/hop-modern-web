@@ -155,6 +155,7 @@ export {
   databaseConnectionConfigSchema,
   execSqlConfigSchema,
   httpConfigSchema,
+  setVariableConfigSchema,
   findConfigSchema,
   listConfigSchemas,
   replaceStringConfigSchema,
