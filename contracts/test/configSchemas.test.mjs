@@ -33,6 +33,10 @@ test("Table Input uses a metadata picker without inventing storeWithName semanti
   const outputFields = schema.fields.find(({ key }) => key === "fields.field");
   assert.equal(outputFields?.columns?.find(({ key }) => key === "type")?.valueType, "integer",
     "TableInputField.type is an int on ConfigJsonSerializer wire; do not send a type-name string");
+  assert.deepEqual(outputFields?.columns?.map(({ key }) => key),
+    ["name", "type", "format", "length", "precision"],
+    "TableInputField.format is a separate native conversion mask, not a type code");
+  assert.equal(outputFields?.columns?.find(({ key }) => key === "format")?.valueType, "string");
 
 });
 
