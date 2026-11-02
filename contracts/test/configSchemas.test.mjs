@@ -49,6 +49,25 @@ test("Table Input uses a metadata picker without inventing storeWithName semanti
 
 });
 
+test("SortRows spill directory is server-local, not a remote HopVfs picker", () => {
+  const sort = findConfigSchema("transform", "SortRows");
+  const table = findConfigSchema("transform", "TableInput");
+  assert.ok(sort && table);
+  const directory = sort.fields.find(({ key }) => key === "directory");
+  assert.deepEqual(
+    { control: directory?.control, valueType: directory?.valueType,
+      pickerHint: directory?.pickerHint, variable: directory?.variable,
+      vfsMode: directory?.vfsMode },
+    { control: "VariableInput", valueType: "string",
+      pickerHint: "LOCAL_DIRECTORY_PICKER", variable: true,
+      vfsMode: undefined },
+    "SortRows uses java.io.File for temporary spill files; never advertise remote VFS");
+  assert.equal(table.fields.find(({ key }) => key === "sql_from_file")?.control,
+    "VfsPicker", "TableInput SQL files still use HopVfs and must not be narrowed");
+  assert.equal(sort.fields.find(({ key }) => key === "sort_prefix")?.pickerHint,
+    undefined, "local-directory semantics apply only to the directory field");
+});
+
 test("Database Connection marks password transport as sensitive", () => {
   const schema = findConfigSchema("metadata", "DatabaseMeta");
   assert.ok(schema);
