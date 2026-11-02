@@ -50,7 +50,7 @@ class PipelineJettyStrictJsonTransportTest {
       HttpClient client = HttpClient.newHttpClient();
       URI echo = base.resolve("api/diagnostic/echo");
       URI open = base.resolve("api/pipelines/open");
-      String valid = "{\"path\":\"/definitely-not-present/jetty-strict.hpl\"}";
+      String valid = "{\"path\":\"/definitely-not-present/strict-mapper.hpl\"}";
       String concat = valid + "{\"path\":\"/another.hpl\"}";
       String garbage = valid + " NOT_JSON";
       String duplicate = "{\"path\":\"/first.hpl\",\"path\":\"/second.hpl\"}";
