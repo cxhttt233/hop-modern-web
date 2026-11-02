@@ -70,6 +70,9 @@ export interface HopConfigField {
   metadataType?: string;
   storeWithName?: boolean;
 
+  /** Optional producer-owned native picker semantics; unsupported UIs may use text fallback. */
+  pickerHint?: "INFO_STREAM_TRANSFORM_PICKER";
+
   /** VariableInput: preserve Hop variable expressions; resolution remains server-side. */
   variable?: boolean;
 
