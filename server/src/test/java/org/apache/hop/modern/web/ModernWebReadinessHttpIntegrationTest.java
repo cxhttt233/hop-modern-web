@@ -70,8 +70,7 @@ class ModernWebReadinessHttpIntegrationTest {
     AtomicBoolean initialized = new AtomicBoolean(false);
     URI base = URI.create("http://127.0.0.1:" + port + "/");
     Server server = JettyHttpContainerFactory.createServer(
-        base, ModernWebServer.createResourceConfig()
-            .register(new ReadinessResource(initialized::get)));
+        base, new ResourceConfig().register(new ReadinessResource(initialized::get)));
     try {
       HttpClient client = HttpClient.newHttpClient();
       URI endpoint = base.resolve("api/ready");
