@@ -88,6 +88,47 @@ try {
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
   if (await sqlField.inputValue() !== "SELECT id, name FROM customers") throw new Error("Authoritative SQL not visible");
 
+  // Native Hop configuration groups may be collapsed by mouse or keyboard.
+  // Searching must reveal a matching control without losing the user's group
+  // preference, and neither collapse nor expansion may mutate Hop configuration.
+  const sqlGroup = panel.locator("fieldset.config-field-group").filter({ has: sqlField });
+  const groupToggle = sqlGroup.locator(".config-group-toggle");
+  const groupWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeGroup = groupWrites();
+  const originalGroupSql = await sqlField.inputValue();
+  const groupDraftSql = "SELECT id FROM customers /* 分组折叠未保存草稿 */";
+  if (await groupToggle.getAttribute("aria-expanded") !== "true" ||
+      !await sqlField.isVisible()) throw new Error("Native SQL group must start expanded");
+  await sqlField.fill(groupDraftSql);
+  await groupToggle.focus();
+  await groupToggle.press("Enter");
+  if (await groupToggle.getAttribute("aria-expanded") !== "false" ||
+      await sqlField.isVisible() || groupWrites() !== writesBeforeGroup) {
+    throw new Error("Keyboard collapse must hide SQL without writing native Hop config");
+  }
+  const groupFinder = panel.getByRole("searchbox", { name: "查找配置字段" });
+  await groupFinder.fill("sql");
+  if (!await sqlField.isVisible() || !await groupToggle.isDisabled() ||
+      await groupToggle.getAttribute("aria-expanded") !== "true" ||
+      await sqlField.inputValue() !== groupDraftSql) {
+    throw new Error("Searching a collapsed group must reveal and retain its unsaved SQL draft");
+  }
+  await panel.getByRole("button", { name: "清除字段查找" }).click();
+  if (await sqlField.isVisible() || await groupToggle.getAttribute("aria-expanded") !== "false") {
+    throw new Error("Clearing config search must restore the user's collapsed group");
+  }
+  await groupToggle.click();
+  if (!await sqlField.isVisible() || await sqlField.inputValue() !== groupDraftSql ||
+      await groupToggle.getAttribute("aria-expanded") !== "true") {
+    throw new Error("Reopening a group lost the unsaved native SQL draft");
+  }
+  await sqlField.fill(originalGroupSql);
+  if (groupWrites() !== writesBeforeGroup) {
+    throw new Error("Group collapse, search, and restore must not write Hop configuration");
+  }
+  console.log("V4 config group collapse proof passed: keyboard toggle, search reveal, draft retained, no Hop write.");
+
   // Count only actual unsaved field changes, independently of search filtering.
   // Never show native Hop values or send a config/write until the user saves.
   const changeSummary = panel.locator(".config-change-count[role=status]");
