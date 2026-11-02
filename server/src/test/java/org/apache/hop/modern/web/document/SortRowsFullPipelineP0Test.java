@@ -886,6 +886,7 @@ class SortRowsFullPipelineP0Test {
 
       List<Object[]> emitted = new CopyOnWriteArrayList<>();
       AtomicReference<List<Integer>> spillHeader = new AtomicReference<>();
+      AtomicReference<Integer> spillCountAtEmission = new AtomicReference<>();
       AtomicReference<String> inspectionError = new AtomicReference<>();
       LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
       engine.setMetadataProvider(provider);
@@ -906,6 +907,7 @@ class SortRowsFullPipelineP0Test {
                 inspectionError.set("no native external sort file at first output");
                 return;
               }
+              spillCountAtEmission.set(files.size());
               var firstFile = (org.apache.commons.vfs2.FileObject) files.get(0);
               try (var stream = firstFile.getContent().getInputStream()) {
                 spillHeader.set(List.of(stream.read(), stream.read()));
@@ -921,14 +923,17 @@ class SortRowsFullPipelineP0Test {
         assertEquals(expectedCompression[scenario],
             nativeData.getClass().getField("compressFiles").getBoolean(nativeData),
             "runtime variable must override the opposite static compress flag");
-        List<?> files = (List<?>) nativeData.getClass().getField("files").get(nativeData);
-        assertTrue(files.size() >= 2, "sort_size=2 must create multiple real spill files");
+        // Native cleanup may clear the file registry after row delivery.
+        // The row listener records the real spill count before cleanup.
       } finally {
         if (!engine.isFinishedOrStopped()) engine.stopAll();
         engine.cleanup();
       }
       assertNull(inspectionError.get(), "native spill file must be readable before cleanup");
       assertNotNull(spillHeader.get());
+      assertNotNull(spillCountAtEmission.get());
+      assertTrue(spillCountAtEmission.get() >= 2,
+          "sort_size=2 must create multiple spill files before native cleanup");
       if (expectedCompression[scenario]) {
         assertEquals(List.of(0x1f, 0x8b), spillHeader.get(),
             "enabled variable must create a real GZIP spill file");
