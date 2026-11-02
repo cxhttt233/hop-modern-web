@@ -609,11 +609,11 @@ class JsonInputFullPipelineP0Test {
 
 
   @Test
-  void jsonInputRowLimitAndZeroBasedRowNumberExecuteNativeEngineAfterHplReopen(
+  void jsonInputLimitCountsExpandedRowsAndOneBasedRowNumberAfterHplReopen(
       @TempDir Path tempDir) throws Exception {
-    // Pinned JsonInput.writeOutputRowIfPossible() increments rownr AFTER putRow(),
-    // then stops only when rownr > rowLimit. Prove the actual output contract
-    // rather than assuming an inclusive SQL-style LIMIT or 1-based row numbers.
+    // Pinned JsonInput.init() initializes rownr=1. Each wildcard-expanded output
+    // receives that counter before writeOutputRowIfPossible() increments it;
+    // the post-emit limit check counts output rows, not source JSON documents.
     PluginRegistry plugins = PluginRegistry.getInstance();
     IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
     IPlugin jsonPlugin = plugins.findPluginWithId(TransformPluginType.class, "JsonInput");
@@ -679,7 +679,7 @@ class JsonInputFullPipelineP0Test {
     draft.put("removeSourceField", true);
     draft.put("rownum", true);
     draft.put("rownum_field", "序号<&>");
-    draft.put("limit", 1);
+    draft.put("limit", 2);
     ArrayNode paths = (ArrayNode) draft.path("fields").path("field");
     assertEquals(1, paths.size());
     ((ObjectNode) paths.get(0)).put("path", "$.items[*].station");
@@ -698,7 +698,7 @@ class JsonInputFullPipelineP0Test {
     assertTrue(wire.at("/rownum").booleanValue());
     assertEquals("序号<&>", wire.at("/rownum_field").asText());
     assertTrue(wire.at("/limit").isNumber());
-    assertEquals(1L, wire.at("/limit").longValue());
+    assertEquals(2L, wire.at("/limit").longValue());
     assertEquals("$.items[*].station", wire.at("/fields/field/0/path").asText());
 
     List<Object[]> emitted = new CopyOnWriteArrayList<>();
@@ -731,14 +731,14 @@ class JsonInputFullPipelineP0Test {
     assertEquals("序号<&>", outputMeta.get().getValueMeta(2).getName());
     assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(2).getType());
     assertEquals(2, emitted.size(),
-        "native limit=1 emits two rows because the stop check occurs after putRow");
+        "native limit=2 must stop after two wildcard-expanded rows");
     assertEquals("批次<&>", emitted.get(0)[0]);
     assertEquals("黄河<&>", emitted.get(0)[1]);
-    assertEquals(0L, ((Number) emitted.get(0)[2]).longValue());
+    assertEquals(1L, ((Number) emitted.get(0)[2]).longValue());
     assertEquals("批次<&>", emitted.get(1)[0]);
     assertEquals("渭河", emitted.get(1)[1]);
-    assertEquals(1L, ((Number) emitted.get(1)[2]).longValue());
-    System.out.println("PROD_P0_JSONINPUT_LIMIT_PLUS_ONE_ZERO_BASED_ROWNUM_NATIVE_ENGINE=PASS");
+    assertEquals(2L, ((Number) emitted.get(1)[2]).longValue());
+    System.out.println("PROD_P0_JSONINPUT_LIMIT_EXPANDED_ROWS_ONE_BASED_ROWNUM_NATIVE_ENGINE=PASS");
   }
 
 }
