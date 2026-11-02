@@ -50,16 +50,16 @@ class PipelineJettyStrictJsonTransportTest {
       HttpClient client = HttpClient.newHttpClient();
       URI echo = base.resolve("api/diagnostic/echo");
       URI open = base.resolve("api/pipelines/open");
-      String valid = "{\\"path\\":\\"/definitely-not-present/jetty-strict.hpl\\"}";
-      String concat = valid + "{\\"path\\":\\"/another.hpl\\"}";
+      String valid = "{\"path\":\"/definitely-not-present/jetty-strict.hpl\"}";
+      String concat = valid + "{\"path\":\"/another.hpl\"}";
       String garbage = valid + " NOT_JSON";
-      String duplicate = "{\\"path\\":\\"/first.hpl\\",\\"path\\":\\"/second.hpl\\"}";
+      String duplicate = "{\"path\":\"/first.hpl\",\"path\":\"/second.hpl\"}";
 
       Result before = post(client, echo, valid);
       Result concatEcho = post(client, echo, concat);
       Result garbageEcho = post(client, echo, garbage);
       Result duplicateEcho = post(client, echo, duplicate);
-      Result malformed = post(client, echo, "{\\"path\\":");
+      Result malformed = post(client, echo, "{\"path\":");
       Result empty = post(client, echo, "");
       Result concatOpen = post(client, open, concat);
       Result garbageOpen = post(client, open, garbage);
