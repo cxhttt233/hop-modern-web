@@ -81,6 +81,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const [draft, setDraft] = useState<Record<string, unknown>>(() => Object.fromEntries(
     descriptor.properties.filter((p) => !p.sensitive).map((p) => [p.key, read(config, p.key)])));
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
+  // Field navigation is presentation-only: never search or expose configuration values.
+  const [fieldQuery, setFieldQuery] = useState("");
   // Resize only the visible editor: no graph/config write, persistence or schema change.
   const [panelWidth, setPanelWidth] = useState(600);
   const resizeStart = useRef<{ pointerId: number; x: number; width: number } | null>(null);
@@ -94,6 +96,15 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     descriptor.properties.forEach((p) => { const group = p.groupKey?.trim() || "General"; result.set(group, [...(result.get(group) ?? []), p]); });
     return [...result.entries()];
   }, [descriptor]);
+  const normalizedFieldQuery = fieldQuery.trim().toLocaleLowerCase();
+  const visibleGroups = useMemo(() => groups.map(([group, properties]) => {
+    const groupMatches = (GROUP_LABELS[group] ?? group).toLocaleLowerCase().includes(normalizedFieldQuery);
+    return [group, properties.filter((property) => !normalizedFieldQuery || invalid[property.key] || groupMatches ||
+      localLabel(property.key).toLocaleLowerCase().includes(normalizedFieldQuery) ||
+      property.key.toLocaleLowerCase().includes(normalizedFieldQuery))] as const;
+  }).filter(([, properties]) => properties.length > 0), [groups, normalizedFieldQuery, invalid]);
+  const visibleFieldCount = visibleGroups.reduce((count, [, properties]) => count + properties.length, 0);
+  const totalFieldCount = descriptor.properties.length;
   const set = (key: string, value: unknown) => setDraft((old) => ({ ...old, [key]: value }));
   const label = (p: ConfigPropertyDescriptor) => localLabel(p.key);
 
@@ -144,7 +155,15 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
         }
       }} />
     <header><strong>转换配置{transformName ? `：${transformName}` : ""}</strong><small>{transformId ? `节点：${transformId} · ` : ""}{descriptor.className}</small></header>
-    {groups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
+    <div className="config-field-search">
+      <input type="search" aria-label="查找配置字段" placeholder="查找字段名称或分组" value={fieldQuery}
+        onChange={(event) => setFieldQuery(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} />
+      {fieldQuery && <button type="button" onClick={() => setFieldQuery("")} aria-label="清除字段查找">清除</button>}
+      <small aria-live="polite">显示 {visibleFieldCount} / {totalFieldCount} 项</small>
+    </div>
+    {visibleGroups.length === 0 && <p className="config-search-empty" role="status">没有匹配的配置字段，请更换关键词。</p>}
+    {visibleGroups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
       <label key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
     <footer><button type="button" aria-label="取消配置（Cancel）" onClick={onCancel}>取消</button><button type="submit" aria-label="保存配置（Save）" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
   </form>;
