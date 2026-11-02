@@ -27,6 +27,7 @@ export const tableInputConfigSchema: HopConfigSchema = {
       columns: [
         { key: "name", label: "Name", valueType: "string" },
         { key: "type", label: "Type", valueType: "integer" },
+        { key: "format", label: "Format", valueType: "string" },
         { key: "length", label: "Length", valueType: "integer" },
         { key: "precision", label: "Precision", valueType: "integer" },
       ],
