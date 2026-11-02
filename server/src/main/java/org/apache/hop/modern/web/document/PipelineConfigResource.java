@@ -108,7 +108,20 @@ public final class PipelineConfigResource {
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   private ITransformMeta decode(JsonNode config, Class<?> type) throws HopException {
-    Object decoded = ConfigJsonSerializer.fromJson(config, (Class) type, metadataProvider);
+    JsonNode input = config;
+    // Pinned Hop TableOutputMeta exposes a nullable transient partitionDataPer field,
+    // but its setter calls value.equals(...) without handling null. Omitting only
+    // this absent optional value avoids invoking the null-unsafe setter while
+    // preserving all other fields, including explicit nulls, unchanged.
+    if ("org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta".equals(type.getName())
+        && config.has("partitionDataPer")
+        && config.get("partitionDataPer").isNull()) {
+      com.fasterxml.jackson.databind.node.ObjectNode copy =
+          ((com.fasterxml.jackson.databind.node.ObjectNode) config).deepCopy();
+      copy.remove("partitionDataPer");
+      input = copy;
+    }
+    Object decoded = ConfigJsonSerializer.fromJson(input, (Class) type, metadataProvider);
     return (ITransformMeta) decoded;
   }
 
