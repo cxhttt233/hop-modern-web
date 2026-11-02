@@ -1041,7 +1041,22 @@ public final class AutomaticConfigDescriptor {
                       + "order, operator codes, and explicit nested groups across Hop "
                       + "JSON/XML editing. Warn before execution when a SQL-like predicate "
                       + "would change meaning; do not rewrite the saved condition tree "
-                      + "or reject drafts."));
+                      + "or reject drafts."),
+              new RuntimePrecondition(
+                  "FILTER_ROWS_NONFIRST_NOT_OPERATOR_IS_IGNORED",
+                  List.of("/compare/condition"),
+                  "In pinned Hop Condition.evaluate(), a composite condition evaluates "
+                      + "its first child without consulting that child's operator. For "
+                      + "each later child the switch handles OR, AND, OR NOT, AND NOT "
+                      + "and XOR, but not the standalone NOT or NONE operator. A later "
+                      + "child stored with operator=NOT is therefore skipped entirely; "
+                      + "it does not negate that child or the accumulated result. Use "
+                      + "the child's negated flag for unary negation, or the explicit "
+                      + "AND NOT / OR NOT combination operator for negated combination. "
+                      + "Preserve the original operator code in JSON and HPL, warn "
+                      + "before execution, and never silently normalize imported "
+                      + "conditions. This is a runtime compatibility diagnostic, not "
+                      + "a draft-save validator."));
       case "org.apache.hop.pipeline.transforms.groupby.GroupByMeta" ->
           List.of(
               new RuntimePrecondition(
