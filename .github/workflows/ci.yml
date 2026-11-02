@@ -18,6 +18,8 @@ jobs:
         run: node e2e/l3-generic-config-render.mjs
       - name: Typecheck
         run: npm run typecheck
+      - name: Verify native config schema contracts
+        run: npm run test -w @hop-modern/contracts
       - name: Build frontend
         run: npm run build
 
