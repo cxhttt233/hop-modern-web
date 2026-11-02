@@ -14,6 +14,7 @@ test("registry exposes the first real config targets", () => {
       "transform:StringCut",
       "transform:ReplaceString",
       "transform:ExecSql",
+      "transform:Http",
       "metadata:DatabaseMeta",
     ],
   );
@@ -444,4 +445,59 @@ test("ExecSql T1 preserves native SQL file precedence, indexed arguments and two
     field.key === "quoteString").activation.additionalConditions,
     [{ flagPointer: "/set_params", activeWhen: false }],
     "both activation conditions must survive JSON transport");
+});
+
+test("Http T1 preserves independent native query/header LISTs and sensitive URL modes", () => {
+  const schema = findConfigSchema("transform", "Http");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.fields.map(field => field.key), [
+    "urlInField", "url", "urlField", "lookup.arg", "lookup.header", "encoding",
+    "socketTimeout", "connectionTimeout", "closeIdleConnectionsTime", "ignoreSsl",
+    "proxyHost", "proxyPort", "httpLogin", "httpPassword",
+    "result.name", "result.code", "result.response_time", "result.response_header",
+  ], "all 18 pinned HttpMeta leaf paths are native, not UI-invented");
+  assert.deepEqual(schema.tabs.map(tab => tab.key),
+    ["request", "parameters", "connection", "response"]);
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  assert.equal(new Set(grouped.map(field => field.key)).size, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(item => item.key === field.key),
+      "tabs must share the flat native field object without rewriting the Hop wire shape");
+  }
+
+  for (const key of ["lookup.arg", "lookup.header"]) {
+    const list = schema.fields.find(field => field.key === key);
+    assert.equal(list?.control, "EditableTable");
+    assert.equal(list?.valueType, "object[]");
+    assert.deepEqual(list?.columns?.map(column => column.key), ["name", "parameter"],
+      "both native lists have repeated leaf names, not a shared merged row array");
+    assert.equal(list.columns[0].pickerHint, "UPSTREAM_FIELD_PICKER");
+    assert.equal(list.columns[1].pickerHint, undefined,
+      "the HTTP parameter/header name is a literal, not an incoming field reference");
+  }
+
+  const url = schema.fields.find(field => field.key === "url");
+  const urlField = schema.fields.find(field => field.key === "urlField");
+  assert.deepEqual(url?.activation, { flagPointer: "/urlInField", activeWhen: false });
+  assert.deepEqual(urlField?.activation, { flagPointer: "/urlInField", activeWhen: true });
+  assert.equal(urlField?.pickerHint, "UPSTREAM_FIELD_PICKER");
+  assert.equal(url?.pickerHint, undefined);
+  assert.equal(schema.fields.find(field => field.key === "httpPassword")?.sensitive, true,
+    "the password must not be treated as an ordinary browser display value");
+  assert.equal(schema.fields.find(field => field.key === "ignoreSsl")?.valueType, "boolean");
+  for (const key of ["socketTimeout", "connectionTimeout", "closeIdleConnectionsTime"]) {
+    assert.equal(schema.fields.find(field => field.key === key)?.valueType, "string",
+      "native timeout values preserve variable expressions, not coerced JSON numbers");
+  }
+  for (const key of ["result.name", "result.code", "result.response_time", "result.response_header"]) {
+    assert.equal(schema.fields.find(field => field.key === key)?.pickerHint, undefined,
+      "response field names are authored outputs, not incoming row fields");
+  }
+  const transported = JSON.parse(JSON.stringify(schema));
+  assert.deepEqual(transported.fields.find(field => field.key === "urlField").activation,
+    { flagPointer: "/urlInField", activeWhen: true });
+  assert.equal(transported.fields.find(field => field.key === "httpPassword").sensitive, true);
+  assert.deepEqual(transported.fields.filter(field => field.key.startsWith("lookup."))
+    .map(field => field.key), ["lookup.arg", "lookup.header"]);
 });
