@@ -184,6 +184,39 @@ tableInputConfigSchema.tabs = bindLayout(tableInputConfigSchema, [
   ] },
 ]);
 
+// The Select Values stages are ordered: selection/renaming, removal, then metadata
+// conversion. Keep all three native LISTs independent and preserve their row order.
+// The UI may present stages separately but must never discard inactive/unknown values.
+selectValuesConfigSchema.tabs = bindLayout(selectValuesConfigSchema, [
+  { key: "select", label: "Select and rename", groups: [
+    { key: "selection", label: "Fields to select",
+      keys: ["fields.field", "fields.select_unspecified"] },
+  ] },
+  { key: "remove", label: "Remove", groups: [
+    { key: "removal", label: "Fields to remove",
+      keys: ["fields.remove"] },
+  ] },
+  { key: "metadata", label: "Metadata", groups: [
+    { key: "conversion", label: "Type and format changes",
+      keys: ["fields.meta"] },
+  ] },
+]);
+
+// SortRows keeps its ordered comparison-field LIST separate from the
+// server-local spill configuration. Tabs only organize existing native values.
+sortRowsConfigSchema.tabs = bindLayout(sortRowsConfigSchema, [
+  { key: "fields", label: "Sort fields", groups: [
+    { key: "comparison", label: "Comparison order",
+      keys: ["fields.field", "unique_rows"] },
+  ] },
+  { key: "performance", label: "Execution and spill files", groups: [
+    { key: "memory", label: "Memory",
+      keys: ["sort_size", "free_memory"] },
+    { key: "spill", label: "Temporary files",
+      keys: ["directory", "sort_prefix", "compress", "compress_variables"] },
+  ] },
+]);
+
 const configSchemas: readonly HopConfigSchema[] = [
   tableInputConfigSchema,
   selectValuesConfigSchema,
