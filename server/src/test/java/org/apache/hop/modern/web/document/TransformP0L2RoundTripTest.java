@@ -83,8 +83,12 @@ class TransformP0L2RoundTripTest {
           sample.id() + " must not coerce option values to the wrong JSON type");
 
       var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(meta, provider);
-      var nativeType = wire.at("/fields/field/0/type");
-      assertEquals("测站<&雪>", wire.at("/fields/field/0/name").asText(),
+      // DataGridFieldMeta is wrapped in an additional native "field" object
+      // inside each fields.field list entry; JsonInput and ConcatFields are not.
+      String itemPointer = sample.id().equals("DataGrid")
+          ? "/fields/field/0/field" : "/fields/field/0";
+      var nativeType = wire.at(itemPointer + "/type");
+      assertEquals("测站<&雪>", wire.at(itemPointer + "/name").asText(),
           sample.id() + " native wire=" + wire.toString());
       if (sample.numericWire()) {
         assertTrue(nativeType.isIntegralNumber(), sample.id() + " JSON type must be NUMBER");
