@@ -23,33 +23,29 @@ import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
-import org.glassfish.grizzly.http.server.HttpServer;
-import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
+import org.eclipse.jetty.server.Server;
+import org.glassfish.jersey.jetty.JettyHttpContainerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * Test-only compatibility probe: can an explicitly strict Jackson mapper reject
- * trailing and duplicate JSON while the production READ_FULL_STREAM=false
- * provider setting avoids the observed Grizzly end-of-stream hang?
- *
- * This does NOT install the mapper in production. A failed or timed-out request
- * is recorded as -1, not accepted as a successful rejection.
+ * Production transport compatibility regression for strict Jackson parsing.
+ * Uses the actual Jetty/Jersey ResourceConfig, including the production mapper.
+ * A failed or timed-out request is recorded as -1, never as HTTP 400.
  */
 class PipelineStrictMapperCompatibilityTest {
 
   @Test
   @Timeout(value = 110, unit = TimeUnit.SECONDS)
-  void probesStrictMapperOnTheActualGrizzlyJerseyStack() throws Exception {
+  void probesStrictMapperOnProductionJettyJerseyStack() throws Exception {
     int port;
     try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
       port = socket.getLocalPort();
     }
     URI base = URI.create("http://127.0.0.1:" + port + "/");
-    HttpServer server = GrizzlyHttpServerFactory.createHttpServer(
+    Server server = JettyHttpContainerFactory.createServer(
         base,
         ModernWebServer.createResourceConfig()
-            .register(new StrictMapperProvider())
             .register(PipelineHttpJsonBoundaryABTest.JsonEchoResource.class));
     try {
       HttpClient client = HttpClient.newHttpClient();
@@ -86,7 +82,7 @@ class PipelineStrictMapperCompatibilityTest {
           () -> assertEquals(400, concatOpen.status(), concatOpen.body()),
           () -> assertEquals(200, after.status(), after.body()));
     } finally {
-      server.shutdownNow();
+      server.stop();
     }
   }
 
