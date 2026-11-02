@@ -13,6 +13,7 @@ test("registry exposes the first real config targets", () => {
       "transform:CheckSum",
       "transform:StringCut",
       "transform:ReplaceString",
+      "transform:ExecSql",
       "metadata:DatabaseMeta",
     ],
   );
@@ -404,4 +405,43 @@ test("ReplaceString T1 matches native ordered rule columns and Boolean flags", (
   }
   assert.deepEqual(JSON.parse(JSON.stringify(rules.columns)).map(c => c.key),
     rules.columns.map(c => c.key), "browser transport preserves ordered native columns");
+});
+
+test("ExecSql T1 preserves native SQL file precedence, indexed arguments and two-flag quote activation", () => {
+  const schema = findConfigSchema("transform", "ExecSql");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.fields.map(field => field.key), [
+    "connection", "sql", "sql_from_file", "execute_each_row", "single_statement",
+    "replace_variables", "set_params", "quoteString", "arguments.argument",
+    "insert_field", "update_field", "delete_field", "read_field",
+  ]);
+  assert.deepEqual(schema.tabs.map(tab => tab.key), ["sql", "execution", "results"]);
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(item => item.key === field.key),
+      "tabs must reuse the native wire fields, not clone them");
+  }
+  assert.deepEqual(schema.fields.find(field => field.key === "sql")?.sqlSourceContext, {
+    inlineSqlPointer: "/sql", fileSqlPointer: "/sql_from_file",
+    precedence: "FILE_WHEN_NONEMPTY", inlineReadOnlyWhenFileSelected: true,
+  });
+  assert.equal(schema.fields.find(field => field.key === "sql_from_file")?.control, "VfsPicker");
+  assert.deepEqual(schema.fields.find(field => field.key === "quoteString")?.activation, {
+    flagPointer: "/execute_each_row", activeWhen: true,
+    additionalConditions: [{ flagPointer: "/set_params", activeWhen: false }],
+  });
+  const argumentsList = schema.fields.find(field => field.key === "arguments.argument");
+  assert.equal(argumentsList?.valueType, "object[]");
+  assert.deepEqual(argumentsList?.columns, [
+    { key: "name", label: "Incoming field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
+  ]);
+  for (const name of ["insert_field", "update_field", "delete_field", "read_field"]) {
+    assert.equal(schema.fields.find(field => field.key === name)?.pickerHint, undefined,
+      "result counters are output names, not upstream field references");
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(schema)).fields.find(field =>
+    field.key === "quoteString").activation.additionalConditions,
+    [{ flagPointer: "/set_params", activeWhen: false }],
+    "both activation conditions must survive JSON transport");
 });
