@@ -14,6 +14,7 @@ test("registry exposes the first real config targets", () => {
       "transform:StringCut",
       "transform:ReplaceString",
       "transform:ExecSql",
+      "transform:ConcatFields",
       "transform:Http",
       "transform:SetVariable",
       "metadata:DatabaseMeta",
@@ -534,4 +535,49 @@ test("SetVariable T1 keeps native ordered assignments, upstream references and s
     ["field_name", "variable_name", "variable_type", "default_value"]);
   assert.equal(transported.fields[0].columns[2].valueType, "string");
   assert.equal(transported.fields[1].valueType, "boolean");
+});
+
+test("ConcatFields T1 preserves native ordered sources and capitalized target OBJECT", () => {
+  const schema = findConfigSchema("transform", "ConcatFields");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.fields.map(field => field.key), [
+    "fields.field", "ConcatFields.targetFieldName",
+    "ConcatFields.targetFieldLength", "ConcatFields.removeSelectedFields",
+    "separator", "enclosure", "force_enclosure", "skip_value_empty",
+  ], "native ConcatFieldsMeta has one LIST, one nested OBJECT and four scalar properties");
+  const list = schema.fields[0];
+  assert.equal(list.control, "EditableTable");
+  assert.equal(list.valueType, "object[]");
+  assert.deepEqual(list.columns.map(column => column.key), [
+    "name", "type", "format", "length", "precision", "currency",
+    "decimal", "group", "nullif", "trim_type",
+  ], "ConcatField wire columns must not be omitted or reordered");
+  assert.deepEqual(list.columns.map(column => column.valueType), [
+    "string", "string", "string", "integer", "integer", "string",
+    "string", "string", "string", "string",
+  ], "native length and precision are NUMBER, while ValueMeta type is STRING");
+  assert.equal(list.columns[0].pickerHint, "UPSTREAM_FIELD_PICKER");
+  assert.equal(list.columns[1].pickerHint, "VALUE_META_TYPE_PICKER");
+  for (const column of list.columns.slice(2)) {
+    assert.equal(column.pickerHint, undefined,
+      "formatting and literal fields must not become incoming field references");
+  }
+  assert.equal(schema.fields[1].required, true, "native output field name cannot be blank");
+  assert.equal(schema.fields[2].valueType, "integer");
+  for (const key of ["ConcatFields.removeSelectedFields", "force_enclosure", "skip_value_empty"]) {
+    assert.equal(schema.fields.find(field => field.key === key)?.valueType, "boolean");
+  }
+  assert.deepEqual(schema.tabs.map(tab => tab.key), ["source", "target"]);
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(item => item.key === field.key),
+      "T1 layout must reuse native fields without flattening ConcatFields OBJECT");
+  }
+  const transported = JSON.parse(JSON.stringify(schema));
+  assert.deepEqual(transported.fields.map(field => field.key), schema.fields.map(field => field.key));
+  assert.deepEqual(transported.fields[0].columns.map(column => column.key),
+    list.columns.map(column => column.key));
+  assert.equal(transported.fields[2].valueType, "integer");
+  assert.equal(transported.fields[3].valueType, "boolean");
 });
