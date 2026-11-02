@@ -281,3 +281,32 @@ test("SortRows layout separates ordered keys from memory and local spill setting
     "LOCAL_DIRECTORY_PICKER");
   assert.equal(spill.find(({ key }) => key === "compress_variables")?.variable, true);
 });
+
+test("SortRows comparison picker consumes incoming row fields, not output aliases or local spill paths", () => {
+  const schema = findConfigSchema("transform", "SortRows");
+  assert.ok(schema?.tabs);
+  const comparison = schema.fields.find(({ key }) => key === "fields.field");
+  assert.equal(comparison?.control, "EditableTable");
+  assert.equal(comparison?.valueType, "object[]");
+  const name = comparison?.columns?.find(({ key }) => key === "name");
+  assert.deepEqual(
+    { valueType: name?.valueType, pickerHint: name?.pickerHint, fieldSourceStage: name?.fieldSourceStage },
+    { valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER", fieldSourceStage: undefined },
+    "native SortRowsField.name resolves in the incoming row, unlike SelectValues staged fields",
+  );
+  for (const column of comparison?.columns?.filter(({ key }) => key !== "name") ?? []) {
+    assert.equal(column.pickerHint, undefined,
+      "sort direction, collator settings and presorted flags are not incoming field references");
+  }
+  assert.strictEqual(schema.tabs[0].groups[0].fields[0], comparison,
+    "grouped SortRows layout must expose the same picker as the flat schema");
+  assert.equal(JSON.parse(JSON.stringify(name)).pickerHint, "UPSTREAM_FIELD_PICKER",
+    "the producer-owned picker hint must survive browser JSON transport");
+  assert.equal(schema.fields.find(({ key }) => key === "directory")?.pickerHint,
+    "LOCAL_DIRECTORY_PICKER", "temporary directories are not row field references");
+  const tableInputOutputName = findConfigSchema("transform", "TableInput")
+    ?.fields.find(({ key }) => key === "fields.field")
+    ?.columns?.find(({ key }) => key === "name");
+  assert.equal(tableInputOutputName?.pickerHint, undefined,
+    "declared JDBC output names must remain authored names, not incoming field picks");
+});
