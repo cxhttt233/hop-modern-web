@@ -91,7 +91,7 @@ try {
   // Native Hop configuration groups may be collapsed by mouse or keyboard.
   // Searching must reveal a matching control without losing the user's group
   // preference, and neither collapse nor expansion may mutate Hop configuration.
-  const sqlGroup = panel.locator("fieldset.config-field-group").filter({ has: sqlField });
+  const sqlGroup = sqlField.locator("xpath=ancestor::fieldset[1]");
   const groupToggle = sqlGroup.locator(".config-group-toggle");
   const groupWrites = () => requests.filter(({ url, method }) =>
     method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
