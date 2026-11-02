@@ -107,6 +107,15 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   }).filter(([, properties]) => properties.length > 0), [groups, normalizedFieldQuery, invalid]);
   const visibleFieldCount = visibleGroups.reduce((count, [, properties]) => count + properties.length, 0);
   const totalFieldCount = descriptor.properties.length;
+  // Count actual unsaved field differences without revealing values, including secrets.
+  // This is display-only: the existing native Hop save/cancel contract is unchanged.
+  const changedFieldCount = descriptor.properties.reduce((count, property) => {
+    if (!Object.prototype.hasOwnProperty.call(draft, property.key)) return count;
+    const value = draft[property.key];
+    if (property.sensitive && (value === "" || value === undefined)) return count;
+    const original = read(config, property.key);
+    return count + (Object.is(value, original) || JSON.stringify(value) === JSON.stringify(original) ? 0 : 1);
+  }, 0);
   const set = (key: string, value: unknown) => setDraft((old) => ({ ...old, [key]: value }));
   const label = (p: ConfigPropertyDescriptor) => localLabel(p.key);
   // Focus only visible descriptor-owned controls. Never inspect configuration values
@@ -197,6 +206,6 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     {visibleGroups.length === 0 && <p className="config-search-empty" role="status">没有匹配的配置字段，请更换关键词。</p>}
     {visibleGroups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
       <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
-    <footer><button type="button" aria-label="取消配置（Cancel）" onClick={onCancel}>取消</button><button type="submit" aria-label="保存配置（Save）" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
+    <footer>{changedFieldCount > 0 && <small className="config-change-count" role="status" aria-live="polite">已修改 {changedFieldCount} 项（未保存）</small>}<button type="button" aria-label="取消配置（Cancel）" onClick={onCancel}>取消</button><button type="submit" aria-label="保存配置（Save）" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
   </form>;
 }
