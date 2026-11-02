@@ -1,4 +1,4 @@
-import type { HopConfigSchema } from "./index.js";
+import type { HopConfigSchema, HopConfigTab } from "./index.js";
 
 /**
  * First real Transform contract. Keys mirror TableInputMeta @HopMetadataProperty keys so the thin
@@ -13,16 +13,17 @@ export const tableInputConfigSchema: HopConfigSchema = {
     { key: "connection", label: "Connection", control: "MetadataPicker", valueType: "string", metadataType: "DatabaseMeta", required: true, variable: true },
     { key: "lookup", label: "SQL parameter source", control: "VariableInput", valueType: "string", pickerHint: "INFO_STREAM_TRANSFORM_PICKER", description: "Named pipeline INFO-stream transform supplying SQL parameter rows; preserve the literal transform name, not a database metadata reference." },
     { key: "sql", label: "SQL", control: "MonacoEditor", valueType: "string", language: "sql", variable: true },
-    { key: "sql_from_file", label: "SQL from file", control: "VfsPicker", valueType: "string", vfsMode: "file", variable: true },
+    { key: "sql_from_file", label: "SQL from file", control: "VfsPicker", valueType: "string", vfsMode: "file", variable: true, description: "When nonempty, native TableInput reads SQL from this HopVfs file instead of inline SQL; retain the inline SQL draft when switching back." },
     { key: "limit", label: "Row limit", control: "VariableInput", valueType: "string", variable: true },
     { key: "execute_each_row", label: "Execute for each row", control: "VariableInput", valueType: "boolean" },
     { key: "variables_active", label: "Replace variables", control: "VariableInput", valueType: "boolean" },
     { key: "use_named_parameters", label: "Use named parameters", control: "VariableInput", valueType: "boolean" },
     { key: "specify_fields", label: "Specify output fields", control: "VariableInput", valueType: "boolean" },
-    { key: "validate_specified_fields", label: "Validate specified fields", control: "VariableInput", valueType: "boolean" },
+    { key: "validate_specified_fields", label: "Validate specified fields", control: "VariableInput", valueType: "boolean", activation: { flagKey: "specify_fields", activeWhen: true } },
     {
       key: "fields.field",
       label: "Output fields",
+      activation: { flagKey: "specify_fields", activeWhen: true },
       control: "EditableTable",
       valueType: "object[]",
       columns: [
@@ -135,6 +136,53 @@ export const databaseConnectionConfigSchema: HopConfigSchema = {
     { key: "rdbms.manualUrl", label: "JDBC URL", control: "VariableInput", valueType: "string", variable: true },
   ],
 };
+
+/**
+ * Bind a producer-owned layout to the same native field objects used by the flat T1
+ * fallback. Reject missing/duplicate keys rather than silently dropping a Hop property.
+ */
+function bindLayout(
+  schema: HopConfigSchema,
+  specs: readonly {
+    key: string; label: string;
+    groups: readonly { key: string; label: string; keys: readonly string[] }[];
+  }[],
+): HopConfigTab[] {
+  const byKey = new Map(schema.fields.map((field) => [field.key, field]));
+  if (byKey.size !== schema.fields.length) throw new Error(`Duplicate native schema key: ${schema.pluginId}`);
+  const seen = new Set<string>();
+  const tabs = specs.map((tab) => ({
+    key: tab.key,
+    label: tab.label,
+    groups: tab.groups.map((group) => ({
+      key: group.key,
+      label: group.label,
+      fields: group.keys.map((key) => {
+        const field = byKey.get(key);
+        if (!field || seen.has(key)) throw new Error(`Invalid layout key ${schema.pluginId}:${key}`);
+        seen.add(key);
+        return field;
+      }),
+    })),
+  }));
+  if (seen.size !== byKey.size) throw new Error(`Incomplete native schema layout: ${schema.pluginId}`);
+  return tabs;
+}
+
+// UI Schema v2 handoff: group without duplicating or rewriting the native Hop wire fields.
+// Consumers without tab support continue to use tableInputConfigSchema.fields unchanged.
+tableInputConfigSchema.tabs = bindLayout(tableInputConfigSchema, [
+  { key: "query", label: "Query", groups: [
+    { key: "source", label: "Connection and SQL",
+      keys: ["connection", "sql", "sql_from_file", "lookup"] },
+    { key: "execution", label: "Parameters and limits",
+      keys: ["limit", "execute_each_row", "variables_active", "use_named_parameters"] },
+  ] },
+  { key: "output", label: "Output fields", groups: [
+    { key: "columns", label: "Declared output columns",
+      keys: ["specify_fields", "fields.field", "validate_specified_fields"] },
+  ] },
+]);
 
 const configSchemas: readonly HopConfigSchema[] = [
   tableInputConfigSchema,
