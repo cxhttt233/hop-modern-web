@@ -83,6 +83,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
   // Field navigation is presentation-only: never search or expose configuration values.
   const [fieldQuery, setFieldQuery] = useState("");
+  const configFormRef = useRef<HTMLFormElement>(null);
+  const nextFieldMatch = useRef(0);
   // Resize only the visible editor: no graph/config write, persistence or schema change.
   const [panelWidth, setPanelWidth] = useState(600);
   const resizeStart = useRef<{ pointerId: number; x: number; width: number } | null>(null);
@@ -107,6 +109,20 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const totalFieldCount = descriptor.properties.length;
   const set = (key: string, value: unknown) => setDraft((old) => ({ ...old, [key]: value }));
   const label = (p: ConfigPropertyDescriptor) => localLabel(p.key);
+  // Focus only visible descriptor-owned controls. Never inspect configuration values
+  // or invoke a Hop edit/write request when navigating between search results.
+  const focusNextMatchingField = () => {
+    const keys = visibleGroups.flatMap(([, properties]) => properties.map((property) => property.key));
+    if (!keys.length || disabled) return;
+    const key = keys[nextFieldMatch.current % keys.length];
+    const labels = configFormRef.current?.querySelectorAll<HTMLLabelElement>("label[data-config-key]");
+    const target = Array.from(labels ?? []).find((element) => element.dataset.configKey === key);
+    const control = target?.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select");
+    if (!control || control.disabled) return;
+    nextFieldMatch.current += 1;
+    control.focus();
+    control.scrollIntoView({ block: "nearest" });
+  };
 
   const field = (p: ConfigPropertyDescriptor) => {
     const value = draft[p.key]; const id = `config-${p.javaField}`;
@@ -130,7 +146,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
       placeholder={p.sensitive ? "留空以保留现有值" : undefined} onChange={(e) => set(p.key, e.target.value)} />;
   };
 
-  return <form className="config-panel generic-config" style={{ "--config-panel-width": `${panelWidth}px` } as CSSProperties} onSubmit={(e) => { e.preventDefault(); if (!Object.values(invalid).some(Boolean)) void onSave(applyGenericConfigDraft(config, descriptor, draft)); }}>
+  return <form ref={configFormRef} className="config-panel generic-config" style={{ "--config-panel-width": `${panelWidth}px` } as CSSProperties} onSubmit={(e) => { e.preventDefault(); if (!Object.values(invalid).some(Boolean)) void onSave(applyGenericConfigDraft(config, descriptor, draft)); }}>
     <div className="config-resize-grip" role="separator" aria-label="调整配置面板宽度" aria-orientation="vertical"
       aria-valuemin={480} aria-valuemax={800} aria-valuenow={panelWidth} tabIndex={0}
       onPointerDown={(event) => {
@@ -171,14 +187,16 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     </header>
     <div className="config-field-search">
       <input type="search" aria-label="查找配置字段" placeholder="查找字段名称或分组" value={fieldQuery}
-        onChange={(event) => setFieldQuery(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} />
-      {fieldQuery && <button type="button" onClick={() => setFieldQuery("")} aria-label="清除字段查找">清除</button>}
+        onChange={(event) => { nextFieldMatch.current = 0; setFieldQuery(event.target.value); }}
+        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); focusNextMatchingField(); } }} />
+      {fieldQuery && <button type="button" aria-label="定位下一匹配字段" disabled={disabled || visibleFieldCount === 0}
+        onClick={focusNextMatchingField}>定位下一项</button>}
+      {fieldQuery && <button type="button" onClick={() => { nextFieldMatch.current = 0; setFieldQuery(""); }} aria-label="清除字段查找">清除</button>}
       <small aria-live="polite">显示 {visibleFieldCount} / {totalFieldCount} 项</small>
     </div>
     {visibleGroups.length === 0 && <p className="config-search-empty" role="status">没有匹配的配置字段，请更换关键词。</p>}
     {visibleGroups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
-      <label key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
+      <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
     <footer><button type="button" aria-label="取消配置（Cancel）" onClick={onCancel}>取消</button><button type="submit" aria-label="保存配置（Save）" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
   </form>;
 }
