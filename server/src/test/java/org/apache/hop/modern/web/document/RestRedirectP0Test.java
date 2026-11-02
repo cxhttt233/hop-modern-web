@@ -195,4 +195,150 @@ class RestRedirectP0Test {
       server.stop(0);
     }
   }
+
+  /**
+   * Static REST Basic credentials are scoped to the original request origin.
+   * Redirects to a different loopback port must not replay Authorization.
+   * This verifies actual HttpClient5 redirect behavior, not just the origin
+   * check performed before the first request.
+   */
+  @Test
+  void restStaticBasicAuthorizationIsNotForwardedAcrossOriginsOn302And307AfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    String expectedAuth = "Basic " + java.util.Base64.getEncoder().encodeToString(
+        "fixture-user:fixture-password".getBytes(StandardCharsets.UTF_8));
+    AtomicInteger sourceAuthorized = new AtomicInteger();
+    AtomicInteger sourceRequests = new AtomicInteger();
+    AtomicInteger targetRequests = new AtomicInteger();
+    AtomicInteger targetAuthHeaders = new AtomicInteger();
+    HttpServer target = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    target.createContext("/final", exchange -> {
+      try (exchange) {
+        targetRequests.incrementAndGet();
+        if (exchange.getRequestHeaders().getFirst("Authorization") != null) {
+          targetAuthHeaders.incrementAndGet();
+        }
+        byte[] body = "redirect-target-雪".getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+        exchange.sendResponseHeaders(200, body.length);
+        exchange.getResponseBody().write(body);
+      }
+    });
+    HttpServer source = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    String targetUrl = "http://127.0.0.1:" + target.getAddress().getPort() + "/final";
+    source.createContext("/redirect", exchange -> {
+      try (exchange) {
+        sourceRequests.incrementAndGet();
+        if (expectedAuth.equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
+          sourceAuthorized.incrementAndGet();
+        }
+        int status = exchange.getRequestURI().getPath().endsWith("307") ? 307 : 302;
+        exchange.getResponseHeaders().set("Location", targetUrl);
+        exchange.sendResponseHeaders(status, -1);
+      }
+    });
+    target.start();
+    source.start();
+    try {
+      String sourceBase = "http://127.0.0.1:" + source.getAddress().getPort();
+      PluginRegistry plugins = PluginRegistry.getInstance();
+      IPlugin plugin = plugins.findPluginWithId(TransformPluginType.class, "Rest");
+      assertNotNull(plugin, "pinned REST plugin required");
+      ITransformMeta meta = plugins.loadClass(plugin, ITransformMeta.class);
+      meta.setDefault();
+      meta.getClass().getMethod("setUrl", String.class)
+          .invoke(meta, sourceBase + "/redirect302");
+      meta.getClass().getMethod("setHttpLogin", String.class)
+          .invoke(meta, "fixture-user");
+      meta.getClass().getMethod("setHttpPassword", String.class)
+          .invoke(meta, "fixture-password");
+
+      var provider = new MemoryMetadataProvider();
+      var store = new PipelineDocumentStore(provider, new Variables());
+      Path hpl = tempDir.resolve("rest-cross-origin-redirect.hpl");
+      PipelineMeta pipeline = new PipelineMeta();
+      pipeline.setName("rest-cross-origin-redirect");
+      pipeline.addTransform(new TransformMeta("Rest", "rest-redirect-node", meta));
+      store.save(hpl, pipeline);
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("rest-cross-origin-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("rest-cross-origin-doc",
+          new PipelineConfigResource.ReadRequest("rest-redirect-node"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("url", sourceBase + "/redirect302");
+      draft.put("method", "GET");
+      draft.put("non_preemptive_basic_auth", false);
+      ObjectNode result = (ObjectNode) draft.path("result");
+      result.put("name", "响应正文_雪<&>");
+      result.put("code", "最终状态");
+      result.put("response_header", "");
+      result.put("response_time", "");
+      result.put("binary", false);
+      var write = resource.write("rest-cross-origin-doc",
+          new PipelineConfigResource.WriteRequest("rest-redirect-node", draft));
+      assertEquals(200, write.getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      ITransformMeta diskMeta = reopened.findTransform("rest-redirect-node").getTransform();
+      JsonNode wire = ConfigJsonSerializer.toJson(diskMeta, provider);
+      assertEquals(sourceBase + "/redirect302", wire.at("/url").asText());
+      assertEquals("GET", wire.at("/method").asText());
+      assertTrue(wire.at("/non_preemptive_basic_auth").isBoolean());
+      assertFalse(wire.at("/non_preemptive_basic_auth").booleanValue());
+      assertEquals("响应正文_雪<&>", wire.at("/result/name").asText());
+
+      ClassLoader loader = diskMeta.getClass().getClassLoader();
+      Class<?> restType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.Rest");
+      Class<?> dataType = loader.loadClass("org.apache.hop.pipeline.transforms.rest.RestData");
+      Object data = dataType.getConstructor().newInstance();
+      Object rest = restType.getConstructor(TransformMeta.class, diskMeta.getClass(),
+          dataType, int.class, PipelineMeta.class, org.apache.hop.pipeline.Pipeline.class)
+          .newInstance(reopened.findTransform("rest-redirect-node"), diskMeta, data, 0,
+              reopened, Mockito.spy(new LocalPipelineEngine()));
+      restType.getMethod("setMetadataProvider",
+          org.apache.hop.metadata.api.IHopMetadataProvider.class).invoke(rest, provider);
+      assertTrue((Boolean) restType.getMethod("init").invoke(rest));
+      dataType.getField("inputRowMeta").set(data, new RowMeta());
+      dataType.getField("method").set(data, "GET");
+      dataType.getField("binaryResult").setBoolean(data, false);
+      dataType.getField("resultFieldName").set(data, "响应正文_雪<&>");
+      dataType.getField("resultCodeFieldName").set(data, "最终状态");
+      dataType.getField("resultResponseFieldName").set(data, null);
+      dataType.getField("resultHeaderFieldName").set(data, null);
+      var invoke = restType.getDeclaredMethod("invokeRestExchange", Object[].class,
+          String.class, LinkedHashMap.class, LinkedHashMap.class, LinkedHashMap.class);
+      invoke.setAccessible(true);
+      try {
+        for (int status : new int[] {302, 307}) {
+          dataType.getField("realUrl").set(data, sourceBase + "/redirect" + status);
+          Object exchange = invoke.invoke(rest, new Object[0], null,
+              new LinkedHashMap<String, String>(), new LinkedHashMap<String, String>(),
+              new LinkedHashMap<String, String>());
+          var finalStatus = exchange.getClass().getDeclaredField("status");
+          finalStatus.setAccessible(true);
+          assertEquals(200, finalStatus.getInt(exchange));
+          var finalBody = exchange.getClass().getDeclaredField("body");
+          finalBody.setAccessible(true);
+          assertEquals("redirect-target-雪", finalBody.get(exchange));
+        }
+      } finally {
+        restType.getMethod("dispose").invoke(rest);
+      }
+      assertEquals(2, sourceRequests.get(), "both redirects must be exercised");
+      assertEquals(2, sourceAuthorized.get(), "Basic credentials must reach original origin");
+      assertEquals(2, targetRequests.get(), "both redirects must reach the other origin");
+      assertEquals(0, targetAuthHeaders.get(),
+          "Authorization must not be replayed across origins");
+      System.out.println("PROD_P0_REST_BASIC_CROSS_ORIGIN_REDIRECT_AUTH_SCOPE_HPL=PASS");
+    } finally {
+      source.stop(0);
+      target.stop(0);
+    }
+  }
+
 }
