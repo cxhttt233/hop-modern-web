@@ -942,17 +942,19 @@ public final class AutomaticConfigDescriptor {
                       + "disable this structural check. This depends on input data "
                       + "and is an execution diagnostic, not a draft-save validator."),
               new RuntimePrecondition(
-                  "JSON_INPUT_LIMIT_IS_POST_EMIT_AND_ROWNUM_STARTS_AT_ZERO",
+                  "JSON_INPUT_LIMIT_COUNTS_EXPANDED_ROWS_WITH_ONE_BASED_ROWNUM",
                   List.of("/limit", "/rownum", "/rownum_field", "/fields/field"),
-                  "Pinned JsonInput.getOneOutputRow() writes the current data.rownr "
-                      + "into an enabled rownum_field before incrementing the counter. "
-                      + "JsonInput.writeOutputRowIfPossible() then emits the row, increments "
-                      + "rownr, and stops only when rownr > a positive limit. When enough "
-                      + "JSONPath results exist, limit=1 therefore emits two rows with "
-                      + "INTEGER row numbers 0 and 1, not one row numbered 1. "
-                      + "Preserve the native numeric limit and BOOLEAN rownum settings "
-                      + "through config JSON and HPL; this is a runtime compatibility "
-                      + "warning, not a save-time validator."),
+                  "Pinned JsonInput.init() initializes data.rownr to 1. Each "
+                      + "JSONPath-expanded output row receives the current counter "
+                      + "in an enabled rownum_field before putRow() increments it. "
+                      + "JsonInput.writeOutputRowIfPossible() stops when the "
+                      + "incremented counter exceeds a positive limit, so limit=2 "
+                      + "emits two rows numbered 1 and 2 from a single document "
+                      + "whose wildcard path yields at least three values. "
+                      + "The limit applies to expanded output rows, not the number "
+                      + "of upstream JSON documents. Preserve the numeric limit "
+                      + "and BOOLEAN rownum flags across config JSON and HPL; "
+                      + "this is a runtime diagnostic, not a save-time validator."),
               new RuntimePrecondition(
                   "JSON_INPUT_SOURCE_REMOVAL_AND_AUXILIARY_OUTPUT_COLUMNS",
                   List.of("/IsInFields", "/removeSourceField", "/valueField", "/fields/field", "/include", "/include_field", "/rownum", "/rownum_field"),
