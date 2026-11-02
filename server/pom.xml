@@ -69,13 +69,12 @@
       <artifactId>jersey-container-grizzly2-http</artifactId>
       <version>4.0.0</version>
     </dependency>
-    <!-- Test-only transport feasibility gate for the architecture-approved Jetty/Jersey path.
-         Production remains Grizzly until strict HTTP negative cases are formally proven. -->
+    <!-- Architecture-approved Jetty/Jersey transport: the same listener must reject
+         malformed, concatenated, trailing and duplicate JSON without EOF blocking. -->
     <dependency>
       <groupId>org.glassfish.jersey.containers</groupId>
       <artifactId>jersey-container-jetty-http</artifactId>
       <version>4.0.0</version>
-      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.glassfish.jersey.media</groupId>
