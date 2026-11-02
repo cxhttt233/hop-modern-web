@@ -15,6 +15,7 @@ test("registry exposes the first real config targets", () => {
       "transform:ReplaceString",
       "transform:ExecSql",
       "transform:Http",
+      "transform:SetVariable",
       "metadata:DatabaseMeta",
     ],
   );
