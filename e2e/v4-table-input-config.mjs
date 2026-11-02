@@ -137,16 +137,32 @@ try {
       sqlMatches === 0 || sqlMatches >= initial.descriptor.properties.length) {
     throw new Error("Real TableInput SQL field finder did not narrow the configuration form");
   }
+  // Search Enter focuses the first matching native control; the explicit
+  // navigation action cycles every visible result without writing to Hop.
+  const matchingControls = panel.locator("fieldset label input, fieldset label textarea, fieldset label select");
+  const isFocused = async (control) => control.evaluate(element => element === document.activeElement);
   await fieldFinder.press("Enter");
-  if (finderWrites() !== writesBeforeFinder) throw new Error("Pressing Enter in field finder submitted a Hop write");
+  if (!await isFocused(matchingControls.first()) || finderWrites() !== writesBeforeFinder) {
+    throw new Error("Search Enter must focus the first matching control without a Hop write");
+  }
+  const nextMatch = panel.getByRole("button", { name: "定位下一匹配字段" });
+  for (let index = 1; index <= sqlMatches; index++) {
+    await nextMatch.click();
+    if (!await isFocused(matchingControls.nth(index % sqlMatches))) {
+      throw new Error("Field finder next-result navigation lost visible descriptor order");
+    }
+  }
   const temporaryDraft = "SELECT id FROM customers /* 未保存的字段查找草稿 */";
   await sqlField.fill(temporaryDraft);
   await fieldFinder.fill("连接");
   if (!await connection.isVisible() || await sqlField.isVisible()) {
     throw new Error("Chinese field search did not switch visible configuration fields");
   }
+  await nextMatch.click();
+  if (!await isFocused(connection)) throw new Error("Chinese connection field cannot be focused from the finder");
   await fieldFinder.fill("__no_such_config_field__");
-  if (!await panel.locator(".config-search-empty[role=status]").isVisible() ||
+  if (!await nextMatch.isDisabled() ||
+      !await panel.locator(".config-search-empty[role=status]").isVisible() ||
       await panel.locator("fieldset").count() !== 0) {
     throw new Error("Unmatched config field query must show a safe empty state");
   }
@@ -157,7 +173,7 @@ try {
   }
   await sqlField.fill("SELECT id, name FROM customers");
   if (finderWrites() !== writesBeforeFinder) throw new Error("Field search/draft navigation wrote Hop configuration");
-  console.log("V4 config field finder proof passed: Chinese search, empty/clear, draft preservation, Enter no-write.");
+  console.log("V4 config field finder navigation proof passed: Enter focus, ordered next/wrap, empty disabled, draft preserved, no Hop write.");
   // A malformed LIST JSON draft must fail closed in the real Hop editor:
   // no config/write, no enabled Save, and Cancel must restore server state.
   // This tests the existing JSON fallback, not unverified typed LIST editing.
