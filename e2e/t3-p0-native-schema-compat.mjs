@@ -246,3 +246,72 @@ console.log("PROD_P0_T1_NATIVE_PRIORITY_SCHEMA_COMPAT=PASS");
   }
 }
 console.log("PROD_P0_T1_EXECSQL_NATIVE_SCHEMA_COMPAT=PASS");
+
+/**
+ * Http has two independent native LISTs nested under lookup, both using the
+ * same name/parameter leaves. Compare against the installed plugin descriptor
+ * so a flat T1 schema cannot silently collapse query parameters and headers.
+ */
+{
+  const pluginId = "Http";
+  const descriptor = byId.get(pluginId);
+  const schema = findConfigSchema("transform", pluginId);
+  assert.ok(descriptor?.properties, "Http installed native descriptor missing");
+  assert.ok(schema?.tabs, "Http production T1 schema missing");
+  const entries = flattenNativeProperties(descriptor.properties);
+  const native = new Map(entries);
+  assert.equal(native.size, entries.length, "Http native descriptor paths must be unique");
+  assert.deepEqual(schema.fields.map(field => field.key).sort(), [...native.keys()].sort(),
+    "Http T1 must cover all 18 native leaf paths including nested results");
+
+  for (const field of schema.fields) {
+    const property = native.get(field.key);
+    const context = "Http." + field.key;
+    assert.ok(property, context + ": native property missing");
+    if (property.shape === "LIST") {
+      assert.equal(field.control, "EditableTable", context);
+      assert.equal(field.valueType, "object[]", context);
+      const nativeColumns = property.elementProperties ?? [];
+      assert.deepEqual((field.columns ?? []).map(column => column.key),
+        nativeColumns.map(column => column.key), context + ": native list columns");
+      for (const column of field.columns ?? []) {
+        const child = nativeColumns.find(item => item.key === column.key);
+        assert.ok(child, context + "." + column.key + ": native column missing");
+        assertNativeValueType(column.valueType, child, context + "." + column.key);
+        assert.equal(column.pickerHint,
+          child.widgetHint === "UPSTREAM_FIELD_PICKER" ? "UPSTREAM_FIELD_PICKER" : undefined,
+          context + "." + column.key + ": native upstream field source");
+      }
+      const pointer = "/" + field.key.replaceAll(".", "/");
+      const wire = descriptor.wireLists?.find(entry => entry.listPointer === pointer);
+      assert.ok(wire, context + ": producer-owned indexed wire LIST missing");
+      assert.equal(wire.itemPointerTemplate, pointer + "/{index}",
+        context + ": native indexed JSON Pointer");
+    } else {
+      assertNativeValueType(field.valueType, property, context);
+    }
+  }
+  for (const [key, activeWhen] of [["url", false], ["urlField", true]]) {
+    const property = native.get(key);
+    const field = schema.fields.find(item => item.key === key);
+    assert.equal(property.activationContext?.flagPointer, "/urlInField");
+    assert.equal(property.activationContext?.activeWhen, activeWhen);
+    assert.deepEqual(field.activation, { flagPointer: "/urlInField", activeWhen });
+  }
+  assert.equal(native.get("urlField").widgetHint, "UPSTREAM_FIELD_PICKER");
+  assert.equal(schema.fields.find(field => field.key === "urlField").pickerHint,
+    "UPSTREAM_FIELD_PICKER");
+  assert.equal(native.get("httpPassword").password, true,
+    "pinned Hop HttpMeta declares password=true");
+  assert.equal(schema.fields.find(field => field.key === "httpPassword").sensitive, true);
+  for (const key of ["result.name", "result.code", "result.response_time", "result.response_header"]) {
+    assert.equal(native.get(key).widgetHint, "NONE",
+      key + ": response field names are authored outputs, not input references");
+  }
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(item => item.key === field.key));
+  }
+}
+console.log("PROD_P0_T1_HTTP_NATIVE_SCHEMA_COMPAT=PASS");
