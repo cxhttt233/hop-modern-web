@@ -189,28 +189,32 @@ public final class AutomaticConfigDescriptor {
 
   /**
    * Native ValueMeta choices have two different wire representations.
-   * SelectValues metadata changes store plugin names (STRING), whereas
-   * TableInputField.type is a Java int with a Hop XML intCodeConverter.
-   * ConfigJsonSerializer transports that TableInput field as a NUMBER.
-   * Keep the option values typed accordingly; never send a type name to
-   * the numeric JSON field or silently coerce an imported unknown code.
+   * SelectValues, DataGrid and ConcatFields store registered type names (STRING).
+   * TableInput and JsonInput field types are Java ints with native XML code
+   * converters, but ConfigJsonSerializer transports those values as NUMBER.
+   * Preserve the wire type and registered plugin options without coercion.
    */
   private static List<Option> nativeValueMetaOptions(Class<?> owner, String key, Shape shape) {
-    boolean selectValues = shape == Shape.STRING && owner.getName().equals(
-        "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange");
-    boolean tableInput = shape == Shape.NUMBER && owner.getName().equals(
-        "org.apache.hop.pipeline.transforms.tableinput.TableInputField");
-    if (!key.equals("type") || (!selectValues && !tableInput)) return List.of();
+    boolean stringWire = shape == Shape.STRING && Set.of(
+        "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange",
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta",
+        "org.apache.hop.pipeline.transforms.concatfields.ConcatField")
+        .contains(owner.getName());
+    boolean codeWire = shape == Shape.NUMBER && Set.of(
+        "org.apache.hop.pipeline.transforms.tableinput.TableInputField",
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField")
+        .contains(owner.getName());
+    if (!key.equals("type") || (!stringWire && !codeWire)) return List.of();
 
     String unchanged = ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_NONE);
     List<Option> options = new ArrayList<>();
-    options.add(new Option(unchanged, tableInput ? IValueMeta.TYPE_NONE : unchanged));
+    options.add(new Option(unchanged, codeWire ? IValueMeta.TYPE_NONE : unchanged));
     java.util.Arrays.stream(ValueMetaFactory.getValueMetaNames())
         .filter(name -> name != null && !name.isBlank() && !name.equalsIgnoreCase(unchanged))
         .distinct()
         .sorted(String.CASE_INSENSITIVE_ORDER)
         .forEach(name -> options.add(new Option(
-            name, tableInput ? ValueMetaFactory.getIdForValueMeta(name) : name)));
+            name, codeWire ? ValueMetaFactory.getIdForValueMeta(name) : name)));
     return List.copyOf(options);
   }
 
@@ -229,17 +233,19 @@ public final class AutomaticConfigDescriptor {
   /** Browser editor hints are derived from Hop annotations, not from field-name guesses. */
   private static WidgetHint widgetHint(
       Class<?> owner, String key, Shape shape, HopMetadataProperty metadata) {
-    // Hop XML converts this int to a value-meta name, but JSON transport does not.
-    if (shape == Shape.NUMBER && key.equals("type") && owner.getName().equals(
-        "org.apache.hop.pipeline.transforms.tableinput.TableInputField")) {
-      return WidgetHint.VALUE_META_CODE_PICKER;
-    }
+    // Both pinned intCodeConverter fields remain NUMBER in JSON, even though
+    // Hop XML stores their human-readable ValueMeta type names.
+    if (shape == Shape.NUMBER && key.equals("type") && Set.of(
+        "org.apache.hop.pipeline.transforms.tableinput.TableInputField",
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField")
+        .contains(owner.getName())) return WidgetHint.VALUE_META_CODE_PICKER;
     if (shape != Shape.STRING) return WidgetHint.NONE;
-    // SelectValues fields.meta[*].type is a native value-meta plugin name,
-    // not an enum code. Its producer-owned choices are in Property.options.
-    if (owner.getName().equals(
-            "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange")
-        && key.equals("type")) return WidgetHint.VALUE_META_TYPE_PICKER;
+    // These three native STRING fields store registered ValueMeta names.
+    if (key.equals("type") && Set.of(
+        "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange",
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta",
+        "org.apache.hop.pipeline.transforms.concatfields.ConcatField")
+        .contains(owner.getName())) return WidgetHint.VALUE_META_TYPE_PICKER;
     return switch (metadata.hopMetadataPropertyType()) {
       case RDBMS_CONNECTION, REST_CONNECTION -> WidgetHint.METADATA_PICKER;
       // These pinned annotations identify target database columns, not input row fields.
