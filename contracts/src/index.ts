@@ -152,6 +152,7 @@ export interface HopMetadataSummary {
 
 export {
   checkSumConfigSchema,
+  concatFieldsConfigSchema,
   databaseConnectionConfigSchema,
   execSqlConfigSchema,
   httpConfigSchema,
