@@ -21,12 +21,12 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.apache.hop.core.HopClientEnvironment;
-import org.glassfish.grizzly.http.server.HttpServer;
-import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
+import org.eclipse.jetty.server.Server;
+import org.glassfish.jersey.jetty.JettyHttpContainerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** Real Jersey/Grizzly transport contract for the authoritative in-memory config editor. */
+/** Real production Jetty/Jersey transport contract for the authoritative in-memory config editor. */
 class PipelineConfigHttpIntegrationTest {
   @TempDir Path tempDir;
 
@@ -44,8 +44,8 @@ class PipelineConfigHttpIntegrationTest {
       port = socket.getLocalPort();
     }
     URI base = URI.create("http://127.0.0.1:" + port + "/");
-    HttpServer server =
-        GrizzlyHttpServerFactory.createHttpServer(base, ModernWebServer.createResourceConfig());
+    Server server =
+        JettyHttpContainerFactory.createServer(base, ModernWebServer.createResourceConfig());
     try {
       HttpClient client = HttpClient.newHttpClient();
       ObjectMapper json = new ObjectMapper();
@@ -90,7 +90,7 @@ class PipelineConfigHttpIntegrationTest {
       assertEquals(originalDisk, Files.readString(fixture),
           "HTTP config editing must not silently save the .hpl file");
     } finally {
-      server.shutdownNow();
+      server.stop();
     }
   }
 
