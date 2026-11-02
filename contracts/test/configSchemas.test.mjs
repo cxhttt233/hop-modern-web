@@ -10,6 +10,8 @@ test("registry exposes the first real config targets", () => {
       "transform:TableInput",
       "transform:SelectValues",
       "transform:SortRows",
+      "transform:CheckSum",
+      "transform:StringCut",
       "metadata:DatabaseMeta",
     ],
   );
@@ -309,4 +311,67 @@ test("SortRows comparison picker consumes incoming row fields, not output aliase
     ?.columns?.find(({ key }) => key === "name");
   assert.equal(tableInputOutputName?.pickerHint, undefined,
     "declared JDBC output names must remain authored names, not incoming field picks");
+});
+
+test("CheckSum T1 preserves native grouped field list and code-backed enum wire values", () => {
+  const schema = findConfigSchema("transform", "CheckSum");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.fields.map(({ key }) => key), [
+    "fields.field", "resultfieldName", "checksumtype", "resultType",
+    "separator", "prefix", "suffix",
+  ], "match the pinned CheckSumMeta @HopMetadataProperty keys exactly");
+  assert.deepEqual(schema.tabs.map(({ key }) => key), ["source", "result"]);
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.deepEqual(grouped.map(({ key }) => key), schema.fields.map(({ key }) => key));
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(({ key }) => key === field.key),
+      "T1 layout must reuse native flat fields, not clone or alter wire properties");
+  }
+  const selected = schema.fields[0];
+  assert.equal(selected.control, "EditableTable");
+  assert.equal(selected.valueType, "object[]");
+  assert.deepEqual(selected.columns, [
+    { key: "name", label: "Input field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
+  ], "CheckSum.Field.name is the only native list item property");
+  for (const key of ["checksumtype", "resultType"]) {
+    const field = schema.fields.find(f => f.key === key);
+    assert.equal(field?.valueType, "string", "native storeWithCode ENUM values are strings");
+    assert.equal(field?.options, undefined,
+      "do not freeze installed Hop enum options or localized labels into a static T1 schema");
+    assert.match(field?.description ?? "", /code|ENUM/i);
+  }
+  for (const key of ["separator", "prefix", "suffix", "resultfieldName"]) {
+    assert.equal(schema.fields.find(f => f.key === key)?.variable, true,
+      "native expressions must be preserved for server-side resolution");
+  }
+  assert.equal(JSON.parse(JSON.stringify(schema)).tabs[0].groups[0].fields[0].key,
+    "fields.field", "browser JSON handoff must retain the native LIST descriptor key");
+});
+
+test("StringCut T1 keeps cut bounds as variable-capable strings and output aliases free", () => {
+  const schema = findConfigSchema("transform", "StringCut");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.fields.map(({ key }) => key), ["fields.field"]);
+  assert.deepEqual(schema.tabs.map(({ key }) => key), ["rules"]);
+  assert.strictEqual(schema.tabs[0].groups[0].fields[0], schema.fields[0]);
+  const rules = schema.fields[0];
+  assert.equal(rules.control, "EditableTable");
+  assert.equal(rules.valueType, "object[]");
+  assert.deepEqual(rules.columns?.map(({ key }) => key), [
+    "in_stream_name", "out_stream_name", "cut_from", "cut_to",
+  ], "match the pinned StringCutField annotation keys without inventing scalar roots");
+  const input = rules.columns.find(({ key }) => key === "in_stream_name");
+  const output = rules.columns.find(({ key }) => key === "out_stream_name");
+  assert.equal(input.pickerHint, "UPSTREAM_FIELD_PICKER");
+  assert.equal(output.pickerHint, undefined,
+    "the output alias is an authored field name, not an upstream reference");
+  for (const key of ["cut_from", "cut_to"]) {
+    const column = rules.columns.find(c => c.key === key);
+    assert.equal(column.valueType, "string",
+      "StringCutField cut boundaries are native STRING values, not JSON numbers");
+    assert.equal(column.variable, true,
+      "keep ${} expressions and leading zeros until the native runtime resolves them");
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(rules.columns)).map(({ key }) => key),
+    ["in_stream_name", "out_stream_name", "cut_from", "cut_to"]);
 });
