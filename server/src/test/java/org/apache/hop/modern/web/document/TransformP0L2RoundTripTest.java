@@ -23,6 +23,75 @@ class TransformP0L2RoundTripTest {
   @BeforeAll static void init() throws Exception { HopClientEnvironment.init(); ModernWebServer.initializePipelinePlugins(); }
 
   @Test
+  void nativeValueMetaTypePickersMatchThreeAdditionalP0JsonWireFormats() throws Exception {
+    // Hop XML intCodeConverter does not change the JSON wire type. These
+    // production plugin classes are intentionally loaded from the P0 registry,
+    // keeping the standalone server test classpath independent of their jars.
+    record TypeCase(String id, String itemClass, String listField, boolean numericWire) {}
+    var cases = List.of(
+        new TypeCase("JsonInput",
+            "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField", "inputFields", true),
+        new TypeCase("DataGrid",
+            "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta", "dataGridFields", false),
+        new TypeCase("ConcatFields",
+            "org.apache.hop.pipeline.transforms.concatfields.ConcatField", "outputFields", false));
+    var provider = new MemoryMetadataProvider();
+    int typeCode = org.apache.hop.core.row.IValueMeta.TYPE_BIGNUMBER;
+    String typeName = org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(typeCode);
+    assertNotNull(typeName);
+    for (TypeCase sample : cases) {
+      IPlugin plugin = PluginRegistry.getInstance().findPluginWithId(
+          TransformPluginType.class, sample.id());
+      assertNotNull(plugin, "missing production plugin " + sample.id());
+      ITransformMeta meta = PluginRegistry.getInstance().loadClass(plugin, ITransformMeta.class);
+      meta.setDefault();
+      Class<?> itemClass = meta.getClass().getClassLoader().loadClass(sample.itemClass());
+      Object item = itemClass.getConstructor().newInstance();
+      itemClass.getMethod("setName", String.class).invoke(item, "测站<&雪>");
+      if (sample.numericWire()) {
+        itemClass.getMethod("setType", int.class).invoke(item, typeCode);
+      } else {
+        itemClass.getMethod("setType", String.class).invoke(item, typeName);
+      }
+      metadataField(meta.getClass(), sample.listField()).set(meta, List.of(item));
+
+      Descriptor descriptor = AutomaticConfigDescriptor.describe(meta.getClass());
+      Property type = property(descriptor, "field", "type");
+      assertEquals(sample.numericWire() ? Shape.NUMBER : Shape.STRING, type.shape(),
+          sample.id() + " native descriptor wire shape");
+      assertEquals(sample.numericWire()
+              ? WidgetHint.VALUE_META_CODE_PICKER : WidgetHint.VALUE_META_TYPE_PICKER,
+          type.widgetHint(), sample.id() + " picker hint");
+      assertTrue(descriptor.wireLists().stream().anyMatch(
+          contract -> contract.listPointer().equals("/fields/field")),
+          sample.id() + " must publish the indexed native field list");
+      assertTrue(type.options().stream().anyMatch(option ->
+          option.label().equals(typeName)
+              && option.value().equals(sample.numericWire() ? typeCode : typeName)),
+          sample.id() + " must use the installed ValueMeta registry");
+      assertTrue(type.options().stream().allMatch(option ->
+          sample.numericWire() ? option.value() instanceof Integer
+              : option.value() instanceof String),
+          sample.id() + " must not coerce option values to the wrong JSON type");
+
+      var wire = org.apache.hop.metadata.serializer.json.ConfigJsonSerializer.toJson(meta, provider);
+      var nativeType = wire.at("/fields/field/0/type");
+      assertEquals("测站<&雪>", wire.at("/fields/field/0/name").asText());
+      if (sample.numericWire()) {
+        assertTrue(nativeType.isIntegralNumber(), sample.id() + " JSON type must be NUMBER");
+        assertEquals(typeCode, nativeType.intValue());
+      } else {
+        assertTrue(nativeType.isTextual(), sample.id() + " JSON type must be STRING");
+        assertEquals(typeName, nativeType.asText());
+      }
+      var published = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(type);
+      assertEquals(type.widgetHint().name(), published.path("widgetHint").asText());
+      assertTrue(published.path("options").isArray());
+    }
+    System.out.println("PROD_P0_ADDITIONAL_VALUE_META_PICKERS_NATIVE_JSON=PASS");
+  }
+
+  @Test
   void scriptValueModScriptsAndOutputFieldsPublishDistinctIndexedNativeWireLists()
       throws Exception {
     PluginRegistry registry = PluginRegistry.getInstance();
