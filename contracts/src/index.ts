@@ -154,6 +154,7 @@ export {
   databaseConnectionConfigSchema,
   findConfigSchema,
   listConfigSchemas,
+  replaceStringConfigSchema,
   selectValuesConfigSchema,
   sortRowsConfigSchema,
   stringCutConfigSchema,

@@ -171,6 +171,29 @@ export const stringCutConfigSchema: HopConfigSchema = {
   ],
 };
 
+/** P0 ReplaceString stores ordered replacement rules in the native fields.field LIST. */
+export const replaceStringConfigSchema: HopConfigSchema = {
+  pluginId: "ReplaceString",
+  pluginType: "transform",
+  title: "Replace in string",
+  tier: "T1",
+  fields: [
+    { key: "fields.field", label: "Replacement rules", control: "EditableTable", valueType: "object[]",
+      columns: [
+        { key: "in_stream_name", label: "Input field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
+        { key: "out_stream_name", label: "Output field", valueType: "string" },
+        { key: "use_regex", label: "Use regular expression", valueType: "boolean" },
+        { key: "replace_string", label: "Search text or pattern", valueType: "string" },
+        { key: "replace_by_string", label: "Replacement text", valueType: "string" },
+        { key: "set_empty_string", label: "Set empty string", valueType: "boolean" },
+        { key: "replace_field_by_string", label: "Replacement source field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
+        { key: "whole_word", label: "Whole word", valueType: "boolean" },
+        { key: "case_sensitive", label: "Case sensitive", valueType: "boolean" },
+        { key: "is_unicode", label: "Unicode", valueType: "boolean" },
+      ] },
+  ],
+};
+
 /**
  * First real Metadata contract. DatabaseMeta stores its database implementation under `rdbms`;
  * standard connection fields below are BaseDatabaseMeta metadata properties. Password is marked
@@ -315,12 +338,21 @@ stringCutConfigSchema.tabs = bindLayout(stringCutConfigSchema, [
   ] },
 ]);
 
+// Replacement rules preserve the native LIST order and each Boolean regex flag.
+// The two input-field references use native upstream pickers; output aliases stay free text.
+replaceStringConfigSchema.tabs = bindLayout(replaceStringConfigSchema, [
+  { key: "rules", label: "Replacement rules", groups: [
+    { key: "replacements", label: "Search and replacement", keys: ["fields.field"] },
+  ] },
+]);
+
 const configSchemas: readonly HopConfigSchema[] = [
   tableInputConfigSchema,
   selectValuesConfigSchema,
   sortRowsConfigSchema,
   checkSumConfigSchema,
   stringCutConfigSchema,
+  replaceStringConfigSchema,
   databaseConnectionConfigSchema,
 ];
 

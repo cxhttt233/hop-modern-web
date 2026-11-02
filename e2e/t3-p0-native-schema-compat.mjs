@@ -8,7 +8,7 @@ const sourceRows = JSON.parse(await readFile(
   new URL("../docs/p0-transform-descriptors.generated.json", import.meta.url), "utf8"));
 const byId = new Map(sourceRows.map(row => [row.id, row.descriptor]));
 
-for (const pluginId of ["CheckSum", "StringCut"]) {
+for (const pluginId of ["CheckSum", "StringCut", "ReplaceString"]) {
   const descriptor = byId.get(pluginId);
   const schema = findConfigSchema("transform", pluginId);
   assert.ok(descriptor?.properties, `${pluginId}: installed native descriptor missing`);
@@ -34,12 +34,18 @@ for (const pluginId of ["CheckSum", "StringCut"]) {
         `${pluginId}.${field.key}: T1 list columns must match native list item properties`);
       for (const column of columns) {
         const child = children.get(column.key);
-        assert.equal(child.shape, "STRING",
-          `${pluginId}.${field.key}.${column.key}: expected native STRING`);
-        assert.equal(column.valueType, "string");
-        assert.equal(column.pickerHint,
-          child.widgetHint === "UPSTREAM_FIELD_PICKER" ? "UPSTREAM_FIELD_PICKER" : undefined,
-          `${pluginId}.${field.key}.${column.key}: native source picker mismatch`);
+        if (child.shape === "BOOLEAN") {
+          assert.equal(column.valueType, "boolean",
+            `${pluginId}.${field.key}.${column.key}: native Boolean wire type mismatch`);
+          assert.equal(column.pickerHint, undefined);
+        } else {
+          assert.equal(child.shape, "STRING",
+            `${pluginId}.${field.key}.${column.key}: expected native STRING or BOOLEAN`);
+          assert.equal(column.valueType, "string");
+          assert.equal(column.pickerHint,
+            child.widgetHint === "UPSTREAM_FIELD_PICKER" ? "UPSTREAM_FIELD_PICKER" : undefined,
+            `${pluginId}.${field.key}.${column.key}: native source picker mismatch`);
+        }
       }
     } else if (property.shape === "ENUM") {
       assert.equal(field.valueType, "string",

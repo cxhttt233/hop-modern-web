@@ -12,6 +12,7 @@ test("registry exposes the first real config targets", () => {
       "transform:SortRows",
       "transform:CheckSum",
       "transform:StringCut",
+      "transform:ReplaceString",
       "metadata:DatabaseMeta",
     ],
   );
@@ -374,4 +375,33 @@ test("StringCut T1 keeps cut bounds as variable-capable strings and output alias
   }
   assert.deepEqual(JSON.parse(JSON.stringify(rules.columns)).map(({ key }) => key),
     ["in_stream_name", "out_stream_name", "cut_from", "cut_to"]);
+});
+
+test("ReplaceString T1 matches native ordered rule columns and Boolean flags", () => {
+  const schema = findConfigSchema("transform", "ReplaceString");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.fields.map(({ key }) => key), ["fields.field"]);
+  assert.deepEqual(schema.tabs.map(({ key }) => key), ["rules"]);
+  assert.strictEqual(schema.tabs[0].groups[0].fields[0], schema.fields[0]);
+  const rules = schema.fields[0];
+  assert.equal(rules.control, "EditableTable");
+  assert.equal(rules.valueType, "object[]");
+  assert.deepEqual(rules.columns.map(({ key }) => key), [
+    "in_stream_name", "out_stream_name", "use_regex", "replace_string",
+    "replace_by_string", "set_empty_string", "replace_field_by_string",
+    "whole_word", "case_sensitive", "is_unicode",
+  ]);
+  for (const key of ["use_regex", "set_empty_string", "whole_word", "case_sensitive", "is_unicode"]) {
+    assert.equal(rules.columns.find(c => c.key === key).valueType, "boolean",
+      "native ReplaceStringField flags must remain JSON Booleans");
+  }
+  for (const key of ["in_stream_name", "replace_field_by_string"]) {
+    assert.equal(rules.columns.find(c => c.key === key).pickerHint, "UPSTREAM_FIELD_PICKER");
+  }
+  for (const key of ["out_stream_name", "replace_string", "replace_by_string"]) {
+    assert.equal(rules.columns.find(c => c.key === key).pickerHint, undefined,
+      "output aliases and literal replacement text are not upstream references");
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(rules.columns)).map(c => c.key),
+    rules.columns.map(c => c.key), "browser transport preserves ordered native columns");
 });
