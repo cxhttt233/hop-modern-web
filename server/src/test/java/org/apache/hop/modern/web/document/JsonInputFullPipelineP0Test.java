@@ -607,4 +607,138 @@ class JsonInputFullPipelineP0Test {
     System.out.println("PROD_P0_JSONINPUT_UNEQUAL_NONEMPTY_WILDCARDS_NATIVE_ERROR_HPL=PASS");
   }
 
+
+  @Test
+  void jsonInputRowLimitAndZeroBasedRowNumberExecuteNativeEngineAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    // Pinned JsonInput.writeOutputRowIfPossible() increments rownr AFTER putRow(),
+    // then stops only when rownr > rowLimit. Prove the actual output contract
+    // rather than assuming an inclusive SQL-style LIMIT or 1-based row numbers.
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin jsonPlugin = plugins.findPluginWithId(TransformPluginType.class, "JsonInput");
+    assertNotNull(gridPlugin);
+    assertNotNull(jsonPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader gridLoader = grid.getClass().getClassLoader();
+    Class<?> gridFieldType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> gridLineType = gridLoader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> gridFields = new ArrayList<>();
+    for (String name : List.of("payload", "来源")) {
+      Object field = gridFieldType.getConstructor().newInstance();
+      gridFieldType.getMethod("setName", String.class).invoke(field, name);
+      gridFieldType.getMethod("setType", String.class).invoke(field, "String");
+      gridFields.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, gridFields);
+    Object line = gridLineType.getConstructor().newInstance();
+    gridLineType.getMethod("setDatalines", List.class).invoke(line, List.of(
+        "{\"items\":[{\"station\":\"黄河<&>\"},{\"station\":\"渭河\"},"
+            + "{\"station\":\"汾河\"}]}", "批次<&>"));
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, List.of(line));
+
+    ITransformMeta json = plugins.loadClass(jsonPlugin, ITransformMeta.class);
+    json.setDefault();
+    Class<?> fieldType = json.getClass().getClassLoader().loadClass(
+        "org.apache.hop.pipeline.transforms.jsoninput.JsonInputField");
+    Object station = fieldType.getConstructor(String.class).newInstance("测站<&>");
+    fieldType.getMethod("setPath", String.class).invoke(station, "$.legacy");
+    fieldType.getMethod("setType", int.class).invoke(station, IValueMeta.TYPE_STRING);
+    json.getClass().getMethod("setInputFields", List.class)
+        .invoke(json, List.of(station));
+
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("JsonInput", "json-node", json);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("jsoninput-rowlimit-zero-based-rownum");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("jsoninput-rowlimit-rownum.hpl");
+    store.save(hpl, pipeline);
+    PipelineMeta loaded = store.open(hpl);
+    assertEquals(1, loaded.nrPipelineHops());
+
+    var documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("json-rowlimit-doc", hpl, loaded));
+    var resource = new PipelineConfigResource(documents, provider);
+    var read = resource.read("json-rowlimit-doc",
+        new PipelineConfigResource.ReadRequest("json-node"));
+    assertEquals(200, read.getStatus());
+    ObjectNode draft = ((ObjectNode)
+        ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+    draft.put("IsInFields", true);
+    draft.put("IsAFile", false);
+    draft.put("valueField", "payload");
+    draft.put("removeSourceField", true);
+    draft.put("rownum", true);
+    draft.put("rownum_field", "序号<&>");
+    draft.put("limit", 1);
+    ArrayNode paths = (ArrayNode) draft.path("fields").path("field");
+    assertEquals(1, paths.size());
+    ((ObjectNode) paths.get(0)).put("path", "$.items[*].station");
+    var write = resource.write("json-rowlimit-doc",
+        new PipelineConfigResource.WriteRequest("json-node", draft));
+    assertEquals(200, write.getStatus());
+    store.save(hpl, loaded);
+
+    PipelineMeta reopened = store.open(hpl);
+    assertEquals(1, reopened.nrPipelineHops());
+    JsonNode wire = ConfigJsonSerializer.toJson(
+        reopened.findTransform("json-node").getTransform(), provider);
+    assertTrue(wire.at("/IsInFields").booleanValue());
+    assertTrue(wire.at("/removeSourceField").booleanValue());
+    assertTrue(wire.at("/rownum").isBoolean());
+    assertTrue(wire.at("/rownum").booleanValue());
+    assertEquals("序号<&>", wire.at("/rownum_field").asText());
+    assertTrue(wire.at("/limit").isNumber());
+    assertEquals(1L, wire.at("/limit").longValue());
+    assertEquals("$.items[*].station", wire.at("/fields/field/0/path").asText());
+
+    List<Object[]> emitted = new CopyOnWriteArrayList<>();
+    AtomicReference<IRowMeta> outputMeta = new AtomicReference<>();
+    LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+    engine.setMetadataProvider(provider);
+    try {
+      engine.prepareExecution();
+      ITransform output = engine.getRunThread("json-node", 0);
+      assertNotNull(output);
+      output.addRowListener(new RowAdapter() {
+        @Override
+        public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+          outputMeta.set(rowMeta.clone());
+          emitted.add(row.clone());
+        }
+      });
+      engine.startThreads();
+      engine.waitUntilFinished();
+      assertEquals(0, engine.getErrors());
+    } finally {
+      if (!engine.isFinishedOrStopped()) engine.stopAll();
+      engine.cleanup();
+    }
+
+    assertNotNull(outputMeta.get());
+    assertEquals(3, outputMeta.get().size());
+    assertEquals("来源", outputMeta.get().getValueMeta(0).getName());
+    assertEquals("测站<&>", outputMeta.get().getValueMeta(1).getName());
+    assertEquals("序号<&>", outputMeta.get().getValueMeta(2).getName());
+    assertEquals(IValueMeta.TYPE_INTEGER, outputMeta.get().getValueMeta(2).getType());
+    assertEquals(2, emitted.size(),
+        "native limit=1 emits two rows because the stop check occurs after putRow");
+    assertEquals("批次<&>", emitted.get(0)[0]);
+    assertEquals("黄河<&>", emitted.get(0)[1]);
+    assertEquals(0L, ((Number) emitted.get(0)[2]).longValue());
+    assertEquals("批次<&>", emitted.get(1)[0]);
+    assertEquals("渭河", emitted.get(1)[1]);
+    assertEquals(1L, ((Number) emitted.get(1)[2]).longValue());
+    System.out.println("PROD_P0_JSONINPUT_LIMIT_PLUS_ONE_ZERO_BASED_ROWNUM_NATIVE_ENGINE=PASS");
+  }
+
 }
