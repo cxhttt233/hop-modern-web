@@ -17,15 +17,15 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
-import org.glassfish.grizzly.http.server.HttpServer;
-import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
+import org.eclipse.jetty.server.Server;
+import org.glassfish.jersey.jetty.JettyHttpContainerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * HTTP security regression for Jersey's READ_FULL_STREAM=false workaround.
+ * HTTP security regression against the production Jetty/Jersey JSON boundary.
  * The diagnostic endpoint is test-only, but uses the production ResourceConfig,
- * Jackson provider, Grizzly listener, and a single reusable Java HTTP client.
+ * strict Jackson provider, Jetty listener, and a single reusable Java HTTP client.
  * A 200 on either trailing-input case is a security regression, not a pass.
  */
 class PipelineJsonStrictnessHttpTest {
@@ -38,7 +38,7 @@ class PipelineJsonStrictnessHttpTest {
       port = socket.getLocalPort();
     }
     URI base = URI.create("http://127.0.0.1:" + port + "/");
-    HttpServer server = GrizzlyHttpServerFactory.createHttpServer(
+    Server server = JettyHttpContainerFactory.createServer(
         base,
         ModernWebServer.createResourceConfig()
             .register(PipelineHttpJsonBoundaryABTest.JsonEchoResource.class));
@@ -76,13 +76,14 @@ class PipelineJsonStrictnessHttpTest {
           () -> assertEquals(400, trailingOpen.statusCode(), trailingOpen.body()),
           () -> assertEquals(200, validAfter.statusCode(), validAfter.body()));
     } finally {
-      server.shutdownNow();
+      server.stop();
     }
   }
 
   private static HttpResponse<String> post(HttpClient client, URI uri, String body)
       throws Exception {
     HttpRequest request = HttpRequest.newBuilder(uri)
+        .timeout(java.time.Duration.ofSeconds(8))
         .header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
         .build();
