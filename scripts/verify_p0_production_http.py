@@ -84,9 +84,17 @@ def verify(base, fixture, manifest):
                     or not isinstance(config.get("descriptor"), dict)):
                 raise AssertionError(f"{plugin_id}: authoritative config or descriptor missing")
             # Real HTTP config writes must survive both an immediate read and disk reopen.
+            write_config = config["config"]
+            if plugin_id == "TableInput":
+                # A real edit, not only an idempotent echo: UTF-8 and XML escaping
+                # must survive authoritative config write, save and disk reopen.
+                write_config = dict(write_config)
+                write_config["sql"] = "SELECT '黄河<&>' AS river_name, 'C:\\\\water' AS path"
             written = post(base, root + "/config/write", {
-                "nodeId": node_id, "config": config["config"],
+                "nodeId": node_id, "config": write_config,
             })
+            if plugin_id == "TableInput" and written.get("config", {}).get("sql") != write_config["sql"]:
+                raise AssertionError("TableInput: edited SQL was not committed")
             if (written.get("nodeId") != node_id or written.get("pluginId") != plugin_id
                     or not isinstance(written.get("config"), dict)):
                 raise AssertionError(f"{plugin_id}: config write response invalid")
