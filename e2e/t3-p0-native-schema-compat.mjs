@@ -301,8 +301,8 @@ console.log("PROD_P0_T1_EXECSQL_NATIVE_SCHEMA_COMPAT=PASS");
   assert.equal(native.get("urlField").widgetHint, "UPSTREAM_FIELD_PICKER");
   assert.equal(schema.fields.find(field => field.key === "urlField").pickerHint,
     "UPSTREAM_FIELD_PICKER");
-  assert.equal(native.get("httpPassword").password, true,
-    "pinned Hop HttpMeta declares password=true");
+  assert.equal(native.get("httpPassword").sensitive, true,
+    "pinned Hop HttpMeta declares password=true and descriptor exposes sensitive=true");
   assert.equal(schema.fields.find(field => field.key === "httpPassword").sensitive, true);
   for (const key of ["result.name", "result.code", "result.response_time", "result.response_header"]) {
     assert.equal(native.get(key).widgetHint, "NONE",
