@@ -82,6 +82,50 @@ jobs:
         working-directory: hop
         shell: bash
         run: ./mvnw -q -pl "lib,$P0_MAVEN_PL" -am -DskipTests install
+      - name: Test official ZIP distribution assembly safety
+        working-directory: modern/scripts
+        run: python3 -m unittest -v test_assemble_p0_distribution.py
+      - name: Assemble real P0 plugin distribution (no POM scope changes)
+        working-directory: modern
+        run: python3 scripts/assemble_p0_distribution.py docs/transform-source-catalog.generated.json ../hop "$HOME/.m2/repository" dist/p0
+      - name: Build production-only server runtime classpath
+        working-directory: modern/server
+        run: mvn -q -DskipTests package dependency:build-classpath -Dmdep.includeScope=runtime -Dmdep.outputFile=runtime-classpath.txt
+      - name: Admit packaged P0 plugins with production classpath and Jandex
+        working-directory: modern/server
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME_CP="target/classes:$(cat runtime-classpath.txt):../dist/p0/lib/core/*"
+          java -DHOP_PLUGIN_BASE_FOLDERS="$GITHUB_WORKSPACE/modern/dist/p0/plugins" \
+            -DHOP_SHARED_JDBC_FOLDERS="$GITHUB_WORKSPACE/modern/dist/p0/lib/jdbc" \
+            -cp "$RUNTIME_CP" org.apache.hop.modern.web.ProductionP0Admission
+      - name: Boot packaged production Jetty listener and verify readiness
+        working-directory: modern/server
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME_CP="target/classes:$(cat runtime-classpath.txt):../dist/p0/lib/core/*"
+          timeout 100s java -DHOP_PLUGIN_BASE_FOLDERS="$GITHUB_WORKSPACE/modern/dist/p0/plugins" \
+            -DHOP_SHARED_JDBC_FOLDERS="$GITHUB_WORKSPACE/modern/dist/p0/lib/jdbc" \
+            -cp "$RUNTIME_CP" org.apache.hop.modern.web.ModernWebServer >/tmp/p0-production-server.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 45); do
+            if [ "$(curl -fsS --max-time 2 http://127.0.0.1:8080/api/ready 2>/dev/null)" = ready ]; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then cat /tmp/p0-production-server.log; exit 1; fi
+          echo "PRODUCTION_P0_JETTY_READY=PASS"
+      - name: Upload production P0 distribution provenance (manifest only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-production-distribution-manifest
+          path: modern/dist/p0/p0-distribution-manifest.json
       - name: Prove production P0 Transform runtime L0/L1/L2 and emit descriptors
         working-directory: modern/server
         run: mvn -q -Dtest=TransformCatalogProbeTest,TransformP0L2RoundTripTest -DprodP0Expected=true -Dp0DescriptorFixture=../docs/p0-transform-descriptors.generated.json test
