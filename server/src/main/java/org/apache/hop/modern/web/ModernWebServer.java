@@ -7,6 +7,7 @@
 package org.apache.hop.modern.web;
 
 import java.net.URI;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
@@ -29,6 +30,7 @@ import org.glassfish.jersey.server.ResourceConfig;
 /** Provisional loopback-only HTTP host for the first real browser pipeline slice. */
 public final class ModernWebServer {
   static final URI DEFAULT_URI = URI.create("http://127.0.0.1:8080/");
+  private static final AtomicBoolean PLUGINS_INITIALIZED = new AtomicBoolean(false);
 
   private ModernWebServer() {}
 
@@ -45,6 +47,7 @@ public final class ModernWebServer {
   public static void initializePipelinePlugins() throws Exception {
     PluginRegistry.addPluginType(TransformPluginType.getInstance());
     PluginRegistry.init();
+    PLUGINS_INITIALIZED.set(true);
   }
 
   static ResourceConfig createResourceConfig() {
@@ -61,6 +64,7 @@ public final class ModernWebServer {
         .register(openResource)
         .register(configResource)
         .register(editResource)
+        .register(new ReadinessResource(PLUGINS_INITIALIZED::get))
         // Jersey Jackson 2.15+ reads to EOF by default; on Grizzly this can block
         // POST record binding for 30 seconds (eclipse-ee4j/jersey#5812).
         // Use the provider's supported setting rather than changing HTTP framing.
