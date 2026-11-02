@@ -118,6 +118,47 @@ try {
   }
   console.log("V4 unsaved config count proof passed: actual field differences, filtered draft retention, revert, no values or Hop write.");
 
+  // Native TableInput prioritizes a nonempty HopVfs SQL file, but both sources
+  // must remain untouched until the user explicitly saves the configuration.
+  const sqlFileDescriptor = initial.descriptor?.properties?.find(p => p.key === "sql_from_file");
+  if (!sqlFileDescriptor || !initial.descriptor.className.endsWith(".TableInputMeta")) {
+    throw new Error("Authoritative TableInput SQL source descriptor missing");
+  }
+  const sqlFileField = panel.locator(`#config-${sqlFileDescriptor.javaField}`);
+  const sourceNotice = panel.locator(".config-sql-source-notice[role=status]");
+  const originalSqlFile = await sqlFileField.inputValue();
+  const originalInlineSql = await sqlField.inputValue();
+  const writesBeforeSource = countWrites();
+  if ((await sourceNotice.count() > 0) !== (originalSqlFile.trim().length > 0)) {
+    throw new Error("SQL source notice disagrees with the native Hop file source");
+  }
+  await sqlFileField.fill("   ");
+  if (await sourceNotice.count() !== 0) {
+    throw new Error("Whitespace-only SQL file draft must not activate file precedence");
+  }
+  const unsavedSqlFile = "/tmp/未保存 SQL 来源.sql";
+  await sqlFileField.fill(unsavedSqlFile);
+  const noticeText = await sourceNotice.innerText();
+  if (!await sourceNotice.isVisible() || !noticeText.includes("文件内容优先") ||
+      noticeText.includes(unsavedSqlFile) || noticeText.includes(originalInlineSql) ||
+      countWrites() !== writesBeforeSource) {
+    throw new Error("Native SQL file precedence guidance leaked values or wrote Hop");
+  }
+  const inlineSourceDraft = "SELECT id FROM customers /* 保留内联 SQL 草稿 */";
+  await sqlField.fill(inlineSourceDraft);
+  if (!await sourceNotice.isVisible() || await sqlField.inputValue() !== inlineSourceDraft ||
+      await sqlFileField.inputValue() !== unsavedSqlFile || countWrites() !== writesBeforeSource) {
+    throw new Error("File source guidance discarded an unsaved inline SQL draft");
+  }
+  await sqlField.fill(originalInlineSql);
+  await sqlFileField.fill(originalSqlFile);
+  if ((await sourceNotice.count() > 0) !== (originalSqlFile.trim().length > 0) ||
+      await changeSummary.count() !== 0 || countWrites() !== writesBeforeSource) {
+    throw new Error("Reverting SQL source drafts did not restore native Hop editor state");
+  }
+  console.log("V4 native SQL source notice proof passed: whitespace, file precedence, inline draft retained, no value leak or Hop write.");
+
+
   // Developer-only identifiers must not crowd the Chinese configuration heading.
   // This is a disclosure of schema keys, never of the native Hop configuration values.
   const developerDetails = panel.locator("details.config-developer-details");
