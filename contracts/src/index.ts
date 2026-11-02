@@ -54,8 +54,10 @@ export interface HopEditableTableColumn {
   label: string;
   valueType?: HopConfigValueType;
   variable?: boolean;
-  /** Native Hop value-meta picker; the descriptor supplies registered options and wire types. */
-  pickerHint?: "VALUE_META_TYPE_PICKER" | "VALUE_META_CODE_PICKER";
+  /** Native field/type picker; the descriptor owns the stage and the installed type options. */
+  pickerHint?: "VALUE_META_TYPE_PICKER" | "VALUE_META_CODE_PICKER" | "UPSTREAM_FIELD_PICKER" | "STAGED_FIELD_PICKER";
+  /** SelectValues Remove sees the Select result; Meta sees the result after Remove. */
+  fieldSourceStage?: "AFTER_SELECT" | "AFTER_REMOVE";
   options?: HopConfigOption[];
 }
 
