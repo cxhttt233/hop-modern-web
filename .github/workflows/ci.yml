@@ -121,6 +121,10 @@ jobs:
           done
           if [ "$ready" -ne 1 ]; then cat /tmp/p0-production-server.log; exit 1; fi
           echo "PRODUCTION_P0_JETTY_READY=PASS"
+          python3 ../scripts/verify_p0_production_http.py \
+            http://127.0.0.1:8080 \
+            ../e2e/fixtures/v4-table-input-proof.hpl \
+            ../dist/p0/p0-distribution-manifest.json
       - name: Upload production P0 distribution provenance (manifest only)
         uses: actions/upload-artifact@v4
         with:
