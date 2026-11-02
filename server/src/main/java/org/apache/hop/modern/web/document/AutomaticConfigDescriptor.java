@@ -1196,6 +1196,25 @@ public final class AutomaticConfigDescriptor {
                       + "reopen; this is a native runtime compatibility diagnostic, "
                       + "not a save-time validator."),
               new RuntimePrecondition(
+                  "REST_STATIC_BASIC_AUTH_CROSS_ORIGIN_REDIRECT_NOT_FOLLOWED",
+                  List.of("/url", "/urlInField", "/httpLogin", "/httpPassword",
+                      "/non_preemptive_basic_auth", "/method", "/result/code"),
+                  "With a static URL, transform-level Basic credentials and "
+                      + "non_preemptive_basic_auth=false, native RestAuthenticator "
+                      + "binds the credentials to the configured URL origin. In "
+                      + "the pinned HttpClient5 runtime, an authenticated GET "
+                      + "receiving 302 or 307 Location pointing to the same host "
+                      + "on a different port does not follow that cross-origin "
+                      + "redirect: REST reports the original 3xx status and the "
+                      + "other origin receives no request or Authorization header. "
+                      + "This differs from same-origin redirects and from "
+                      + "urlInField=true, where credentials are not bound to a "
+                      + "single origin. Preserve the native status and auth flags "
+                      + "across JSON/HPL editing; do not silently retry at the "
+                      + "redirect destination or promise that a redirected call "
+                      + "reached the target. This is a runtime diagnostic, not a "
+                      + "draft-save validator."),
+              new RuntimePrecondition(
                   "REST_POST_302_VS_307_REDIRECT_METHOD_SEMANTICS",
                   List.of("/url", "/method", "/bodyField", "/result/name", "/result/code"),
                   "With native REST POST and HttpClient5 default redirects, a same-origin "
