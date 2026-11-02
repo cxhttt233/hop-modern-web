@@ -780,4 +780,167 @@ class SortRowsFullPipelineP0Test {
     }
   }
 
+
+  /**
+   * Engine-level complement to the existing native-init compression test.
+   * With a tiny sort_size, verify real external spill files have the GZIP
+   * magic bytes only when the named runtime variable enables compression.
+   * All files are isolated under the JUnit temp directory and are deleted
+   * by native SortRows cleanup; inspect the first file during row emission.
+   */
+  @Test
+  void sortRowsVariableOverridesStaticFlagForActualGzipSpillAfterHplReopen(
+      @TempDir Path tempDir) throws Exception {
+    PluginRegistry plugins = PluginRegistry.getInstance();
+    IPlugin gridPlugin = plugins.findPluginWithId(TransformPluginType.class, "DataGrid");
+    IPlugin sortPlugin = plugins.findPluginWithId(TransformPluginType.class, "SortRows");
+    assertNotNull(gridPlugin);
+    assertNotNull(sortPlugin);
+
+    ITransformMeta grid = plugins.loadClass(gridPlugin, ITransformMeta.class);
+    grid.setDefault();
+    ClassLoader loader = grid.getClass().getClassLoader();
+    Class<?> fieldType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridFieldMeta");
+    Class<?> lineType = loader.loadClass(
+        "org.apache.hop.pipeline.transforms.datagrid.DataGridDataMeta");
+    List<Object> fields = new ArrayList<>();
+    for (String name : List.of("排序键<&>", "批次")) {
+      Object field = fieldType.getConstructor().newInstance();
+      fieldType.getMethod("setName", String.class).invoke(field, name);
+      fieldType.getMethod("setType", String.class).invoke(field, "String");
+      fields.add(field);
+    }
+    grid.getClass().getMethod("setDataGridFields", List.class).invoke(grid, fields);
+    List<Object> lines = new ArrayList<>();
+    for (List<String> values : List.of(
+        List.of("z", "批次五"), List.of("b", "批次二"),
+        List.of("d", "批次四"), List.of("a", "批次一"),
+        List.of("c", "批次三"))) {
+      Object line = lineType.getConstructor().newInstance();
+      lineType.getMethod("setDatalines", List.class).invoke(line, values);
+      lines.add(line);
+    }
+    grid.getClass().getMethod("setDataLines", List.class).invoke(grid, lines);
+
+    ITransformMeta sort = plugins.loadClass(sortPlugin, ITransformMeta.class);
+    sort.setDefault();
+    assertEquals(List.of("/compress", "/compress_variables", "/sort_size"),
+        AutomaticConfigDescriptor.describe(sort.getClass()).runtimePreconditions()
+            .stream().filter(rule -> rule.code().equals(
+                "SORT_ROWS_COMPRESSION_VARIABLE_OVERRIDES_STATIC_FLAG_AT_INIT"))
+            .findFirst().orElseThrow().keyListPointers());
+
+    TransformMeta source = new TransformMeta("DataGrid", "grid-node", grid);
+    TransformMeta target = new TransformMeta("SortRows", "sort-node", sort);
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("sort-variable-compressed-external-spill");
+    pipeline.addTransform(source);
+    pipeline.addTransform(target);
+    pipeline.addPipelineHop(new PipelineHopMeta(source, target));
+
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path hpl = tempDir.resolve("sort-variable-compressed-spill.hpl");
+    store.save(hpl, pipeline);
+
+    boolean[] staticFlags = {false, true};
+    String[] runtimeValues = {"Y", "N"};
+    boolean[] expectedCompression = {true, false};
+    for (int scenario = 0; scenario < staticFlags.length; scenario++) {
+      PipelineMeta loaded = store.open(hpl);
+      var documents = new PipelineDocumentRegistry();
+      documents.put(new PipelineDocument("sort-spill-doc", hpl, loaded));
+      var resource = new PipelineConfigResource(documents, provider);
+      var read = resource.read("sort-spill-doc",
+          new PipelineConfigResource.ReadRequest("sort-node"));
+      assertEquals(200, read.getStatus());
+      ObjectNode draft = ((ObjectNode)
+          ((PipelineConfigResource.ConfigResponse) read.getEntity()).config()).deepCopy();
+      draft.put("compress", staticFlags[scenario]);
+      draft.put("compress_variables", "SORT_GZIP");
+      draft.put("sort_size", "2");
+      draft.put("directory", tempDir.toAbsolutePath().toString());
+      draft.put("sort_prefix", "sort-spill-" + scenario + "-雪");
+      draft.put("unique_rows", false);
+      draft.putObject("fields").putArray("field").addObject()
+          .put("name", "排序键<&>")
+          .put("ascending", true)
+          .put("case_sensitive", true)
+          .put("collator_enabled", false)
+          .put("collator_strength", 0)
+          .put("presorted", false);
+      assertEquals(200, resource.write("sort-spill-doc",
+          new PipelineConfigResource.WriteRequest("sort-node", draft)).getStatus());
+      store.save(hpl, loaded);
+
+      PipelineMeta reopened = store.open(hpl);
+      assertEquals(1, reopened.nrPipelineHops());
+      JsonNode wire = ConfigJsonSerializer.toJson(
+          reopened.findTransform("sort-node").getTransform(), provider);
+      assertTrue(wire.at("/compress").isBoolean());
+      assertEquals(staticFlags[scenario], wire.at("/compress").booleanValue());
+      assertEquals("SORT_GZIP", wire.at("/compress_variables").asText());
+      assertEquals("2", wire.at("/sort_size").asText());
+      assertEquals("排序键<&>", wire.at("/fields/field/0/name").asText());
+
+      List<Object[]> emitted = new CopyOnWriteArrayList<>();
+      AtomicReference<List<Integer>> spillHeader = new AtomicReference<>();
+      AtomicReference<String> inspectionError = new AtomicReference<>();
+      LocalPipelineEngine engine = new LocalPipelineEngine(reopened);
+      engine.setMetadataProvider(provider);
+      engine.setVariable("SORT_GZIP", runtimeValues[scenario]);
+      try {
+        engine.prepareExecution();
+        ITransform output = engine.getRunThread("sort-node", 0);
+        assertNotNull(output);
+        Object nativeData = output.getData();
+        output.addRowListener(new RowAdapter() {
+          @Override
+          public void rowWrittenEvent(IRowMeta rowMeta, Object[] row) {
+            emitted.add(row.clone());
+            if (spillHeader.get() != null || inspectionError.get() != null) return;
+            try {
+              List<?> files = (List<?>) nativeData.getClass().getField("files").get(nativeData);
+              if (files.isEmpty()) {
+                inspectionError.set("no native external sort file at first output");
+                return;
+              }
+              var firstFile = (org.apache.commons.vfs2.FileObject) files.get(0);
+              try (var stream = firstFile.getContent().getInputStream()) {
+                spillHeader.set(List.of(stream.read(), stream.read()));
+              }
+            } catch (Exception e) {
+              inspectionError.set(e.toString());
+            }
+          }
+        });
+        engine.startThreads();
+        engine.waitUntilFinished();
+        assertEquals(0, engine.getErrors(), "native external SortRows must finish");
+        assertEquals(expectedCompression[scenario],
+            nativeData.getClass().getField("compressFiles").getBoolean(nativeData),
+            "runtime variable must override the opposite static compress flag");
+        List<?> files = (List<?>) nativeData.getClass().getField("files").get(nativeData);
+        assertTrue(files.size() >= 2, "sort_size=2 must create multiple real spill files");
+      } finally {
+        if (!engine.isFinishedOrStopped()) engine.stopAll();
+        engine.cleanup();
+      }
+      assertNull(inspectionError.get(), "native spill file must be readable before cleanup");
+      assertNotNull(spillHeader.get());
+      if (expectedCompression[scenario]) {
+        assertEquals(List.of(0x1f, 0x8b), spillHeader.get(),
+            "enabled variable must create a real GZIP spill file");
+      } else {
+        assertNotEquals(List.of(0x1f, 0x8b), spillHeader.get(),
+            "disabled variable must create an uncompressed spill file");
+      }
+      assertEquals(5, emitted.size());
+      assertEquals(List.of("a", "b", "c", "d", "z"),
+          emitted.stream().map(row -> (String) row[0]).toList());
+    }
+    System.out.println("PROD_P0_SORTROWS_VARIABLE_GZIP_SPILL_NATIVE_ENGINE_JSON_HPL=PASS");
+  }
+
 }
