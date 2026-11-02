@@ -613,6 +613,16 @@ button { cursor: pointer; }
   font-size: 11px;
 }
 .config-search-empty { color: #64748b; font-size: 12px; margin: 10px 0; }
+.config-sql-source-notice {
+  margin: 0;
+  padding: 9px 11px;
+  border-left: 3px solid #5474a5;
+  border-radius: 5px;
+  background: #f1f5fb;
+  color: #344761;
+  font-size: 12px;
+  line-height: 1.55;
+}
 .generic-config fieldset {
   display: grid;
   gap: 11px;
