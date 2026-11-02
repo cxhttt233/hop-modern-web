@@ -114,7 +114,9 @@ const nativePickerHints = new Set([
   "UPSTREAM_FIELD_PICKER", "STAGED_FIELD_PICKER",
   "VALUE_META_CODE_PICKER", "VALUE_META_TYPE_PICKER",
 ]);
-for (const pluginId of ["TableInput", "SelectValues", "SortRows"]) {
+// SortRows is installed as a non-P0 fixture but is not emitted in the 20-plugin P0 catalog.
+// Its native descriptor/wire checks remain covered by formal Java JUnit.
+for (const pluginId of ["TableInput", "SelectValues"]) {
   const descriptor = byId.get(pluginId);
   const schema = findConfigSchema("transform", pluginId);
   assert.ok(descriptor?.properties, pluginId + ": installed native descriptor missing");
@@ -184,11 +186,6 @@ for (const pluginId of ["TableInput", "SelectValues", "SortRows"]) {
     assert.equal(native.get("sql_from_file").widgetHint, "VFS_PICKER");
     assert.equal(native.get("lookup").widgetHint, "INFO_STREAM_TRANSFORM_PICKER");
     assert.equal(schema.fields.find(field => field.key === "sql_from_file").control, "VfsPicker");
-  }
-  if (pluginId === "SortRows") {
-    assert.equal(native.get("directory").widgetHint, "LOCAL_DIRECTORY_PICKER");
-    assert.equal(schema.fields.find(field => field.key === "directory").pickerHint,
-      "LOCAL_DIRECTORY_PICKER");
   }
 }
 console.log("PROD_P0_T1_NATIVE_PRIORITY_SCHEMA_COMPAT=PASS");
