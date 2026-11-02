@@ -86,7 +86,8 @@ export interface HopConfigField {
   sqlSourceContext?: HopSqlSourceContext;
 
   /** Canonical JSON Pointer for conditional editor activation; never delete inactive native values. */
-  activation?: { flagPointer: string; activeWhen: boolean };
+  activation?: { flagPointer: string; activeWhen: boolean;
+    additionalConditions?: { flagPointer: string; activeWhen: boolean }[] };
 
   /** MetadataPicker: Hop metadata interface/type and named-reference semantics. */
   metadataType?: string;
@@ -152,6 +153,7 @@ export interface HopMetadataSummary {
 export {
   checkSumConfigSchema,
   databaseConnectionConfigSchema,
+  execSqlConfigSchema,
   findConfigSchema,
   listConfigSchemas,
   replaceStringConfigSchema,
