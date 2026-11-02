@@ -217,6 +217,27 @@ sortRowsConfigSchema.tabs = bindLayout(sortRowsConfigSchema, [
   ] },
 ]);
 
+
+// The first Metadata target needs the same T1 layout contract as the three
+// priority transforms. Keep native rdbms.* paths and the sensitive password
+// descriptor unchanged; grouping is presentation only, not credential decoding.
+// Manual JDBC URL remains an independent native field, not a replacement for
+// or a destructive toggle over host/database drafts.
+databaseConnectionConfigSchema.tabs = bindLayout(databaseConnectionConfigSchema, [
+  { key: "identity", label: "Connection identity", groups: [
+    { key: "name", label: "Connection name", keys: ["name"] },
+  ] },
+  { key: "endpoint", label: "Database endpoint", groups: [
+    { key: "network", label: "Host and database",
+      keys: ["rdbms.hostname", "rdbms.port", "rdbms.databaseName"] },
+    { key: "jdbc", label: "Manual JDBC URL", keys: ["rdbms.manualUrl"] },
+  ] },
+  { key: "credentials", label: "Authentication", groups: [
+    { key: "login", label: "Credentials",
+      keys: ["rdbms.username", "rdbms.password"] },
+  ] },
+]);
+
 const configSchemas: readonly HopConfigSchema[] = [
   tableInputConfigSchema,
   selectValuesConfigSchema,
