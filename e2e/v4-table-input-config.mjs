@@ -47,6 +47,42 @@ try {
       await panel.getByRole("button", { name: "保存配置（Save）", exact: true }).count() !== 1) {
     throw new Error("Real TableInput configuration dialog lacks Chinese-first action names");
   }
+  // Genuine browser interaction with the resizable right-side configuration surface.
+  // Resizing must never issue Hop config/write or disturb the native .hpl draft.
+  await page.setViewportSize({ width: 1365, height: 768 });
+  const grip = panel.getByRole("separator", { name: "调整配置面板宽度" });
+  await grip.waitFor({ state: "visible" });
+  const initialPanelBox = await panel.boundingBox();
+  const gripBox = await grip.boundingBox();
+  if (!initialPanelBox || !gripBox || Math.abs(initialPanelBox.width - 600) > 4) {
+    throw new Error("Desktop configuration panel did not open at the expected 600px width");
+  }
+  const dragX = gripBox.x + gripBox.width / 2;
+  const dragY = gripBox.y + gripBox.height / 2;
+  await page.mouse.move(dragX, dragY);
+  await page.mouse.down();
+  await page.mouse.move(dragX - 110, dragY, { steps: 6 });
+  await page.mouse.up();
+  const widenedBox = await panel.boundingBox();
+  if (!widenedBox || widenedBox.width < initialPanelBox.width + 80) {
+    throw new Error("Dragging the configuration grip did not expand the real editor");
+  }
+  await grip.focus();
+  await grip.press("ArrowRight");
+  const keyboardBox = await panel.boundingBox();
+  if (!keyboardBox || Math.abs(keyboardBox.width - (widenedBox.width - 24)) > 3) {
+    throw new Error("Keyboard resizing did not shrink the configuration panel by 24px");
+  }
+  await page.setViewportSize({ width: 760, height: 768 });
+  const narrowBox = await panel.boundingBox();
+  if (!narrowBox || narrowBox.width > 421 || await grip.isVisible()) {
+    throw new Error("Narrow viewport failed to use the safe fixed-width configuration layout");
+  }
+  await page.setViewportSize({ width: 1365, height: 768 });
+  if (requests.some(({ url, method }) => method === "POST" && new URL(url).pathname.endsWith("/config/write"))) {
+    throw new Error("Resizing must not write native Hop configuration");
+  }
+  console.log("V4 config resize proof passed: pointer, keyboard, narrow-screen fallback, no Hop write.");
   const connection = panel.locator(`#config-${connectionDescriptor.javaField}`);
   const sqlField = panel.locator(`#config-${sqlDescriptor.javaField}`);
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
