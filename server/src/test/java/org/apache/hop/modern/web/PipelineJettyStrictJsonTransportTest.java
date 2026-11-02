@@ -27,9 +27,9 @@ import org.junit.jupiter.api.Timeout;
  * Architecture-aligned, isolated Jetty/Jersey transport feasibility proof.
  *
  * Unlike the Grizzly strict-mapper probe, this starts Jersey on Jetty while
- * keeping the Task5 ResourceConfig, Jackson feature, OpenRequest record,
+ * using the actual production ResourceConfig and strict Jackson mapper, OpenRequest record,
  * reusable Java 21 HttpClient, fixture, and security assertions unchanged.
- * It does not switch the production host or relax the failing Grizzly tests.
+ * It verifies the production Jetty host configuration without relaxing Grizzly regressions.
  * A timeout is a failure, never a successful HTTP 400 rejection.
  */
 class PipelineJettyStrictJsonTransportTest {
@@ -44,7 +44,6 @@ class PipelineJettyStrictJsonTransportTest {
     URI base = URI.create("http://127.0.0.1:" + port + "/");
     Server server = JettyHttpContainerFactory.createServer(
         base, ModernWebServer.createResourceConfig()
-            .register(new PipelineStrictMapperCompatibilityTest.StrictMapperProvider())
             .register(PipelineHttpJsonBoundaryABTest.JsonEchoResource.class));
     try {
       HttpClient client = HttpClient.newHttpClient();
