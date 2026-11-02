@@ -109,13 +109,14 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const totalFieldCount = descriptor.properties.length;
   // Count actual unsaved field differences without revealing values, including secrets.
   // This is display-only: the existing native Hop save/cancel contract is unchanged.
-  const changedFieldCount = descriptor.properties.reduce((count, property) => {
-    if (!Object.prototype.hasOwnProperty.call(draft, property.key)) return count;
+  const changedFields = descriptor.properties.filter((property) => {
+    if (!Object.prototype.hasOwnProperty.call(draft, property.key)) return false;
     const value = draft[property.key];
-    if (property.sensitive && (value === "" || value === undefined)) return count;
+    if (property.sensitive && (value === "" || value === undefined)) return false;
     const original = read(config, property.key);
-    return count + (Object.is(value, original) || JSON.stringify(value) === JSON.stringify(original) ? 0 : 1);
-  }, 0);
+    return !(Object.is(value, original) || JSON.stringify(value) === JSON.stringify(original));
+  });
+  const changedFieldCount = changedFields.length;
   // Native TableInput gives a non-empty SQL file priority over inline SQL.
   // This notice describes the current unsaved draft; it never rewrites either source.
   const fileSqlSelected = descriptor.className.endsWith(".TableInputMeta") &&
@@ -213,6 +214,13 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     {visibleGroups.length === 0 && <p className="config-search-empty" role="status">没有匹配的配置字段，请更换关键词。</p>}
     {visibleGroups.map(([group, properties]) => <fieldset key={group}><legend>{GROUP_LABELS[group] ?? group}</legend>{properties.map((p) =>
       <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</fieldset>)}
-    <footer>{changedFieldCount > 0 && <small className="config-change-count" role="status" aria-live="polite">已修改 {changedFieldCount} 项（未保存）</small>}<button type="button" aria-label="取消配置（Cancel）" onClick={onCancel}>取消</button><button type="submit" aria-label="保存配置（Save）" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
+    <footer>{changedFieldCount > 0 && <div className="config-change-review">
+      <small className="config-change-count" role="status" aria-live="polite">已修改 {changedFieldCount} 项（未保存）</small>
+      <details>
+        <summary>查看未保存字段</summary>
+        <ul aria-label="未保存字段清单">{changedFields.map((property) =>
+          <li key={property.key}>{label(property)}</li>)}</ul>
+      </details>
+    </div>}<button type="button" aria-label="取消配置（Cancel）" onClick={onCancel}>取消</button><button type="submit" aria-label="保存配置（Save）" disabled={disabled || Object.values(invalid).some(Boolean)}>保存</button></footer>
   </form>;
 }
