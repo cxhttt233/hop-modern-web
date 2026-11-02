@@ -105,7 +105,7 @@ export const sortRowsConfigSchema: HopConfigSchema = {
         { key: "presorted", label: "Presorted", valueType: "boolean" },
       ],
     },
-    { key: "directory", label: "Temporary directory", control: "VfsPicker", valueType: "string", vfsMode: "directory", variable: true },
+    { key: "directory", label: "Temporary directory", control: "VariableInput", valueType: "string", pickerHint: "LOCAL_DIRECTORY_PICKER", variable: true, description: "Resolved on the Hop server as a local filesystem directory for sort spill files; remote HopVfs locations are not supported. Preserve Hop variable expressions." },
     { key: "sort_prefix", label: "Temporary file prefix", control: "VariableInput", valueType: "string", variable: true },
     { key: "sort_size", label: "Sort size", control: "VariableInput", valueType: "string", variable: true },
     { key: "free_memory", label: "Free memory threshold", control: "VariableInput", valueType: "string", variable: true },
