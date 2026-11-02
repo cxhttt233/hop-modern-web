@@ -223,6 +223,43 @@ export const execSqlConfigSchema: HopConfigSchema = {
 };
 
 /**
+ * P0 ConcatFields has an ordered native fields.field LIST and a separate
+ * capitalized ConcatFields OBJECT containing target-field settings. Keep
+ * native STRING type names and NUMBER lengths; never flatten the OBJECT.
+ */
+export const concatFieldsConfigSchema: HopConfigSchema = {
+  pluginId: "ConcatFields",
+  pluginType: "transform",
+  title: "Concat fields",
+  tier: "T1",
+  fields: [
+    { key: "fields.field", label: "Source fields", control: "EditableTable", valueType: "object[]",
+      columns: [
+        { key: "name", label: "Incoming field", valueType: "string", pickerHint: "UPSTREAM_FIELD_PICKER" },
+        { key: "type", label: "Value type", valueType: "string", pickerHint: "VALUE_META_TYPE_PICKER" },
+        { key: "format", label: "Format", valueType: "string" },
+        { key: "length", label: "Length", valueType: "integer" },
+        { key: "precision", label: "Precision", valueType: "integer" },
+        { key: "currency", label: "Currency symbol", valueType: "string" },
+        { key: "decimal", label: "Decimal symbol", valueType: "string" },
+        { key: "group", label: "Grouping symbol", valueType: "string" },
+        { key: "nullif", label: "Null if", valueType: "string" },
+        { key: "trim_type", label: "Trim type", valueType: "string" },
+      ] },
+    { key: "ConcatFields.targetFieldName", label: "Target field", control: "VariableInput",
+      valueType: "string", required: true },
+    { key: "ConcatFields.targetFieldLength", label: "Target length", control: "VariableInput",
+      valueType: "integer" },
+    { key: "ConcatFields.removeSelectedFields", label: "Remove selected source fields",
+      control: "VariableInput", valueType: "boolean" },
+    { key: "separator", label: "Separator", control: "VariableInput", valueType: "string" },
+    { key: "enclosure", label: "Enclosure", control: "VariableInput", valueType: "string" },
+    { key: "force_enclosure", label: "Force enclosure", control: "VariableInput", valueType: "boolean" },
+    { key: "skip_value_empty", label: "Skip empty values", control: "VariableInput", valueType: "boolean" },
+  ],
+};
+
+/**
  * P0 Http uses two independent ordered native lookup LISTs whose rows both
  * contain name/parameter leaves. Preserve the /lookup/arg and /lookup/header
  * containers and the encrypted password transport; do not flatten by leaf key.
@@ -460,6 +497,21 @@ execSqlConfigSchema.tabs = bindLayout(execSqlConfigSchema, [
   ] },
 ]);
 
+// ConcatFields retains the exact capitalized native ConcatFields OBJECT and
+// the independent fields.field LIST; layout is only a grouping of those fields.
+concatFieldsConfigSchema.tabs = bindLayout(concatFieldsConfigSchema, [
+  { key: "source", label: "Input fields", groups: [
+    { key: "fields", label: "Ordered source fields", keys: ["fields.field"] },
+  ] },
+  { key: "target", label: "Output", groups: [
+    { key: "output", label: "Target field",
+      keys: ["ConcatFields.targetFieldName", "ConcatFields.targetFieldLength",
+        "ConcatFields.removeSelectedFields"] },
+    { key: "format", label: "Delimited value formatting",
+      keys: ["separator", "enclosure", "force_enclosure", "skip_value_empty"] },
+  ] },
+]);
+
 // Preserve the native ordered variable assignments independently of formatting.
 setVariableConfigSchema.tabs = bindLayout(setVariableConfigSchema, [
   { key: "assignments", label: "Variable assignments", groups: [
@@ -502,6 +554,7 @@ const configSchemas: readonly HopConfigSchema[] = [
   stringCutConfigSchema,
   replaceStringConfigSchema,
   execSqlConfigSchema,
+  concatFieldsConfigSchema,
   httpConfigSchema,
   setVariableConfigSchema,
   databaseConnectionConfigSchema,
