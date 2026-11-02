@@ -1,7 +1,14 @@
 import { chromium } from "playwright";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-const pipelinePath = process.env.REAL_HPL_PATH;
-if (!pipelinePath) throw new Error("REAL_HPL_PATH is required");
+// Move/undo/redo/save must not mutate the fixture shared by later CI scenarios.
+const fixturePath = process.env.REAL_HPL_PATH;
+if (!fixturePath) throw new Error("REAL_HPL_PATH is required");
+const tempDir = mkdtempSync(join(tmpdir(), "hop-modern-v3-"));
+const pipelinePath = join(tempDir, "semantic-move.hpl");
+copyFileSync(fixturePath, pipelinePath);
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
@@ -31,7 +38,7 @@ try {
   if (!opened.name || !opened.nodes?.some(node => node.id === "source")) {
     throw new Error(`Authoritative open payload missing pipeline identity/source: ${JSON.stringify(opened)}`);
   }
-  await page.getByText(opened.name, { exact: true }).waitFor({ state: "visible" });
+  await page.locator(`.file-identity[data-document-name="${opened.name}"]`).waitFor({ state: "visible" });
   await page.locator(".react-flow").waitFor({ state: "visible" });
   const source = page.locator('.react-flow__node[data-id="source"]');
   await source.waitFor({ state: "visible" });
@@ -41,18 +48,40 @@ try {
   const beforeGraph = opened.nodes.find((node) => node.id === "source");
   if (!beforeGraph) throw new Error("Opened graph did not contain source transform");
 
-  const box = await source.boundingBox();
-  if (!box) throw new Error("Source node has no bounding box");
+  // The title is now an intentional nodrag config button. Start the real
+  // React Flow gesture on the icon, not the node's geometric center.
+  const dragHandle = source.locator(".transform-node-icon");
+  const box = await dragHandle.boundingBox();
+  if (!box) throw new Error("Source drag icon has no bounding box");
+  const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const hit = await page.evaluate(({ x, y }) => {
+    const target = document.elementFromPoint(x, y);
+    return {
+      nodeId: target?.closest(".react-flow__node")?.getAttribute("data-id"),
+      icon: Boolean(target?.closest(".transform-node-icon")),
+      blocked: Boolean(target?.closest(".nodrag")),
+    };
+  }, start);
+  if (hit.nodeId !== "source" || !hit.icon || hit.blocked) {
+    throw new Error(`Drag icon hit-test failed: ${JSON.stringify(hit)}`);
+  }
+
   const moveResponsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
-      /\/api\/pipelines\/[^/]+\/move$/.test(new URL(response.url()).pathname)
+      /\/api\/pipelines\/[^/]+\/move$/.test(new URL(response.url()).pathname),
+    { timeout: 15000 }
   );
 
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 48, box.y + box.height / 2 + 32, { steps: 8 });
-  await page.mouse.up();
+  try {
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x + 48, start.y + 32, { steps: 12 });
+    await page.mouse.up();
+  } catch (error) {
+    await moveResponsePromise.catch(() => undefined);
+    throw error;
+  }
 
   const moveResponse = await moveResponsePromise;
   if (!moveResponse.ok()) throw new Error(`Transform move failed with ${moveResponse.status()}`);
@@ -82,6 +111,71 @@ try {
     throw new Error("React Flow did not end at the returned authoritative coordinates");
   }
 
+  // A real semantic move must be reversible and survive disk persistence.
+  // This exercises the move history (not the add/delete history covered by V5).
+  const waitForCommand = (suffix) => page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname.endsWith(suffix)
+  );
+  const waitForSourcePosition = async ({ x, y }) => {
+    await page.waitForFunction(({ x, y }) => {
+      const node = document.querySelector('.react-flow__node[data-id="source"]');
+      const match = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(node?.getAttribute("style") ?? "");
+      return !!match && Math.abs(Number(match[1]) - x) < 0.01 &&
+        Math.abs(Number(match[2]) - y) < 0.01;
+    }, { x, y });
+  };
+
+  let command = waitForCommand("/edit/undo");
+  await page.getByRole("button", { name: "Undo" }).click();
+  const undoResponse = await command;
+  if (!undoResponse.ok()) throw new Error(`Move undo HTTP ${undoResponse.status()}`);
+  const undone = await undoResponse.json();
+  const undoneSource = undone.nodes.find((node) => node.id === "source");
+  if (!undoneSource || undoneSource.x !== beforeGraph.x || undoneSource.y !== beforeGraph.y) {
+    throw new Error("Undo move failed to restore original authoritative coordinates");
+  }
+  await waitForSourcePosition(beforeGraph);
+
+  command = waitForCommand("/edit/redo");
+  await page.getByRole("button", { name: "Redo" }).click();
+  const redoResponse = await command;
+  if (!redoResponse.ok()) throw new Error(`Move redo HTTP ${redoResponse.status()}`);
+  const redone = await redoResponse.json();
+  const redoneSource = redone.nodes.find((node) => node.id === "source");
+  if (!redoneSource || redoneSource.x !== movedGraph.x || redoneSource.y !== movedGraph.y) {
+    throw new Error("Redo move failed to restore moved authoritative coordinates");
+  }
+  await waitForSourcePosition(movedGraph);
+
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  command = waitForCommand("/save");
+  await page.getByRole("button", { name: "Save" }).click();
+  const saveResponse = await command;
+  if (!saveResponse.ok()) throw new Error(`Move save HTTP ${saveResponse.status()}`);
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+
+  command = waitForCommand("/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const reopenResponse = await command;
+  if (!reopenResponse.ok()) throw new Error(`Move disk reopen HTTP ${reopenResponse.status()}`);
+  const reopened = await reopenResponse.json();
+  const reopenedSource = reopened.nodes.find((node) => node.id === "source");
+  if (!reopenedSource || reopenedSource.x !== movedGraph.x || reopenedSource.y !== movedGraph.y) {
+    throw new Error("Disk reopen lost the redone source coordinates");
+  }
+  for (const edge of opened.edges ?? []) {
+    if (!reopened.edges.some((item) =>
+      item.id === edge.id && item.source === edge.source && item.target === edge.target)) {
+      throw new Error("Disk reopen lost original Hop edge " + edge.id);
+    }
+  }
+  await waitForSourcePosition(movedGraph);
+  if (await page.locator(".dirty-state.is-dirty").count()) {
+    throw new Error("Reopened moved graph must start clean");
+  }
+
   const moveRequests = requests.filter((url) =>
     /\/api\/pipelines\/[^/]+\/move$/.test(new URL(url).pathname)
   );
@@ -96,8 +190,9 @@ try {
   if (rapRequests.length) throw new Error("RAP /ui must not be entered");
 
   console.log(
-    `V3 proof passed: source (${beforeGraph.x},${beforeGraph.y}) -> (${movedGraph.x},${movedGraph.y}); one semantic move request; authoritative revision changed; UI reconciled; no RAP /ui.`
+    `V3 proof passed: source (${beforeGraph.x},${beforeGraph.y}) -> (${movedGraph.x},${movedGraph.y}); one semantic move; real undo/redo; disk save/reopen retained coordinates and edges; no RAP /ui.`
   );
 } finally {
   await browser.close();
+  rmSync(tempDir, { recursive: true, force: true });
 }
