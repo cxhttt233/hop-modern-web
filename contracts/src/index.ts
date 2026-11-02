@@ -53,6 +53,8 @@ export interface HopEditableTableColumn {
   label: string;
   valueType?: HopConfigValueType;
   variable?: boolean;
+  /** Native Hop value-meta picker; the descriptor supplies registered options and wire types. */
+  pickerHint?: "VALUE_META_TYPE_PICKER" | "VALUE_META_CODE_PICKER";
   options?: HopConfigOption[];
 }
 
