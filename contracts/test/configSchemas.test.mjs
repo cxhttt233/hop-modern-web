@@ -219,6 +219,49 @@ test("SelectValues layout preserves ordered native stages without duplicating wi
     ?.find(({ key }) => key === "type")?.pickerHint, "VALUE_META_TYPE_PICKER");
 });
 
+test("SelectValues T1 field pickers follow the native Select, Remove and Meta row stages", () => {
+  const schema = findConfigSchema("transform", "SelectValues");
+  assert.ok(schema?.tabs);
+  const selected = schema.fields.find(({ key }) => key === "fields.field");
+  const removed = schema.fields.find(({ key }) => key === "fields.remove");
+  const metadata = schema.fields.find(({ key }) => key === "fields.meta");
+  const selectName = selected?.columns?.find(({ key }) => key === "name");
+  const selectRename = selected?.columns?.find(({ key }) => key === "rename");
+  const removeName = removed?.columns?.find(({ key }) => key === "name");
+  const metaName = metadata?.columns?.find(({ key }) => key === "name");
+  const metaRename = metadata?.columns?.find(({ key }) => key === "rename");
+
+  assert.deepEqual(
+    [selectName?.pickerHint, selectName?.fieldSourceStage],
+    ["UPSTREAM_FIELD_PICKER", undefined],
+    "Select reads the original incoming row, not the renamed intermediate schema");
+  assert.deepEqual(
+    [removeName?.pickerHint, removeName?.fieldSourceStage],
+    ["STAGED_FIELD_PICKER", "AFTER_SELECT"],
+    "Remove must offer names after Select has renamed them");
+  assert.deepEqual(
+    [metaName?.pickerHint, metaName?.fieldSourceStage],
+    ["STAGED_FIELD_PICKER", "AFTER_REMOVE"],
+    "Meta must not offer fields removed by the preceding stage");
+  for (const outputName of [selectRename, metaRename]) {
+    assert.equal(outputName?.pickerHint, undefined,
+      "output aliases are authored names, not incoming-field references");
+    assert.equal(outputName?.fieldSourceStage, undefined);
+  }
+  for (const [key, field] of [
+    ["fields.field", selected], ["fields.remove", removed], ["fields.meta", metadata],
+  ]) {
+    assert.strictEqual(
+      schema.tabs.flatMap(tab => tab.groups).flatMap(group => group.fields)
+        .find(grouped => grouped.key === key), field,
+      "the grouped T1 editor must reuse the exact flat fallback field");
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify({
+    selectName, removeName, metaName,
+  })).metaName.fieldSourceStage, "AFTER_REMOVE",
+  "staged picker contracts must survive plain JSON transport");
+});
+
 test("SortRows layout separates ordered keys from memory and local spill settings", () => {
   const schema = findConfigSchema("transform", "SortRows");
   assert.ok(schema?.tabs);
