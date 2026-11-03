@@ -15,6 +15,7 @@ test("registry exposes the first real config targets", () => {
       "transform:ReplaceString",
       "transform:ExecSql",
       "transform:ConcatFields",
+      "transform:DataGrid",
       "transform:Http",
       "transform:SetVariable",
       "metadata:DatabaseMeta",
@@ -582,4 +583,38 @@ test("ConcatFields T1 preserves native ordered sources and capitalized target OB
     list.columns.map(column => column.key));
   assert.equal(transported.fields[2].valueType, "integer");
   assert.equal(transported.fields[3].valueType, "boolean");
+});
+
+test("DataGrid T1 preserves independent output metadata and nested literal STRING rows", () => {
+  const schema = findConfigSchema("transform", "DataGrid");
+  assert.ok(schema?.tabs);
+  assert.deepEqual(schema.fields.map(field => field.key), ["fields.field", "data.line"]);
+  const [columns, rows] = schema.fields;
+  assert.equal(columns.control, "EditableTable");
+  assert.equal(columns.valueType, "object[]");
+  assert.deepEqual(columns.columns.map(column => column.key), [
+    "currency", "decimal", "group", "name", "type", "format",
+    "length", "precision", "set_empty_string",
+  ]);
+  assert.deepEqual(columns.columns.map(column => column.valueType), [
+    "string", "string", "string", "string", "string", "string",
+    "integer", "integer", "boolean",
+  ]);
+  assert.equal(columns.columns[4].pickerHint, "VALUE_META_TYPE_PICKER");
+  assert.equal(columns.columns[3].pickerHint, undefined,
+    "DataGrid declares new output names; these are not incoming field references");
+  assert.deepEqual(rows.columns, [
+    { key: "item", label: "Ordered literal cells", valueType: "string[]" },
+  ]);
+  assert.equal(rows.valueType, "object[]");
+  assert.deepEqual(schema.tabs.map(tab => tab.key), ["columns", "rows"]);
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(candidate => candidate.key === field.key),
+      "DataGrid tabs must reuse the native flat fields without rewriting the wire");
+  }
+  const transported = JSON.parse(JSON.stringify(schema));
+  assert.deepEqual(transported.fields[1].columns.map(column => column.valueType), ["string[]"]);
+  assert.deepEqual(transported.fields.map(field => field.key), ["fields.field", "data.line"]);
 });

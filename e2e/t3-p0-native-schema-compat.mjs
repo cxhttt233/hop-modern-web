@@ -419,3 +419,61 @@ console.log("PROD_P0_T1_SETVARIABLE_NATIVE_SCHEMA_COMPAT=PASS");
   }
 }
 console.log("PROD_P0_T1_CONCATFIELDS_NATIVE_SCHEMA_COMPAT=PASS");
+
+/**
+ * DataGrid is a source transform: declared output fields and literal row cells
+ * are independent nested native LISTs. Assert the actual installed plugin
+ * descriptor rather than treating row cells as incoming-field references.
+ */
+{
+  const pluginId = "DataGrid";
+  const descriptor = byId.get(pluginId);
+  const schema = findConfigSchema("transform", pluginId);
+  assert.ok(descriptor?.properties, "DataGrid installed native descriptor missing");
+  assert.ok(schema?.tabs, "DataGrid production T1 layout missing");
+  const nativeEntries = flattenNativeProperties(descriptor.properties);
+  const native = new Map(nativeEntries);
+  assert.equal(native.size, nativeEntries.length, "DataGrid native paths must be unique");
+  assert.deepEqual(schema.fields.map(field => field.key).sort(), [...native.keys()].sort(),
+    "DataGrid T1 must cover both native LISTs without inventing scalar roots");
+
+  const declared = native.get("fields.field");
+  const columns = schema.fields.find(field => field.key === "fields.field");
+  assert.equal(declared?.shape, "LIST");
+  assert.equal(columns?.control, "EditableTable");
+  assert.equal(columns?.valueType, "object[]");
+  assert.deepEqual(columns.columns.map(column => column.key),
+    declared.elementProperties.map(property => property.key),
+    "DataGrid native declared field property order and coverage");
+  for (const column of columns.columns) {
+    const property = declared.elementProperties.find(item => item.key === column.key);
+    assert.ok(property, "DataGridFieldMeta." + column.key + ": native column missing");
+    assert.equal(property.groupKey, "field", "native nested field container must be retained");
+    assertNativeValueType(column.valueType, property, "DataGridFieldMeta." + column.key);
+    assert.equal(column.pickerHint,
+      property.widgetHint === "VALUE_META_TYPE_PICKER" ? property.widgetHint : undefined,
+      "DataGridFieldMeta." + column.key + ": native type picker only");
+  }
+
+  const literal = native.get("data.line");
+  const rows = schema.fields.find(field => field.key === "data.line");
+  assert.equal(literal?.shape, "LIST");
+  assert.equal(rows?.control, "EditableTable");
+  assert.equal(rows?.valueType, "object[]");
+  assert.deepEqual(literal.elementProperties.map(property => property.key), ["item"]);
+  assert.equal(literal.elementProperties[0].shape, "LIST");
+  assert.equal(literal.elementProperties[0].elementJavaType, "java.lang.String");
+  assert.deepEqual(rows.columns.map(column => [column.key, column.valueType]),
+    [["item", "string[]"]], "DataGrid row cells must remain nested STRING arrays");
+  const wire = new Map((descriptor.wireLists ?? []).map(item => [item.listPointer, item]));
+  assert.deepEqual([...wire.keys()].sort(), ["/fields/field", "/data/line"].sort());
+  assert.equal(wire.get("/fields/field")?.itemPointerTemplate, "/fields/field/{index}");
+  assert.equal(wire.get("/data/line")?.itemPointerTemplate, "/data/line/{index}");
+  const grouped = schema.tabs.flatMap(tab => tab.groups.flatMap(group => group.fields));
+  assert.equal(grouped.length, schema.fields.length);
+  for (const field of grouped) {
+    assert.strictEqual(field, schema.fields.find(item => item.key === field.key),
+      "DataGrid grouped schema must preserve original native wire field objects");
+  }
+}
+console.log("PROD_P0_T1_DATAGRID_NATIVE_SCHEMA_COMPAT=PASS");

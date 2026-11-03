@@ -222,6 +222,40 @@ export const execSqlConfigSchema: HopConfigSchema = {
   ],
 };
 
+
+/**
+ * P0 DataGrid declares output metadata independently from literal input rows.
+ * Native field items have their own nested "field" container; data.line[*].item
+ * is an ordered STRING array, not an incoming-row field or a flat scalar.
+ * Preserve both LISTs and cell order; browser support for nested arrays is a
+ * separate consumer gate, not something this producer schema can assume.
+ */
+export const dataGridConfigSchema: HopConfigSchema = {
+  pluginId: "DataGrid",
+  pluginType: "transform",
+  title: "Data grid",
+  tier: "T1",
+  fields: [
+    { key: "fields.field", label: "Declared output columns", control: "EditableTable",
+      valueType: "object[]", columns: [
+        { key: "currency", label: "Currency symbol", valueType: "string" },
+        { key: "decimal", label: "Decimal symbol", valueType: "string" },
+        { key: "group", label: "Grouping symbol", valueType: "string" },
+        { key: "name", label: "Output field name", valueType: "string" },
+        { key: "type", label: "Value type", valueType: "string",
+          pickerHint: "VALUE_META_TYPE_PICKER" },
+        { key: "format", label: "Format", valueType: "string" },
+        { key: "length", label: "Length", valueType: "integer" },
+        { key: "precision", label: "Precision", valueType: "integer" },
+        { key: "set_empty_string", label: "Set empty string", valueType: "boolean" },
+      ] },
+    { key: "data.line", label: "Literal rows", control: "EditableTable",
+      valueType: "object[]",
+      description: "Each ordered line contains an ordered item STRING array. Keep the nested cell array and original column positions; do not flatten or coerce literals.",
+      columns: [{ key: "item", label: "Ordered literal cells", valueType: "string[]" }] },
+  ],
+};
+
 /**
  * P0 ConcatFields has an ordered native fields.field LIST and a separate
  * capitalized ConcatFields OBJECT containing target-field settings. Keep
@@ -497,6 +531,19 @@ execSqlConfigSchema.tabs = bindLayout(execSqlConfigSchema, [
   ] },
 ]);
 
+// DataGrid has two independent native LIST containers. The declared columns
+// are output metadata; literal data.line[*].item cells are nested STRING arrays.
+// Tabs must not flatten either structure or infer upstream-field references.
+dataGridConfigSchema.tabs = bindLayout(dataGridConfigSchema, [
+  { key: "columns", label: "Output columns", groups: [
+    { key: "metadata", label: "Declared field types and formats",
+      keys: ["fields.field"] },
+  ] },
+  { key: "rows", label: "Literal data", groups: [
+    { key: "values", label: "Ordered data rows", keys: ["data.line"] },
+  ] },
+]);
+
 // ConcatFields retains the exact capitalized native ConcatFields OBJECT and
 // the independent fields.field LIST; layout is only a grouping of those fields.
 concatFieldsConfigSchema.tabs = bindLayout(concatFieldsConfigSchema, [
@@ -555,6 +602,7 @@ const configSchemas: readonly HopConfigSchema[] = [
   replaceStringConfigSchema,
   execSqlConfigSchema,
   concatFieldsConfigSchema,
+  dataGridConfigSchema,
   httpConfigSchema,
   setVariableConfigSchema,
   databaseConnectionConfigSchema,
