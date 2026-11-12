@@ -850,3 +850,11 @@ button { cursor: pointer; }
 .generic-config .config-native-list-actions button { margin-right: 3px; padding: 5px; }
 .generic-config .config-native-list-add { margin-top: 9px; }
 .generic-config .config-native-list-empty { display: block; margin-top: 9px; color: #718096; }
+
+/* Nested Select Values editor: distinct native ordered tables, never guessed JSON keys. */
+.generic-config .config-native-object-lists { display: grid; gap: 12px; min-width: 0; }
+.generic-config .config-native-object-lists > p { margin: 0; font-size: 11px; color: #6b7690; line-height: 1.5; }
+.generic-config .config-native-list-section { min-width: 0; display: grid; gap: 6px; padding: 9px; border: 1px solid #e6eaf1; border-radius: 9px; }
+.generic-config .config-native-list-section > h4 { font-size: 12px; margin: 0; color: #394b6b; }
+.generic-config .config-native-select-unspecified { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.generic-config .config-native-list-mode { justify-self: start; }
