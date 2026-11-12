@@ -120,6 +120,57 @@ try {
   }
   console.log("V4 optional SQL Monaco proof passed: local editor, native draft sync, zero server writes.");
 
+  // A missing optional Monaco chunk must never crash the native Hop editor
+  // or discard an in-progress SQL draft. Separate Chromium context avoids the
+  // successful Monaco import in the main proof leaking into this failure case.
+  const offlinePage = await browser.newPage();
+  let blockedSqlChunks = 0;
+  let offlineConfigWrites = 0;
+  offlinePage.on("request", request => {
+    if (request.method() === "POST" &&
+        new URL(request.url()).pathname.endsWith("/config/write")) offlineConfigWrites++;
+  });
+  try {
+    await offlinePage.route(/\\/src\\/editor\\/SqlWorkbench\\.tsx(?:\\?.*)?$/, route => {
+      blockedSqlChunks++;
+      return route.abort("failed");
+    });
+    await offlinePage.goto("http://127.0.0.1:5173", { waitUntil: "networkidle" });
+    const offlineOpen = offlinePage.waitForResponse(r => match(r, "/api/pipelines/open"));
+    await offlinePage.getByLabel("Server-visible pipeline path").fill(pipelinePath);
+    await offlinePage.getByRole("button", { name: "Open pipeline" }).click();
+    if (!(await offlineOpen).ok()) throw new Error("Unable to open native Hop pipeline while simulating offline Monaco");
+    const offlineNode = offlinePage.locator('.react-flow__node[data-id="table-input"]');
+    await offlineNode.waitFor({ state: "visible" });
+    await offlineNode.click();
+    const offlineRead = offlinePage.waitForResponse(r => match(r, "/config/read"));
+    await offlinePage.getByRole("button", { name: "Configure" }).click();
+    if (!(await offlineRead).ok()) throw new Error("Native config/read failed in offline editor case");
+    const offlinePanel = offlinePage.locator("form.generic-config");
+    await offlinePanel.waitFor({ state: "visible" });
+    const offlineSql = offlinePanel.locator(`#config-${sqlDescriptor.javaField}`);
+    const oldValue = await offlineSql.inputValue();
+    await offlinePanel.locator(".config-sql-workbench > summary").click();
+    await offlinePanel.getByRole("alert", { name: "" })
+      .filter({ hasText: "专业 SQL 编辑器未能加载" })
+      .waitFor({ state: "visible", timeout: 15000 });
+    if (blockedSqlChunks !== 1) {
+      throw new Error("Did not genuinely interrupt the local Monaco editor chunk");
+    }
+    const fallbackDraft = "SELECT 99 /* Monaco failed but Hop edit survived */";
+    await offlineSql.fill(fallbackDraft);
+    if (await offlineSql.inputValue() !== fallbackDraft || oldValue === fallbackDraft) {
+      throw new Error("Native SQL textarea stopped working after optional Monaco failure");
+    }
+    await offlinePanel.getByRole("button", { name: "取消配置（Cancel）" }).click();
+    if (offlineConfigWrites !== 0) {
+      throw new Error("Failed SQL editor unexpectedly wrote native Hop configuration");
+    }
+    console.log("V4 SQL Monaco offline fallback proof passed: optional chunk failed, native form stayed usable, zero server writes.");
+  } finally {
+    await offlinePage.close();
+  }
+
   // Native Hop configuration groups may be collapsed by mouse or keyboard.
   // Searching must reveal a matching control without losing the user's group
   // preference, and neither collapse nor expansion may mutate Hop configuration.
