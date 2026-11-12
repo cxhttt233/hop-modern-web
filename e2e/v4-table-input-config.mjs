@@ -131,7 +131,7 @@ try {
         new URL(request.url()).pathname.endsWith("/config/write")) offlineConfigWrites++;
   });
   try {
-    await offlinePage.route(/\\/src\\/editor\\/SqlWorkbench\\.tsx(?:\\?.*)?$/, route => {
+    await offlinePage.route(/\/src\/editor\/SqlWorkbench\.tsx(?:\?.*)?$/, route => {
       blockedSqlChunks++;
       return route.abort("failed");
     });
