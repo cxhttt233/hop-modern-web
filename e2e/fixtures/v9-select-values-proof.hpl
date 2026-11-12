@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pipeline>
+  <info><name>v9-select-values-proof</name><name_sync_with_filename>N</name_sync_with_filename><description>V9 native three-list field editor real HPL round-trip</description><pipeline_type>Normal</pipeline_type><pipeline_status>0</pipeline_status><parameters/></info>
+  <notepads/>
+  <order/>
+  <transform>
+    <name>select-values</name>
+    <type>SelectValues</type>
+    <fields>
+      <select_unspecified>N</select_unspecified>
+    </fields>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <GUI><xloc>230</xloc><yloc>175</yloc><draw>Y</draw></GUI>
+  </transform>
+  <transform_error_handling/>
+  <attributes/>
+</pipeline>

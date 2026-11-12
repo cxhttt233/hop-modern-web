@@ -133,6 +133,11 @@ jobs:
         env:
           REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/v4-table-input-proof.hpl
         run: node e2e/v8-native-fields-table.mjs
+      - name: Prove native SelectValues three tables through real Hop and disk reopen
+        working-directory: modern
+        env:
+          REAL_HPL_PATH: ${{ github.workspace }}/modern/e2e/fixtures/v9-select-values-proof.hpl
+        run: node e2e/v9-select-values-native.mjs
       - name: Show runtime logs on failure
         if: failure()
         run: |
