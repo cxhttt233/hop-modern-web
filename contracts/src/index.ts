@@ -119,6 +119,49 @@ export interface HopConfigDocument {
   values: Record<string, unknown>;
 }
 
+export interface HopNativeWireListContract {
+  descriptorPath: string;
+  listPointer: string;
+  itemPointerTemplate: string;
+  itemWidgetHint?: string | null;
+  sourceTransformPointer?: string | null;
+}
+
+export interface HopNativeWireDescriptor {
+  wireLists?: HopNativeWireListContract[] | null;
+}
+
+/**
+ * Resolve only paths attested by the producer. Never construct an unknown
+ * list path or accept a malformed template; that could silently overwrite a
+ * different same-named nested Hop field during config/write.
+ */
+export function resolveNativeWireListItem(
+  descriptor: HopNativeWireDescriptor,
+  descriptorPath: string,
+  index: number,
+): { listPointer: string; itemPointer: string } | null {
+  if (!Number.isSafeInteger(index) || index < 0) {
+    throw new RangeError("Native LIST index must be a non-negative safe integer");
+  }
+  const matches = descriptor.wireLists?.filter(entry => entry.descriptorPath === descriptorPath) ?? [];
+  if (matches.length === 0) return null;
+  if (matches.length !== 1) {
+    throw new Error("Ambiguous native LIST descriptor path: " + descriptorPath);
+  }
+  const [contract] = matches;
+  if (!contract.listPointer.startsWith("/") ||
+      contract.listPointer.includes("{index}") ||
+      !/^\/(?:[^~]|~[01])*$/.test(contract.listPointer) ||
+      contract.itemPointerTemplate !== contract.listPointer + "/{index}") {
+    throw new Error("Invalid producer-owned native LIST pointer template");
+  }
+  return {
+    listPointer: contract.listPointer,
+    itemPointer: contract.listPointer + "/" + String(index),
+  };
+}
+
 export interface HopMetadataSummary {
   name: string;
   metadataType: string;
