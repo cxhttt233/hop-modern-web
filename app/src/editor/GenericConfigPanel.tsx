@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
+import { SqlWorkbenchBoundary } from "./SqlWorkbenchBoundary";
+
 const SqlWorkbench = lazy(() => import("./SqlWorkbench"));
 
 export type ConfigShape = "STRING" | "NUMBER" | "BOOLEAN" | "ENUM" | "OBJECT" | "LIST";
@@ -258,10 +260,12 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     {hasInlineSql && <details className="config-sql-workbench" onToggle={(event) => setSqlWorkbenchExpanded(event.currentTarget.open)}>
       <summary>专业 SQL 编辑器（可选）</summary>
       <p>SQL 代码编辑器与上方原始字段实时同步；取消配置不会写入服务器。</p>
-      {sqlWorkbenchExpanded && <Suspense fallback={<p role="status">正在加载本地 SQL 编辑器…</p>}>
-        <SqlWorkbench value={typeof draft.sql === "string" ? draft.sql : ""} disabled={Boolean(disabled)}
-          onChange={(value) => set("sql", value)} />
-      </Suspense>}
+      {sqlWorkbenchExpanded && <SqlWorkbenchBoundary>
+        <Suspense fallback={<p role="status">正在加载本地 SQL 编辑器…</p>}>
+          <SqlWorkbench value={typeof draft.sql === "string" ? draft.sql : ""} disabled={Boolean(disabled)}
+            onChange={(value) => set("sql", value)} />
+        </Suspense>
+      </SqlWorkbenchBoundary>}
     </details>}
     <footer>{changedFieldCount > 0 && <div className="config-change-review">
       <small className="config-change-count" role="status" aria-live="polite">已修改 {changedFieldCount} 项（未保存）</small>
