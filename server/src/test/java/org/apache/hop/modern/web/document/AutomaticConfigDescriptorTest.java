@@ -70,6 +70,26 @@ class AutomaticConfigDescriptorTest {
     assertEquals(Presentation.FIELD, mode.layout().presentation());
   }
 
+  @Test
+  void publishesOnlyVerifiedNativeFieldListPaths() {
+    Descriptor table = AutomaticConfigDescriptor.describe(TableInputMeta.class);
+    Descriptor sort = AutomaticConfigDescriptor.describe(SortRowsMeta.class);
+    Descriptor select = AutomaticConfigDescriptor.describe(SelectValuesMeta.class);
+    assertEquals(List.of("field"), table.wireLists().stream()
+        .map(AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals("/fields/field", table.wireLists().get(0).listPointer());
+    assertEquals("/fields/field/{index}", table.wireLists().get(0).itemPointerTemplate());
+    assertEquals("/fields/field", sort.wireLists().get(0).listPointer());
+    assertEquals(List.of("fields.field", "fields.remove", "fields.meta"),
+        select.wireLists().stream()
+            .map(AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/fields/field", "/fields/remove", "/fields/meta"),
+        select.wireLists().stream()
+            .map(AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertTrue(AutomaticConfigDescriptor.describe(EnumFixture.class).wireLists().isEmpty(),
+        "unknown metadata cannot invent native nested-list paths");
+  }
+
   private static final class EnumFixture {
     @HopMetadataProperty(storeWithCode = true)
     private Mode mode;
