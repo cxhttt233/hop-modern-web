@@ -73,6 +73,16 @@ public final class ModernWebServer {
       metadataRoot = System.getenv("HOP_METADATA_FOLDER");
     }
     IHopMetadataProvider metadataProvider = selectMetadataProvider(variables, metadataRoot);
+    return createResourceConfig(variables, metadataProvider);
+  }
+
+  /**
+   * Assemble the same HTTP routes with an explicitly selected project provider.
+   * Integration tests must exercise this real production wiring, not instantiate
+   * PipelineExecutionResource with a hand-populated in-memory substitute.
+   */
+  static ResourceConfig createResourceConfig(
+      IVariables variables, IHopMetadataProvider metadataProvider) {
     ProductContext productContext = new ProductContext(variables, metadataProvider);
     PipelineDocumentStore store =
         new PipelineDocumentStore(productContext.metadataProvider(), productContext.variables());
