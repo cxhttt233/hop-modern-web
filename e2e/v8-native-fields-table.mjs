@@ -57,6 +57,7 @@ try {
   if (savedConfig.fields?.field?.[0]?.name !== "黄河流量" ||
       savedConfig.fields?.field?.[0]?.type !== 2 ||
       savedConfig.fields?.field?.[0]?.length !== 18 ||
+      savedConfig.fields?.field?.[0]?.precision !== -1 ||
       savedConfig.fields?.field?.[0]?.format !== "0.00" ||
       Object.hasOwn(savedConfig, "field") ||
       savedConfig.connection !== read.config.connection ||
@@ -83,6 +84,7 @@ try {
   if (persisted.fields?.field?.[0]?.name !== "黄河流量" ||
       persisted.fields?.field?.[0]?.type !== 2 ||
       persisted.fields?.field?.[0]?.length !== 18 ||
+      persisted.fields?.field?.[0]?.precision !== -1 ||
       persisted.fields?.field?.[0]?.format !== "0.00" ||
       Object.hasOwn(persisted, "field") ||
       persisted.connection !== read.config.connection ||
