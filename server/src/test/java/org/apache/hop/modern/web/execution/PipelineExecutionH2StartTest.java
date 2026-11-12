@@ -151,8 +151,12 @@ class PipelineExecutionH2StartTest {
     assertEquals(202, response.getStatus());
     var accepted = (PipelineExecutionResource.ExecutionStatus) response.getEntity();
     var engine = executions.find(accepted.id()).orElseThrow().execution();
-    assertEquals(source.toString(), engine.getPipelineMeta().getFilename(),
+    assertEquals(source.toAbsolutePath().normalize().toString(),
+        Path.of(engine.getPipelineMeta().getFilename()).toAbsolutePath().normalize().toString(),
         "execution snapshot must resolve relative resources from its opened HPL path");
+    assertEquals(source.toAbsolutePath().normalize().getParent(),
+        Path.of(engine.getPipelineMeta().getFilename()).toAbsolutePath().normalize().getParent(),
+        "execution snapshot must preserve the source HPL directory");
     assertEquals("custom-river-name", engine.getPipelineMeta().getName(),
         "execution must retain the user's authored name rather than the file basename");
     engine.waitUntilFinished();
