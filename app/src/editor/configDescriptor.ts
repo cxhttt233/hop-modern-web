@@ -11,6 +11,7 @@ export interface ConfigPropertyDescriptor {
   children?: ConfigPropertyDescriptor[] | null; elementProperties?: ConfigPropertyDescriptor[] | null;
   options?: ConfigOption[] | null; textEditorHint?: TextEditorHint | null; layout?: ConfigLayoutHint | null;
   nativeNumberDefault?: number | null; nativeBooleanDefault?: boolean | null;
+  nativeStringDefault?: string | null;
 }
 export interface ConfigDescriptor { className: string; properties: ConfigPropertyDescriptor[]; }
 export interface VisibleConfigProperty { property: ConfigPropertyDescriptor; path: string; group: string; }
