@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# New commits supersede obsolete builds for the SAME event/ref only.
+# Push and each distinct PR still retain independent exact-head checks.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     runs-on: ubuntu-latest
