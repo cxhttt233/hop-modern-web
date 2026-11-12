@@ -741,6 +741,8 @@ try {
 
   // A browser reload is a new editor session: recent file paths must not leak
   // into the next session, nor trigger an implicit Hop open on page startup.
+  // The recent list is intentionally mounted only while the file chooser is open.
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
   const recentBeforeReload = page.getByRole("group", { name: "最近打开的流程" });
   if (await recentBeforeReload.getByRole("button", { name: /^填入最近流程：/ }).count() === 0) {
     throw new Error("Expected a successful real .hpl open before session reset proof");
