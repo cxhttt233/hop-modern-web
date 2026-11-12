@@ -130,4 +130,33 @@ class PipelineExecutionH2StartTest {
         ((PipelineExecutionResource.ErrorResponse) status.getEntity()).code());
   }
 
+
+  @Test
+  void executionSnapshotRetainsSourceFilenameAndUserAuthoredName() throws Exception {
+    IVariables variables = new Variables();
+    MemoryMetadataProvider provider = new MemoryMetadataProvider();
+    ProductContext context = new ProductContext(variables, provider);
+    Path source = Path.of("projects", "river", "source.hpl");
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("custom-river-name");
+
+    PipelineDocumentRegistry documents = new PipelineDocumentRegistry();
+    documents.put(new PipelineDocument("doc-path", source, pipeline));
+    ExecutionRegistry<IPipelineEngine<PipelineMeta>> executions =
+        new ExecutionRegistry<>(Duration.ofHours(1), 16);
+    PipelineExecutionResource resource =
+        new PipelineExecutionResource(documents, context, executions);
+
+    var response = resource.start("doc-path");
+    assertEquals(202, response.getStatus());
+    var accepted = (PipelineExecutionResource.ExecutionStatus) response.getEntity();
+    var engine = executions.find(accepted.id()).orElseThrow().execution();
+    assertEquals(source.toString(), engine.getPipelineMeta().getFilename(),
+        "execution snapshot must resolve relative resources from its opened HPL path");
+    assertEquals("custom-river-name", engine.getPipelineMeta().getName(),
+        "execution must retain the user's authored name rather than the file basename");
+    engine.waitUntilFinished();
+    assertEquals(0, engine.getErrors());
+  }
+
 }
