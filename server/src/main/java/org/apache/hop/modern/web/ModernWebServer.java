@@ -17,11 +17,17 @@ import jakarta.ws.rs.container.ContainerResponseFilter;
 import jakarta.ws.rs.ext.ContextResolver;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import org.apache.hop.core.HopClientEnvironment;
+import org.apache.hop.core.encryption.Encr;
+import org.apache.hop.core.encryption.HopTwoWayPasswordEncoder;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
+import org.apache.hop.metadata.serializer.json.JsonMetadataProvider;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.modern.web.document.PipelineConfigResource;
@@ -59,7 +65,14 @@ public final class ModernWebServer {
 
   static ResourceConfig createResourceConfig() {
     IVariables variables = Variables.getADefaultVariableSpace();
-    IHopMetadataProvider metadataProvider = new MemoryMetadataProvider();
+    // Bind only the metadata root explicitly configured by the server operator.
+    // Empty in-memory metadata remains a preview-only fallback, not a substitute
+    // for a real project's database connections at execution time.
+    String metadataRoot = variables.getVariable("HOP_METADATA_FOLDER");
+    if (metadataRoot == null || metadataRoot.isBlank()) {
+      metadataRoot = System.getenv("HOP_METADATA_FOLDER");
+    }
+    IHopMetadataProvider metadataProvider = selectMetadataProvider(variables, metadataRoot);
     ProductContext productContext = new ProductContext(variables, metadataProvider);
     PipelineDocumentStore store =
         new PipelineDocumentStore(productContext.metadataProvider(), productContext.variables());
@@ -80,6 +93,33 @@ public final class ModernWebServer {
         .register(new JavaTimeObjectMapperProvider())
         .register(JacksonFeature.class);
   }
+  /**
+   * Use a server-configured, native Hop project metadata directory when available.
+   * No request-provided path may select a shared metadata provider.
+   */
+  static IHopMetadataProvider selectMetadataProvider(
+      IVariables variables, String configuredMetadataRoot) {
+    if (configuredMetadataRoot == null || configuredMetadataRoot.isBlank()) {
+      return new MemoryMetadataProvider();
+    }
+    final Path root;
+    try {
+      root = Path.of(variables.resolve(configuredMetadataRoot)).toAbsolutePath().normalize();
+    } catch (InvalidPathException e) {
+      throw new IllegalStateException("configured HOP_METADATA_FOLDER has an invalid path", e);
+    }
+    if (!Files.isDirectory(root) || !Files.isReadable(root)) {
+      // Never silently fall back to empty in-memory metadata when an operator
+      // expects project connections to be available for execution.
+      throw new IllegalStateException("configured HOP_METADATA_FOLDER must be a readable directory");
+    }
+    var encoder = Encr.getEncoder();
+    return new JsonMetadataProvider(
+        encoder == null ? new HopTwoWayPasswordEncoder() : encoder,
+        root.toString(),
+        variables);
+  }
+
   /** Prevent shared browser and intermediary caches from retaining pipeline state or execution data. */
   private static final class NoStoreApiResponseFilter implements ContainerResponseFilter {
     @Override
