@@ -1,7 +1,7 @@
 // V4 contract regression: this file intentionally validates only browser/server transport shape.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findConfigSchema, listConfigSchemas, resolveNativeWireListItem } from "../dist/index.js";
+import { findConfigSchema, listConfigSchemas, resolveNativeWireListItem, readNativeWireList, writeNativeWireList } from "../dist/index.js";
 
 test("registry exposes the first real config targets", () => {
   assert.deepEqual(
@@ -95,4 +95,48 @@ test("native LIST resolver rejects cross-descriptor wire container aliasing", ()
       itemPointerTemplate: "/fields/remove/{index}" }) };
   assert.deepEqual(resolveNativeWireListItem(independent, "fields.remove", 1),
     { listPointer: "/fields/remove", itemPointer: "/fields/remove/1" });
+});
+
+test("TableInput native field editor preserves wire paths and sibling values", () => {
+  const descriptor = { wireLists: [{
+    descriptorPath: "field", listPointer: "/fields/field",
+    itemPointerTemplate: "/fields/field/{index}",
+  }] };
+  const original = { connection: "Warehouse", sql: "SELECT * FROM river",
+    fields: { field: [{ name: "甲站", type: 2, length: 32 }],
+      other: [{ keep: "nested-sibling" }] }, opaque: { credential: "keep" } };
+  const rows = readNativeWireList(original, descriptor, "field");
+  assert.deepEqual(rows, [{ name: "甲站", type: 2, length: 32 }]);
+  const changed = writeNativeWireList(original, descriptor, "field",
+    [{ ...rows[0], name: "黄河乙站", length: 64 }]);
+  assert.deepEqual(changed.fields.field, [{ name: "黄河乙站", type: 2, length: 64 }]);
+  assert.deepEqual(changed.fields.other, original.fields.other);
+  assert.deepEqual(changed.opaque, original.opaque);
+  assert.equal(changed.sql, original.sql);
+  assert.equal(Object.hasOwn(changed, "field"), false);
+  assert.equal(original.fields.field[0].name, "甲站", "native draft must be immutable");
+  assert.deepEqual(readNativeWireList({ sql: "SELECT 1" }, descriptor, "field"), []);
+  const created = writeNativeWireList({ sql: "SELECT 1" }, descriptor, "field",
+    [{ name: "新站", type: 0 }]);
+  assert.deepEqual(created, { sql: "SELECT 1", fields: { field: [{ name: "新站", type: 0 }] } });
+  assert.equal(readNativeWireList(original, descriptor, "unlisted"), null);
+  assert.throws(() => writeNativeWireList(original, descriptor, "unlisted", []),
+    /Unattested native LIST/);
+  assert.throws(() => writeNativeWireList({ fields: "bad" }, descriptor, "field", []),
+    /non-object parent/);
+  assert.throws(() => readNativeWireList({ fields: { field: "bad" } }, descriptor, "field"),
+    /not an array/);
+  assert.throws(() => writeNativeWireList({ fields: { field: "bad" } }, descriptor, "field", []),
+    /non-list value/);
+  const alias = { wireLists: [...descriptor.wireLists, {
+    descriptorPath: "other", listPointer: "/fields/field",
+    itemPointerTemplate: "/fields/field/{index}",
+  }] };
+  assert.throws(() => readNativeWireList(original, alias, "field"), /Aliased native LIST/);
+  const hostile = { wireLists: [{
+    descriptorPath: "field", listPointer: "/__proto__/field",
+    itemPointerTemplate: "/__proto__/field/{index}",
+  }] };
+  assert.throws(() => writeNativeWireList(original, hostile, "field", []),
+    /Unsafe native LIST/);
 });
