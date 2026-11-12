@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+
+const SqlWorkbench = lazy(() => import("./SqlWorkbench"));
 
 export type ConfigShape = "STRING" | "NUMBER" | "BOOLEAN" | "ENUM" | "OBJECT" | "LIST";
 export interface ConfigPropertyDescriptor {
@@ -90,6 +92,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const nextFieldMatch = useRef(0);
   // Resize only the visible editor: no graph/config write, persistence or schema change.
   const [panelWidth, setPanelWidth] = useState(600);
+  const [sqlWorkbenchExpanded, setSqlWorkbenchExpanded] = useState(false);
   const resizeStart = useRef<{ pointerId: number; x: number; width: number } | null>(null);
   const stopResize = (target: HTMLDivElement, pointerId: number) => {
     if (resizeStart.current?.pointerId !== pointerId) return;
@@ -141,7 +144,9 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   };
   // Native TableInput gives a non-empty SQL file priority over inline SQL.
   // This notice describes the current unsaved draft; it never rewrites either source.
-  const fileSqlSelected = descriptor.className.endsWith(".TableInputMeta") &&
+  const isTableInput = descriptor.className.endsWith(".TableInputMeta");
+  const hasInlineSql = isTableInput && descriptor.properties.some((property) => property.key === "sql");
+  const fileSqlSelected = isTableInput &&
     descriptor.properties.some((property) => property.key === "sql") &&
     descriptor.properties.some((property) => property.key === "sql_from_file") &&
     typeof draft.sql_from_file === "string" && draft.sql_from_file.trim().length > 0;
@@ -250,6 +255,14 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
           <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</div>
       </fieldset>;
     })}
+    {hasInlineSql && <details className="config-sql-workbench" onToggle={(event) => setSqlWorkbenchExpanded(event.currentTarget.open)}>
+      <summary>专业 SQL 编辑器（可选）</summary>
+      <p>SQL 代码编辑器与上方原始字段实时同步；取消配置不会写入服务器。</p>
+      {sqlWorkbenchExpanded && <Suspense fallback={<p role="status">正在加载本地 SQL 编辑器…</p>}>
+        <SqlWorkbench value={typeof draft.sql === "string" ? draft.sql : ""} disabled={Boolean(disabled)}
+          onChange={(value) => set("sql", value)} />
+      </Suspense>}
+    </details>}
     <footer>{changedFieldCount > 0 && <div className="config-change-review">
       <small className="config-change-count" role="status" aria-live="polite">已修改 {changedFieldCount} 项（未保存）</small>
       <details>
