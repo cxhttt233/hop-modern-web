@@ -169,6 +169,68 @@ export function resolveNativeWireListItem(
   };
 }
 
+/** Read a native LIST only through a producer-attested canonical JSON Pointer. */
+export function readNativeWireList(
+  source: Record<string, unknown>, descriptor: HopNativeWireDescriptor, descriptorPath: string,
+): unknown[] | null {
+  const address = resolveNativeWireListItem(descriptor, descriptorPath, 0);
+  if (!address) return null;
+  const parts = nativeListPointerParts(address.listPointer);
+  let current: unknown = source;
+  for (const part of parts) {
+    if (current === undefined || current === null) return [];
+    if (!isPlainRecord(current)) throw new TypeError("Native LIST parent is not an object");
+    current = current[part];
+  }
+  if (current === undefined || current === null) return [];
+  if (!Array.isArray(current)) throw new TypeError("Native LIST wire location is not an array");
+  return current;
+}
+
+/** Copy-on-write LIST update that preserves unknown siblings and native secrets. */
+export function writeNativeWireList(
+  source: Record<string, unknown>, descriptor: HopNativeWireDescriptor,
+  descriptorPath: string, rows: unknown[],
+): Record<string, unknown> {
+  const address = resolveNativeWireListItem(descriptor, descriptorPath, 0);
+  if (!address) throw new Error("Unattested native LIST path: " + descriptorPath);
+  if (!Array.isArray(rows)) throw new TypeError("Native LIST update requires an array");
+  const parts = nativeListPointerParts(address.listPointer);
+  const root = { ...source };
+  let original: unknown = source;
+  let result: Record<string, unknown> = root;
+  for (const part of parts.slice(0, -1)) {
+    if (!isPlainRecord(original)) throw new TypeError("Native LIST parent is not an object");
+    const previous: unknown = original[part];
+    if (previous !== undefined && previous !== null && !isPlainRecord(previous)) {
+      throw new TypeError("Native LIST path would overwrite a non-object parent");
+    }
+    const child: Record<string, unknown> = isPlainRecord(previous) ? { ...previous } : {};
+    result[part] = child;
+    result = child;
+    original = previous ?? {};
+  }
+  const leaf = parts[parts.length - 1];
+  const oldLeaf = isPlainRecord(original) ? original[leaf] : undefined;
+  if (oldLeaf !== undefined && oldLeaf !== null && !Array.isArray(oldLeaf)) {
+    throw new TypeError("Native LIST path would overwrite a non-list value");
+  }
+  result[leaf] = rows;
+  return root;
+}
+
+function nativeListPointerParts(pointer: string): string[] {
+  const parts = pointer.slice(1).split("/").map(part =>
+    part.replace(/~1/g, "/").replace(/~0/g, "~"));
+  // Defensive even if an invalid producer publishes a prototype-polluting key.
+  if (parts.some(part => !part || part === "__proto__" || part === "constructor" ||
+      part === "prototype")) throw new Error("Unsafe native LIST JSON Pointer");
+  return parts;
+}
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export interface HopMetadataSummary {
   name: string;
   metadataType: string;

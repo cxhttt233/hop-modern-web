@@ -13,6 +13,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.ws.rs.core.Response;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import org.apache.hop.core.row.IValueMeta;
+import org.apache.hop.pipeline.transforms.tableinput.TableInputField;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.modern.web.ModernWebServer;
@@ -154,6 +157,53 @@ class PipelineConfigResourceTest {
     assertEquals("SELECT id, name FROM customers", tableInput.getSql(), getterEvidence);
     assertEquals("Warehouse", json.path("connection").asText(), getterEvidence);
     assertEquals("SELECT id, name FROM customers", json.path("sql").asText(), getterEvidence);
+  }
+
+  @Test
+  void nativeFieldListSurvivesAuthoritativeConfigWriteAndRealDiskReopen() throws Exception {
+    HopClientEnvironment.init();
+    ModernWebServer.initializePipelinePlugins();
+    MemoryMetadataProvider provider = new MemoryMetadataProvider();
+    TableInputMeta meta = new TableInputMeta();
+    meta.setDefault();
+    meta.setConnection("Warehouse");
+    meta.setSql("SELECT 1 AS station");
+    meta.setSpecifyFields(true);
+    TableInputField field = new TableInputField();
+    field.setName("站点甲");
+    field.setType(IValueMeta.TYPE_STRING);
+    field.setFormat("yyyy-MM-dd");
+    field.setLength(32);
+    meta.setFields(List.of(field));
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("native-list-roundtrip");
+    pipeline.addTransform(new TransformMeta("TableInput", "input", meta));
+    PipelineDocumentStore store = new PipelineDocumentStore(provider, new Variables());
+    Path file = tempDir.resolve("native-fields.hpl");
+    store.save(file, pipeline);
+    PipelineMeta opened = store.open(file);
+    PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
+    registry.put(new PipelineDocument("native-doc", file, opened));
+    PipelineConfigResource resource = new PipelineConfigResource(registry, provider);
+    var read = (PipelineConfigResource.ConfigResponse) resource
+        .read("native-doc", new PipelineConfigResource.ReadRequest("input")).getEntity();
+    assertEquals("/fields/field", read.descriptor().wireLists().get(0).listPointer());
+    assertEquals("站点甲", read.config().at("/fields/field/0/name").asText());
+    assertEquals(IValueMeta.TYPE_STRING, read.config().at("/fields/field/0/type").intValue());
+    ObjectNode draft = ((ObjectNode) read.config()).deepCopy();
+    ((ObjectNode) draft.at("/fields/field/0")).put("name", "黄河站乙");
+    ((ObjectNode) draft.at("/fields/field/0")).put("length", 64);
+    assertEquals(200, resource.write("native-doc",
+        new PipelineConfigResource.WriteRequest("input", draft)).getStatus());
+    store.save(file, opened);
+    PipelineMeta reopened = store.open(file);
+    TableInputMeta restored = (TableInputMeta) reopened.findTransform("input").getTransform();
+    ObjectNode wire = ConfigJsonSerializer.toJson(restored, provider);
+    assertEquals("黄河站乙", wire.at("/fields/field/0/name").asText());
+    assertEquals(64, wire.at("/fields/field/0/length").intValue());
+    assertEquals(IValueMeta.TYPE_STRING, wire.at("/fields/field/0/type").intValue());
+    assertTrue(wire.path("field").isMissingNode(), "no incorrect root-level field key");
+    assertEquals("SELECT 1 AS station", wire.path("sql").asText());
   }
 
   @Test

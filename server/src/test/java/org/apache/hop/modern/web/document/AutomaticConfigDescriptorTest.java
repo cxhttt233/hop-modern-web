@@ -70,6 +70,33 @@ class AutomaticConfigDescriptorTest {
     assertEquals(Presentation.FIELD, mode.layout().presentation());
   }
 
+  @Test
+  void publishesOnlyVerifiedNativeFieldListPaths() {
+    Descriptor table = AutomaticConfigDescriptor.describe(TableInputMeta.class);
+    Descriptor sort = AutomaticConfigDescriptor.describe(SortRowsMeta.class);
+    Descriptor select = AutomaticConfigDescriptor.describe(SelectValuesMeta.class);
+    assertEquals(List.of("field"), table.wireLists().stream()
+        .map(AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals("/fields/field", table.wireLists().get(0).listPointer());
+    Property tableField = property(table.properties(), "field");
+    assertEquals(-1, property(tableField.elementProperties(), "length").nativeNumberDefault());
+    assertEquals(-1, property(tableField.elementProperties(), "precision").nativeNumberDefault());
+    assertEquals("/fields/field/{index}", table.wireLists().get(0).itemPointerTemplate());
+    assertEquals("/fields/field", sort.wireLists().get(0).listPointer());
+    Property sortField = property(sort.properties(), "field");
+    assertEquals(Boolean.TRUE, property(sortField.elementProperties(), "ascending").nativeBooleanDefault());
+    assertEquals(Boolean.TRUE, property(sortField.elementProperties(), "case_sensitive").nativeBooleanDefault());
+    assertEquals(null, property(sortField.elementProperties(), "collator_enabled").nativeBooleanDefault());
+    assertEquals(List.of("fields.field", "fields.remove", "fields.meta"),
+        select.wireLists().stream()
+            .map(AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
+    assertEquals(List.of("/fields/field", "/fields/remove", "/fields/meta"),
+        select.wireLists().stream()
+            .map(AutomaticConfigDescriptor.WireListContract::listPointer).toList());
+    assertTrue(AutomaticConfigDescriptor.describe(EnumFixture.class).wireLists().isEmpty(),
+        "unknown metadata cannot invent native nested-list paths");
+  }
+
   private static final class EnumFixture {
     @HopMetadataProperty(storeWithCode = true)
     private Mode mode;

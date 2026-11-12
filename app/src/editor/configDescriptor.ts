@@ -10,6 +10,7 @@ export interface ConfigPropertyDescriptor {
   defaultBoolean?: boolean; enumNameWhenNotFound?: string | null; elementJavaType?: string | null;
   children?: ConfigPropertyDescriptor[] | null; elementProperties?: ConfigPropertyDescriptor[] | null;
   options?: ConfigOption[] | null; textEditorHint?: TextEditorHint | null; layout?: ConfigLayoutHint | null;
+  nativeNumberDefault?: number | null; nativeBooleanDefault?: boolean | null;
 }
 export interface ConfigDescriptor { className: string; properties: ConfigPropertyDescriptor[]; }
 export interface VisibleConfigProperty { property: ConfigPropertyDescriptor; path: string; group: string; }

@@ -21,7 +21,7 @@ public final class AutomaticConfigDescriptor {
   }
 
   private static Descriptor describe(Class<?> type, int depth, Set<Class<?>> ancestors) {
-    if (depth > MAX_DEPTH || !ancestors.add(type)) return new Descriptor(type.getName(), List.of());
+    if (depth > MAX_DEPTH || !ancestors.add(type)) return new Descriptor(type.getName(), List.of(), List.of());
     List<Property> properties = new ArrayList<>();
     int order = 0;
     for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
@@ -40,10 +40,45 @@ public final class AutomaticConfigDescriptor {
             metadata.groupKey(), metadata.password(), metadata.storeWithName(), metadata.storeWithCode(),
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
-            new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD)));
+            new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
+            nativeNumericDefault(type, key, shape), nativeBooleanDefault(type, key, shape)));
       }
     }
-    return new Descriptor(type.getName(), List.copyOf(properties));
+    return new Descriptor(type.getName(), List.copyOf(properties), canonicalWireLists(type));
+  }
+
+  /** Canonical LIST paths verified against the pinned native Hop ConfigJsonSerializer. */
+  private static List<WireListContract> canonicalWireLists(Class<?> type) {
+    return switch (type.getName()) {
+      case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta",
+           "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" ->
+          List.of(new WireListContract("field", "/fields/field", "/fields/field/{index}"));
+      case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
+          new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
+          new WireListContract("fields.remove", "/fields/remove", "/fields/remove/{index}"),
+          new WireListContract("fields.meta", "/fields/meta", "/fields/meta/{index}"));
+      default -> List.of();
+    };
+  }
+
+  /** Defaults verified on the pinned native TableInputField Java constructor. */
+  private static Integer nativeNumericDefault(Class<?> owner, String key, Shape shape) {
+    if (shape == Shape.NUMBER
+        && owner.getName().equals("org.apache.hop.pipeline.transforms.tableinput.TableInputField")
+        && ("length".equals(key) || "precision".equals(key))) {
+      return -1;
+    }
+    return null;
+  }
+
+  /** Native SortRowsField defaults: ascending and caseSensitive both true. */
+  private static Boolean nativeBooleanDefault(Class<?> owner, String key, Shape shape) {
+    if (shape == Shape.BOOLEAN
+        && owner.getName().equals("org.apache.hop.pipeline.transforms.sort.SortRowsField")
+        && ("ascending".equals(key) || "case_sensitive".equals(key))) {
+      return true;
+    }
+    return null;
   }
 
   private static Class<?> itemType(Field field, HopMetadataProperty metadata) {
@@ -93,11 +128,13 @@ public final class AutomaticConfigDescriptor {
 
   public enum Shape { STRING, NUMBER, BOOLEAN, ENUM, OBJECT, LIST }
   public enum Presentation { FIELD, TABLE }
-  public record Descriptor(String className, List<Property> properties) {}
+  public record Descriptor(String className, List<Property> properties, List<WireListContract> wireLists) {}
+  public record WireListContract(String descriptorPath, String listPointer, String itemPointerTemplate) {}
   public record Option(String label, String value) {}
   public record LayoutHint(int order, String group, Presentation presentation) {}
   public record Property(String key, String javaField, Shape shape, String javaType, String groupKey,
       boolean sensitive, boolean storeWithName, boolean storeWithCode, boolean defaultBoolean,
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
-      List<Property> elementProperties, List<Option> options, LayoutHint layout) {}
+      List<Property> elementProperties, List<Option> options, LayoutHint layout,
+      Integer nativeNumberDefault, Boolean nativeBooleanDefault) {}
 }

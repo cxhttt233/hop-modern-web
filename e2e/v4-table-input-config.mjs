@@ -404,6 +404,9 @@ try {
   const listDescriptor = initial.descriptor?.properties?.find(p => p.key === "field" && p.shape === "LIST");
   if (!listDescriptor) throw new Error("Real TableInput LIST descriptor missing");
   const listField = panel.locator(`#config-${listDescriptor.javaField}`);
+  // Typed native rows are now the default, but the prior JSON recovery
+  // acceptance remains mandatory through the explicit T0 fallback.
+  await panel.getByRole("button", { name: "切换字段原始 JSON 编辑" }).click();
   const originalListText = await listField.inputValue();
   const configWriteCount = () => requests.filter(({url, method}) =>
     method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
@@ -456,6 +459,7 @@ try {
     throw new Error("Cancel after invalid LIST JSON changed authoritative Hop config");
   }
   await panel.waitFor({ state: "visible" });
+  await panel.getByRole("button", { name: "切换字段原始 JSON 编辑" }).click();
   if (await listField.inputValue() !== originalListText ||
       await panel.getByRole("alert").count() !== 0 ||
       configWriteCount() !== writesBeforeInvalid) {
