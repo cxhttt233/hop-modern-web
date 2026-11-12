@@ -78,6 +78,9 @@ class AutomaticConfigDescriptorTest {
     assertEquals(List.of("field"), table.wireLists().stream()
         .map(AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
     assertEquals("/fields/field", table.wireLists().get(0).listPointer());
+    Property tableField = property(table.properties(), "field");
+    assertEquals(-1, property(tableField.elementProperties(), "length").nativeNumberDefault());
+    assertEquals(-1, property(tableField.elementProperties(), "precision").nativeNumberDefault());
     assertEquals("/fields/field/{index}", table.wireLists().get(0).itemPointerTemplate());
     assertEquals("/fields/field", sort.wireLists().get(0).listPointer());
     assertEquals(List.of("fields.field", "fields.remove", "fields.meta"),
