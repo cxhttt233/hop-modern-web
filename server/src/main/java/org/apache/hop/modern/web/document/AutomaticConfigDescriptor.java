@@ -41,7 +41,8 @@ public final class AutomaticConfigDescriptor {
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
-            nativeNumericDefault(type, key, shape), nativeBooleanDefault(type, key, shape)));
+            nativeNumericDefault(type, key, shape), nativeBooleanDefault(type, key, shape),
+            nativeStringDefault(type, key, shape)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), canonicalWireLists(type));
@@ -63,10 +64,14 @@ public final class AutomaticConfigDescriptor {
 
   /** Defaults verified on the pinned native TableInputField Java constructor. */
   private static Integer nativeNumericDefault(Class<?> owner, String key, Shape shape) {
-    if (shape == Shape.NUMBER
-        && owner.getName().equals("org.apache.hop.pipeline.transforms.tableinput.TableInputField")
-        && ("length".equals(key) || "precision".equals(key))) {
-      return -1;
+    if (shape == Shape.NUMBER && ("length".equals(key) || "precision".equals(key))) {
+      return switch (owner.getName()) {
+        case "org.apache.hop.pipeline.transforms.tableinput.TableInputField",
+             "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange" -> -1;
+        // SelectValues SelectField uses a distinct UNDEFINED = -2 sentinel.
+        case "org.apache.hop.pipeline.transforms.selectvalues.SelectField" -> -2;
+        default -> null;
+      };
     }
     return null;
   }
@@ -77,6 +82,17 @@ public final class AutomaticConfigDescriptor {
         && owner.getName().equals("org.apache.hop.pipeline.transforms.sort.SortRowsField")
         && ("ascending".equals(key) || "case_sensitive".equals(key))) {
       return true;
+    }
+    return null;
+  }
+
+  /** Native SelectMetadataChange uses ValueMeta TYPE_NONE as its default type name. */
+  private static String nativeStringDefault(Class<?> owner, String key, Shape shape) {
+    if (shape == Shape.STRING && "type".equals(key)
+        && owner.getName().equals(
+            "org.apache.hop.pipeline.transforms.selectvalues.SelectMetadataChange")) {
+      return org.apache.hop.core.row.value.ValueMetaFactory.getValueMetaName(
+          org.apache.hop.core.row.IValueMeta.TYPE_NONE);
     }
     return null;
   }
@@ -136,5 +152,5 @@ public final class AutomaticConfigDescriptor {
       boolean sensitive, boolean storeWithName, boolean storeWithCode, boolean defaultBoolean,
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
       List<Property> elementProperties, List<Option> options, LayoutHint layout,
-      Integer nativeNumberDefault, Boolean nativeBooleanDefault) {}
+      Integer nativeNumberDefault, Boolean nativeBooleanDefault, String nativeStringDefault) {}
 }
