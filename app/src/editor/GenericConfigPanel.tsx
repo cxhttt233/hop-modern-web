@@ -93,6 +93,9 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const [draft, setDraft] = useState<Record<string, unknown>>(() => Object.fromEntries(
     descriptor.properties.filter((p) => !p.sensitive).map((p) => [p.key, nativeValue(p)])));
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
+  // Explicit T0 escape hatch: malformed JSON validation remains available
+  // without making the raw textarea the default for native typed LISTs.
+  const [rawListEditors, setRawListEditors] = useState<Record<string, boolean>>({});
   const [invalidFocusKey, setInvalidFocusKey] = useState<string | null>(null);
   // Field navigation is presentation-only: never search or expose configuration values.
   const [fieldQuery, setFieldQuery] = useState("");
@@ -181,7 +184,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     const value = draft[p.key]; const id = `config-${p.javaField}`;
     if (p.shape === "BOOLEAN") return <input id={id} disabled={disabled} type="checkbox" checked={Boolean(value)} onChange={(e) => set(p.key, e.target.checked)} />;
     if (p.shape === "NUMBER") return <input id={id} disabled={disabled} type="number" value={value == null ? "" : String(value)} onChange={(e) => set(p.key, e.target.value === "" ? undefined : Number(e.target.value))} />;
-    if (p.shape === "LIST" && resolveNativeWireListItem(descriptor, p.key, 0) &&
+    if (p.shape === "LIST" && !rawListEditors[p.key] &&
+        resolveNativeWireListItem(descriptor, p.key, 0) &&
         canEditNativeList(value, p.elementProperties ?? [])) {
       return <NativeListEditor title={label(p)} value={value} properties={p.elementProperties ?? []}
         disabled={disabled} onChange={rows => set(p.key, rows)} />;
@@ -267,10 +271,21 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>{groupLabel}<small>{properties.length} 项</small>
         </button></legend>
         <div id={groupId} className="config-group-fields" hidden={!expanded}>{properties.map((p) =>
-          p.shape === "LIST" && resolveNativeWireListItem(descriptor, p.key, 0) &&
-            canEditNativeList(draft[p.key], p.elementProperties ?? [])
-            ? <div key={p.key} className="config-native-list-field" data-config-key={p.key} role="group" aria-label={label(p)}>
-                <strong>{label(p)}</strong>{field(p)}
+          p.shape === "LIST" && resolveNativeWireListItem(descriptor, p.key, 0)
+            ? <div key={p.key} className="config-native-list-field" role="group" aria-label={label(p)}>
+                <strong>{label(p)}</strong>
+                {canEditNativeList(draft[p.key], p.elementProperties ?? []) &&
+                  <button type="button" className="config-native-list-mode"
+                    aria-label={rawListEditors[p.key] ? "返回字段表格" : "切换字段原始 JSON 编辑"}
+                    onClick={() => setRawListEditors(current => ({ ...current, [p.key]: !current[p.key] }))}>
+                    {rawListEditors[p.key] ? "返回字段表格" : "原始 JSON 编辑"}
+                  </button>}
+                {rawListEditors[p.key] || !canEditNativeList(draft[p.key], p.elementProperties ?? [])
+                  ? <label data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}>
+                      <span>原生字段 JSON</span>{field(p)}
+                      {invalid[p.key] && <small role="alert">请输入有效的列表 JSON</small>}
+                    </label>
+                  : field(p)}
               </div>
             : <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}>
                 <span>{label(p)}</span>{field(p)}
