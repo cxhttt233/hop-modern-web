@@ -21,7 +21,7 @@ public final class AutomaticConfigDescriptor {
   }
 
   private static Descriptor describe(Class<?> type, int depth, Set<Class<?>> ancestors) {
-    if (depth > MAX_DEPTH || !ancestors.add(type)) return new Descriptor(type.getName(), List.of());
+    if (depth > MAX_DEPTH || !ancestors.add(type)) return new Descriptor(type.getName(), List.of(), List.of());
     List<Property> properties = new ArrayList<>();
     int order = 0;
     for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
@@ -43,7 +43,21 @@ public final class AutomaticConfigDescriptor {
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD)));
       }
     }
-    return new Descriptor(type.getName(), List.copyOf(properties));
+    return new Descriptor(type.getName(), List.copyOf(properties), canonicalWireLists(type));
+  }
+
+  /** Canonical LIST paths verified against the pinned native Hop ConfigJsonSerializer. */
+  private static List<WireListContract> canonicalWireLists(Class<?> type) {
+    return switch (type.getName()) {
+      case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta",
+           "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" ->
+          List.of(new WireListContract("field", "/fields/field", "/fields/field/{index}"));
+      case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
+          new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
+          new WireListContract("fields.remove", "/fields/remove", "/fields/remove/{index}"),
+          new WireListContract("fields.meta", "/fields/meta", "/fields/meta/{index}"));
+      default -> List.of();
+    };
   }
 
   private static Class<?> itemType(Field field, HopMetadataProperty metadata) {
@@ -93,7 +107,8 @@ public final class AutomaticConfigDescriptor {
 
   public enum Shape { STRING, NUMBER, BOOLEAN, ENUM, OBJECT, LIST }
   public enum Presentation { FIELD, TABLE }
-  public record Descriptor(String className, List<Property> properties) {}
+  public record Descriptor(String className, List<Property> properties, List<WireListContract> wireLists) {}
+  public record WireListContract(String descriptorPath, String listPointer, String itemPointerTemplate) {}
   public record Option(String label, String value) {}
   public record LayoutHint(int order, String group, Presentation presentation) {}
   public record Property(String key, String javaField, Shape shape, String javaType, String groupKey,
