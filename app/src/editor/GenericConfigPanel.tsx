@@ -1,15 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { SqlWorkbenchBoundary } from "./SqlWorkbenchBoundary";
+import { NativeListEditor, canEditNativeList } from "./NativeListEditor";
+import { readNativeWireList, writeNativeWireList, resolveNativeWireListItem, type HopNativeWireDescriptor } from "@hop-modern/contracts";
+import type { ConfigPropertyDescriptor as NativeConfigPropertyDescriptor } from "./configDescriptor";
 
 const SqlWorkbench = lazy(() => import("./SqlWorkbench"));
 
 export type ConfigShape = "STRING" | "NUMBER" | "BOOLEAN" | "ENUM" | "OBJECT" | "LIST";
-export interface ConfigPropertyDescriptor {
-  key: string; javaField: string; shape: ConfigShape; javaType: string;
-  groupKey?: string | null; sensitive?: boolean; storeWithName?: boolean; storeWithCode?: boolean;
-}
-export interface ConfigDescriptor { className: string; properties: ConfigPropertyDescriptor[]; }
+export type ConfigPropertyDescriptor = NativeConfigPropertyDescriptor;
+export interface ConfigDescriptor extends HopNativeWireDescriptor { className: string; properties: ConfigPropertyDescriptor[]; }
 export interface GenericConfigPanelProps {
   descriptor: ConfigDescriptor; config: Record<string, unknown>; disabled?: boolean;
   transformName?: string; transformId?: string;
@@ -77,13 +77,19 @@ export function applyGenericConfigDraft(original: Record<string, unknown>, descr
     if (!(property.key in draft)) return next;
     const value = draft[property.key];
     if (property.sensitive && (value === "" || value === undefined)) return next;
+    if (property.shape === "LIST" && resolveNativeWireListItem(descriptor, property.key, 0)) {
+      return Array.isArray(value) ? writeNativeWireList(next, descriptor, property.key, value) : next;
+    }
     return write(next, property.key, value);
   }, { ...original });
 }
 
 export function GenericConfigPanel({ descriptor, config, transformName, transformId, disabled, onCancel, onSave }: GenericConfigPanelProps) {
+  const nativeValue = (p: ConfigPropertyDescriptor): unknown =>
+    p.shape === "LIST" && resolveNativeWireListItem(descriptor, p.key, 0) ?
+      readNativeWireList(config, descriptor, p.key) : read(config, p.key);
   const [draft, setDraft] = useState<Record<string, unknown>>(() => Object.fromEntries(
-    descriptor.properties.filter((p) => !p.sensitive).map((p) => [p.key, read(config, p.key)])));
+    descriptor.properties.filter((p) => !p.sensitive).map((p) => [p.key, nativeValue(p)])));
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [invalidFocusKey, setInvalidFocusKey] = useState<string | null>(null);
   // Field navigation is presentation-only: never search or expose configuration values.
@@ -121,7 +127,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     if (!Object.prototype.hasOwnProperty.call(draft, property.key)) return false;
     const value = draft[property.key];
     if (property.sensitive && (value === "" || value === undefined)) return false;
-    const original = read(config, property.key);
+    const original = nativeValue(property);
     return !(Object.is(value, original) || JSON.stringify(value) === JSON.stringify(original));
   });
   const changedFieldCount = changedFields.length;
@@ -173,6 +179,11 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     const value = draft[p.key]; const id = `config-${p.javaField}`;
     if (p.shape === "BOOLEAN") return <input id={id} disabled={disabled} type="checkbox" checked={Boolean(value)} onChange={(e) => set(p.key, e.target.checked)} />;
     if (p.shape === "NUMBER") return <input id={id} disabled={disabled} type="number" value={value == null ? "" : String(value)} onChange={(e) => set(p.key, e.target.value === "" ? undefined : Number(e.target.value))} />;
+    if (p.shape === "LIST" && resolveNativeWireListItem(descriptor, p.key, 0) &&
+        canEditNativeList(value, p.elementProperties ?? [])) {
+      return <NativeListEditor title={label(p)} value={value} properties={p.elementProperties ?? []}
+        disabled={disabled} onChange={rows => set(p.key, rows)} />;
+    }
     if (p.shape === "OBJECT" || p.shape === "LIST") {
       const text = typeof value === "string" ? value : JSON.stringify(value ?? (p.shape === "LIST" ? [] : {}), null, 2);
       return <textarea id={id} disabled={disabled} rows={p.shape === "LIST" ? 8 : 6} value={text} onChange={(e) => {
@@ -254,7 +265,15 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>{groupLabel}<small>{properties.length} 项</small>
         </button></legend>
         <div id={groupId} className="config-group-fields" hidden={!expanded}>{properties.map((p) =>
-          <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}><span>{label(p)}</span>{field(p)}{invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}</label>)}</div>
+          p.shape === "LIST" && resolveNativeWireListItem(descriptor, p.key, 0) &&
+            canEditNativeList(draft[p.key], p.elementProperties ?? [])
+            ? <div key={p.key} className="config-native-list-field" data-config-key={p.key} role="group" aria-label={label(p)}>
+                <strong>{label(p)}</strong>{field(p)}
+              </div>
+            : <label key={p.key} data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}>
+                <span>{label(p)}</span>{field(p)}
+                {invalid[p.key] && <small role="alert">请输入有效的 {p.shape === "LIST" ? "列表" : "对象"} JSON</small>}
+              </label>)}</div>
       </fieldset>;
     })}
     {hasInlineSql && <details className="config-sql-workbench" onToggle={(event) => setSqlWorkbenchExpanded(event.currentTarget.open)}>
