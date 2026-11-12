@@ -78,7 +78,9 @@ export function applyGenericConfigDraft(original: Record<string, unknown>, descr
     const value = draft[property.key];
     if (property.sensitive && (value === "" || value === undefined)) return next;
     if (property.shape === "LIST" && resolveNativeWireListItem(descriptor, property.key, 0)) {
-      return Array.isArray(value) ? writeNativeWireList(next, descriptor, property.key, value) : next;
+      const unchanged = readNativeWireList(original, descriptor, property.key);
+      return Array.isArray(value) && JSON.stringify(value) !== JSON.stringify(unchanged)
+        ? writeNativeWireList(next, descriptor, property.key, value) : next;
     }
     return write(next, property.key, value);
   }, { ...original });
