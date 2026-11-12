@@ -140,3 +140,38 @@ test("TableInput native field editor preserves wire paths and sibling values", (
   assert.throws(() => writeNativeWireList(original, hostile, "field", []),
     /Unsafe native LIST/);
 });
+
+test("SelectValues three native ordered lists stay independent and immutable", () => {
+  const schema = { wireLists: [
+    { descriptorPath: "fields.field", listPointer: "/fields/field", itemPointerTemplate: "/fields/field/{index}" },
+    { descriptorPath: "fields.remove", listPointer: "/fields/remove", itemPointerTemplate: "/fields/remove/{index}" },
+    { descriptorPath: "fields.meta", listPointer: "/fields/meta", itemPointerTemplate: "/fields/meta/{index}" },
+  ] };
+  const original = { fields: {
+    field: [{ name: "上游流量", rename: "flow_before", length: -2, precision: -2 }],
+    remove: [{ name: "legacy" }],
+    meta: [{ name: "flow_before", type: "Number", length: -1, precision: -1 }],
+    select_unspecified: false,
+    opaque: { keep: true },
+  }, rootOpaque: { keep: true } };
+  const chosen = readNativeWireList(original, schema, "fields.field");
+  assert.equal(chosen[0].length, -2);
+  const renamed = writeNativeWireList(original, schema, "fields.field",
+    [{ ...chosen[0], rename: "黄河流量" }]);
+  const removed = writeNativeWireList(renamed, schema, "fields.remove",
+    [{ name: "临时字段" }]);
+  const metadata = writeNativeWireList(removed, schema, "fields.meta",
+    [{ ...readNativeWireList(removed, schema, "fields.meta")[0], name: "黄河流量" }]);
+  assert.deepEqual(metadata.fields.field, [{ name: "上游流量", rename: "黄河流量",
+    length: -2, precision: -2 }]);
+  assert.deepEqual(metadata.fields.remove, [{ name: "临时字段" }]);
+  assert.deepEqual(metadata.fields.meta, [{ name: "黄河流量", type: "Number", length: -1,
+    precision: -1 }]);
+  assert.equal(metadata.fields.select_unspecified, false);
+  assert.deepEqual(metadata.fields.opaque, { keep: true });
+  assert.deepEqual(metadata.rootOpaque, { keep: true });
+  assert.deepEqual(original.fields.remove, [{ name: "legacy" }]);
+  assert.equal(Object.hasOwn(metadata, "field"), false);
+  assert.throws(() => writeNativeWireList(metadata, schema, "fields.other", []),
+    /Unattested native LIST/);
+});
