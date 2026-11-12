@@ -739,6 +739,25 @@ try {
   console.log("Mixed-Hop native proof passed: active Y and disabled N branches -> React Flow isolation -> real TableInput add -> XML save -> disk reopen.");
 
 
+  // A browser reload is a new editor session: recent file paths must not leak
+  // into the next session, nor trigger an implicit Hop open on page startup.
+  // The recent list is intentionally mounted only while the file chooser is open.
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  const recentBeforeReload = page.getByRole("group", { name: "最近打开的流程" });
+  if (await recentBeforeReload.getByRole("button", { name: /^填入最近流程：/ }).count() === 0) {
+    throw new Error("Expected a successful real .hpl open before session reset proof");
+  }
+  const opensBeforeReload = requests.filter((url) => new URL(url).pathname === "/api/pipelines/open").length;
+  await page.reload({ waitUntil: "networkidle" });
+  if (await page.getByRole("group", { name: "最近打开的流程" }).count() !== 0) {
+    throw new Error("Session-only recent Hop paths survived browser reload");
+  }
+  const opensAfterReload = requests.filter((url) => new URL(url).pathname === "/api/pipelines/open").length;
+  if (opensAfterReload !== opensBeforeReload) {
+    throw new Error("Reload unexpectedly opened a server-visible Hop file");
+  }
+  console.log("Recent Hop session boundary proof passed: reload clears paths and performs zero implicit native opens.");
+
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;
     return path === "/ui" || path.startsWith("/ui/");

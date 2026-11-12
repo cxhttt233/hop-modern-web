@@ -1,6 +1,18 @@
 # Implementation Status
 
-Updated: 2026-09-24
+Updated: 2026-11-12
+
+## Verified non-production integration — 2026-11-12
+
+The separate Modern Web repository is the product authority; `cxhttt233/hop` remains the pinned Apache Hop engine source. The protected production execution path is NOT released.
+
+- **Current pre-integration staging checkpoint:** `integration/product-mainline-20261112` @ `68abcbddadf219a3f20b9257991e2da199abbd18`; [GitHub Actions 43209608707](https://github.com/cxhttt233/hop-modern-web/actions/runs/43209608707) completed **3/3 SUCCESS** (frontend including native contracts tests, server including anonymous-execution HTTP negative test, and real-Hop Chromium editor E2E).
+- **Native editor evidence:** real `.hpl` open -> Graph JSON -> React Flow interactions -> semantic edits -> config draft/save -> Hop XML disk reopen, with no RAP `/ui` navigation. This establishes the tested preview slices, not full metadata coverage or unified release readiness.
+- **This Task 5 admission candidate (separate draft branch):** port the *specific* Task 3 LIST-container alias guard and its contract test from `379d176a`, plus Task 4's post-reload recent-file/no-implicit-open browser proof from `c405a114`. Source runs [43226952704](https://github.com/cxhttt233/hop-modern-web/actions/runs/43226952704) and [43227848564](https://github.com/cxhttt233/hop-modern-web/actions/runs/43227848564) are green. The candidate itself requires its own exact-head CI before integration; do not infer success from source runs.
+- **Still incomplete:** Task 3/4 full typed native LIST/OBJECT editing and metadata picker consumption; Task 1 trusted principal, authorization, per-session ownership and Origin/CSRF for protected execution; Task 2 queued Workflow start-time correctness and terminal cleanup (server CI red). Fresh independent review plus complete negative security tests remain mandatory for main/production release.
+- **Separation:** safe preview development may proceed without admitting privileged execution. No changes to `main`, deployments, the engine fork, or hourly schedules follow from this checkpoint.
+
+### Historical bootstrap record (2026-09-24)
 
 ## Repository state
 
