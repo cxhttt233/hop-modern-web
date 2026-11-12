@@ -75,3 +75,24 @@ test("native LIST address resolver never guesses paths or overwrites a sibling l
     itemPointerTemplate: "/fields/other/{index}",
   }] }, "fields.field", 0), /Invalid producer-owned/);
 });
+
+test("native LIST resolver rejects cross-descriptor wire container aliasing", () => {
+  const descriptor = {
+    wireLists: [
+      { descriptorPath: "fields.field", listPointer: "/fields/field",
+        itemPointerTemplate: "/fields/field/{index}" },
+      { descriptorPath: "fields.remove", listPointer: "/fields/field",
+        itemPointerTemplate: "/fields/field/{index}" },
+    ],
+  };
+  for (const path of ["fields.field", "fields.remove"]) {
+    assert.throws(() => resolveNativeWireListItem(descriptor, path, 0),
+      /Aliased native LIST wire pointer/,
+      "different native lists must never share a writable JSON container");
+  }
+  const independent = { wireLists: descriptor.wireLists.map((entry, index) =>
+    index === 0 ? entry : { ...entry, listPointer: "/fields/remove",
+      itemPointerTemplate: "/fields/remove/{index}" }) };
+  assert.deepEqual(resolveNativeWireListItem(independent, "fields.remove", 1),
+    { listPointer: "/fields/remove", itemPointer: "/fields/remove/1" });
+});

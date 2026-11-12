@@ -150,6 +150,13 @@ export function resolveNativeWireListItem(
     throw new Error("Ambiguous native LIST descriptor path: " + descriptorPath);
   }
   const [contract] = matches;
+  // A producer must never assign one wire container to two distinct
+  // descriptor paths: otherwise editing either table silently edits the other.
+  // This is a cross-entry invariant, not just a duplicate descriptor-path check.
+  if (descriptor.wireLists?.some(entry =>
+      entry !== contract && entry.listPointer === contract.listPointer)) {
+    throw new Error("Aliased native LIST wire pointer: " + contract.listPointer);
+  }
   if (!contract.listPointer.startsWith("/") ||
       contract.listPointer.includes("{index}") ||
       !/^\/(?:[^~]|~[01])*$/.test(contract.listPointer) ||
