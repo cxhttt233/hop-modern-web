@@ -83,6 +83,10 @@ class AutomaticConfigDescriptorTest {
     assertEquals(-1, property(tableField.elementProperties(), "precision").nativeNumberDefault());
     assertEquals("/fields/field/{index}", table.wireLists().get(0).itemPointerTemplate());
     assertEquals("/fields/field", sort.wireLists().get(0).listPointer());
+    Property sortField = property(sort.properties(), "field");
+    assertEquals(Boolean.TRUE, property(sortField.elementProperties(), "ascending").nativeBooleanDefault());
+    assertEquals(Boolean.TRUE, property(sortField.elementProperties(), "case_sensitive").nativeBooleanDefault());
+    assertEquals(null, property(sortField.elementProperties(), "collator_enabled").nativeBooleanDefault());
     assertEquals(List.of("fields.field", "fields.remove", "fields.meta"),
         select.wireLists().stream()
             .map(AutomaticConfigDescriptor.WireListContract::descriptorPath).toList());
