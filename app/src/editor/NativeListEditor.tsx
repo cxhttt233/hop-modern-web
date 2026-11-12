@@ -35,7 +35,7 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     onChange(changed);
   };
   const add = () => onChange([...rows, Object.fromEntries(properties.map(p =>
-    [p.key, p.shape === "BOOLEAN" ? false : p.shape === "NUMBER" ? 0 : ""]))]);
+    [p.key, p.shape === "BOOLEAN" ? false : p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) : ""]))]);
   return <div className="config-native-list">
     <div className="config-native-list-scroll">
       <table aria-label={title + "原生字段列表"}>
