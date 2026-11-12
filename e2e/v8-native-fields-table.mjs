@@ -59,8 +59,8 @@ try {
       savedConfig.fields?.field?.[0]?.length !== 18 ||
       savedConfig.fields?.field?.[0]?.format !== "0.00" ||
       Object.hasOwn(savedConfig, "field") ||
-      savedConfig.connection !== "Warehouse" ||
-      savedConfig.sql !== "SELECT id, name FROM customers") {
+      savedConfig.connection !== read.config.connection ||
+      savedConfig.sql !== read.config.sql) {
     throw new Error("Native Hop LIST write mismatch: " + JSON.stringify({
       row: savedConfig.fields?.field?.[0] ?? null,
       nativeFieldCount: savedConfig.fields?.field?.length ?? null,
@@ -84,7 +84,9 @@ try {
       persisted.fields?.field?.[0]?.type !== 2 ||
       persisted.fields?.field?.[0]?.length !== 18 ||
       persisted.fields?.field?.[0]?.format !== "0.00" ||
-      Object.hasOwn(persisted, "field")) {
+      Object.hasOwn(persisted, "field") ||
+      persisted.connection !== read.config.connection ||
+      persisted.sql !== read.config.sql) {
     throw new Error("Native fields not preserved across actual Hop .hpl disk reopen");
   }
   await table.waitFor({ state: "visible" });
