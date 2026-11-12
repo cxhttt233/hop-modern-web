@@ -61,7 +61,13 @@ try {
       Object.hasOwn(savedConfig, "field") ||
       savedConfig.connection !== "Warehouse" ||
       savedConfig.sql !== "SELECT id, name FROM customers") {
-    throw new Error("Native Hop LIST write lost field types or unrelated config");
+    throw new Error("Native Hop LIST write mismatch: " + JSON.stringify({
+      row: savedConfig.fields?.field?.[0] ?? null,
+      nativeFieldCount: savedConfig.fields?.field?.length ?? null,
+      rootFieldPresent: Object.hasOwn(savedConfig, "field"),
+      connection: savedConfig.connection,
+      sql: savedConfig.sql,
+    }));
   }
   const save = page.waitForResponse(response => isPost(response, "/save"));
   await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
