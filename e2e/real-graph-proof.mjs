@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import { fileURLToPath } from "node:url";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 const pipelinePath = process.env.REAL_HPL_PATH;
@@ -361,6 +361,383 @@ try {
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await page.locator('.file-identity[data-document-name="real-graph-proof"]').waitFor({ state: "visible" });
   console.log("Recent-file clear proof passed: session shortcuts removed without changing real Hop graph or network requests.");
+
+  // A server-visible .hpl filename is untrusted text. React must never parse
+  // HTML-like path segments as markup in the session-only recent-file chooser.
+  // Use a real copied Hop document and real browser/backend requests.
+  const htmlLikeName = "<img src=x onerror=alert(1)>.hpl";
+  const htmlLikePath = join(unicodeDirectory, htmlLikeName);
+  await copyFile(pipelinePath, htmlLikePath);
+  const unexpectedDialogs = [];
+  page.on("dialog", (dialog) => {
+    unexpectedDialogs.push(dialog.type());
+    void dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(htmlLikePath);
+  const htmlOpenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const htmlOpenResponse = await htmlOpenPending;
+  const htmlGraph = await htmlOpenResponse.json();
+  if (!htmlOpenResponse.ok() ||
+      htmlOpenResponse.request().postDataJSON()?.path !== htmlLikePath ||
+      htmlGraph.name !== graph.name ||
+      htmlGraph.nodes?.length !== graph.nodes.length ||
+      htmlGraph.edges?.length !== graph.edges.length) {
+    throw new Error("HTML-like filename did not open the real Hop document verbatim");
+  }
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  const htmlRecent = page.getByRole("group", { name: "最近打开的流程" })
+    .getByRole("button", { name: `填入最近流程：${htmlLikePath}` });
+  if (await htmlRecent.count() !== 1 ||
+      await htmlRecent.innerText() !== htmlLikeName ||
+      await htmlRecent.locator("img").count() !== 0 ||
+      unexpectedDialogs.length !== 0) {
+    throw new Error("Untrusted recent-file name was not rendered as inert text");
+  }
+  const htmlOpensBeforeChoice = requests.filter((url) => url.includes("/api/pipelines/open")).length;
+  await htmlRecent.click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== htmlLikePath ||
+      requests.filter((url) => url.includes("/api/pipelines/open")).length !== htmlOpensBeforeChoice) {
+    throw new Error("HTML-like recent-file shortcut changed the document without explicit open");
+  }
+  const htmlReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const htmlReopenResponse = await htmlReopenPending;
+  if (!htmlReopenResponse.ok() ||
+      htmlReopenResponse.request().postDataJSON()?.path !== htmlLikePath ||
+      unexpectedDialogs.length !== 0) {
+    throw new Error("HTML-like recent-file explicit disk reopen was not safe and exact");
+  }
+  console.log("HTML-like recent-file proof passed: inert path text, exact native Hop open/reopen, no implicit request or dialog.");
+
+
+  // Disabled Hop links are real native .hpl metadata, not React-only state.
+  // The browser must distinguish them from executable links without changing
+  // their identities, issuing edit commands, or entering RAP.
+  const enabledXml = await readFile(pipelinePath, "utf8");
+
+  // The pipeline's XML <info><name> is user-authored native Hop metadata,
+  // distinct from the filesystem path. Exercise XML escaping, inert React
+  // rendering and preservation through a real semantic edit/save/disk reopen.
+  const metadataName = '黄河 <img src=x onerror=alert(1)> & "监测流程"';
+  const xmlName = metadataName.replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+  const metadataXml = enabledXml.replace(
+    "<name>real-graph-proof</name>", "<name>" + xmlName + "</name>");
+  if (metadataXml === enabledXml) throw new Error("Native Hop pipeline metadata fixture not found");
+  const metadataPath = join(unicodeDirectory, "原生流程名称保真.hpl");
+  await writeFile(metadataPath, metadataXml);
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(metadataPath);
+  const metadataOpenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const metadataOpenResponse = await metadataOpenPending;
+  const metadataGraph = await metadataOpenResponse.json();
+  if (!metadataOpenResponse.ok() || metadataGraph.name !== metadataName ||
+      metadataGraph.nodes?.length !== graph.nodes.length ||
+      metadataGraph.edges?.length !== graph.edges.length) {
+    throw new Error("Native Hop XML pipeline name was not decoded exactly");
+  }
+  await page.waitForFunction((name) =>
+    document.querySelector(".file-identity")?.getAttribute("data-document-name") === name,
+    metadataName, { timeout: 8000 });
+  const metadataIdentity = page.locator(".file-identity");
+  if (await metadataIdentity.locator("strong").innerText() !== metadataName ||
+      await metadataIdentity.locator("img").count() !== 0 ||
+      unexpectedDialogs.length !== 0) {
+    throw new Error("Untrusted native Hop pipeline name was not rendered as inert text");
+  }
+  const metadataAddPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    /\/api\/pipelines\/[^/]+\/edit\/add$/.test(new URL(response.url()).pathname));
+  await page.locator(".transform-group").getByRole("button", { name: "TableInput" }).click();
+  const metadataAddResponse = await metadataAddPending;
+  const metadataEdited = await metadataAddResponse.json();
+  if (!metadataAddResponse.ok() || metadataEdited.nodes?.length !== graph.nodes.length + 1 ||
+      !metadataEdited.nodes.some((node) => node.pluginId === "TableInput") ||
+      metadataEdited.edges?.length !== graph.edges.length) {
+    throw new Error("Native pipeline metadata edit did not use the real Hop graph");
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const metadataSavePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    /\/api\/pipelines\/[^/]+\/save$/.test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+  const metadataSaveResponse = await metadataSavePending;
+  if (!metadataSaveResponse.ok()) throw new Error("Native metadata disk save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const savedMetadataXml = await readFile(metadataPath, "utf8");
+  if (!savedMetadataXml.includes("&lt;img") || savedMetadataXml.includes("<img src=")) {
+    throw new Error("Native metadata XML lost escaping after semantic save");
+  }
+  const metadataReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const metadataReopenResponse = await metadataReopenPending;
+  const metadataReopened = await metadataReopenResponse.json();
+  if (!metadataReopenResponse.ok() || metadataReopened.name !== metadataName ||
+      metadataReopened.nodes?.length !== graph.nodes.length + 1 ||
+      metadataReopened.edges?.length !== graph.edges.length ||
+      await metadataIdentity.locator("strong").innerText() !== metadataName ||
+      await metadataIdentity.locator("img").count() !== 0 ||
+      unexpectedDialogs.length !== 0) {
+    throw new Error("Native Hop XML pipeline name changed or executed on disk reopen");
+  }
+  console.log("Native pipeline-name proof passed: escaped untrusted Hop XML metadata -> inert Chinese UI -> real TableInput edit -> disk save/reopen.");
+
+  const disabledXml = enabledXml.replace("<enabled>Y</enabled>", "<enabled>N</enabled>");
+  if (disabledXml === enabledXml) throw new Error("Native enabled Hop fixture not found");
+  const disabledPath = join(unicodeDirectory, "停用 Hop 连线.hpl");
+  await writeFile(disabledPath, disabledXml);
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(disabledPath);
+  const disabledPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const disabledResponse = await disabledPending;
+  if (!disabledResponse.ok()) throw new Error("Native disabled-Hop .hpl open failed");
+  const disabledGraph = await disabledResponse.json();
+  const disabledEdge = disabledGraph.edges?.find((edge) => edge.source === "source" && edge.target === "sink");
+  if (!disabledEdge || disabledEdge.enabled !== false ||
+      disabledGraph.nodes?.length !== graph.nodes.length) {
+    throw new Error("Hop server did not preserve disabled native connection semantics");
+  }
+  const disabledEdgeElement = page.locator('.react-flow__edge[data-id="' + disabledEdge.id + '"]');
+  await disabledEdgeElement.waitFor({ state: "attached" });
+  await page.waitForFunction((edgeId) => {
+    const edge = [...document.querySelectorAll(".react-flow__edge")]
+      .find((element) => element.getAttribute("data-id") === edgeId);
+    const path = edge?.querySelector(".react-flow__edge-path");
+    return Boolean(edge?.classList.contains("hop-edge-disabled") &&
+      edge.textContent?.includes("已停用") &&
+      path && getComputedStyle(path).strokeDasharray.includes("8"));
+  }, disabledEdge.id, { timeout: 8000 });
+  // Reopening the same real file must preserve the disabled wire flag and
+  // visual status. No graph mutation or disk save is involved.
+  const disabledReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const disabledReopenResponse = await disabledReopenPending;
+  if (!disabledReopenResponse.ok()) throw new Error("Disabled-Hop disk reopen failed");
+  const disabledReopened = await disabledReopenResponse.json();
+  if (!disabledReopened.edges?.some((edge) => edge.id === disabledEdge.id && edge.enabled === false) ||
+      !(await disabledEdgeElement.evaluate((element) => element.classList.contains("hop-edge-disabled")))) {
+    throw new Error("Native disabled-Hop semantics or visual state lost after disk reopen");
+  }
+  console.log("Disabled-Hop visual proof passed: real XML enabled=N -> authoritative Graph JSON -> dashed Chinese React Flow link -> disk reopen.");
+
+  // Data-integrity regression: a disabled native Hop must remain disabled
+  // after a different semantic edit is saved. A read-only reopen alone cannot
+  // catch XML writers that accidentally re-enable an existing Hop.
+  const disabledSource = page.locator('.react-flow__node[data-id="source"]');
+  await disabledSource.waitFor({ state: "visible" });
+  const beforeDisabledMove = disabledReopened.nodes.find((node) => node.id === "source");
+  if (!beforeDisabledMove) throw new Error("Disabled-Hop graph is missing source transform");
+  const disabledIconBox = await disabledSource.locator(".transform-node-icon").boundingBox();
+  if (!disabledIconBox) throw new Error("Disabled-Hop source drag handle is not visible");
+  const disabledMovePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/move$").test(new URL(response.url()).pathname));
+  const disabledDragStart = {
+    x: disabledIconBox.x + disabledIconBox.width / 2,
+    y: disabledIconBox.y + disabledIconBox.height / 2,
+  };
+  await page.mouse.move(disabledDragStart.x, disabledDragStart.y);
+  await page.mouse.down();
+  await page.mouse.move(disabledDragStart.x + 46, disabledDragStart.y + 30, { steps: 12 });
+  await page.mouse.up();
+  const disabledMoveResponse = await disabledMovePending;
+  const disabledMovedGraph = await disabledMoveResponse.json();
+  const disabledMovedSource = disabledMovedGraph.nodes?.find((node) => node.id === "source");
+  if (!disabledMoveResponse.ok() || !disabledMovedSource ||
+      (disabledMovedSource.x === beforeDisabledMove.x &&
+       disabledMovedSource.y === beforeDisabledMove.y) ||
+      !disabledMovedGraph.edges?.some((edge) =>
+        edge.id === disabledEdge.id && edge.enabled === false)) {
+    throw new Error("Semantic node move altered or lost disabled Hop state");
+  }
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const disabledSavePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/save$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+  const disabledSaveResponse = await disabledSavePending;
+  if (!disabledSaveResponse.ok()) throw new Error("Disabled-Hop native disk save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const disabledSavedXml = await readFile(disabledPath, "utf8");
+  if (!disabledSavedXml.includes("<enabled>N</enabled>") ||
+      disabledSavedXml === disabledXml) {
+    throw new Error("Disabled-Hop disk save did not retain native disabled XML and the semantic move");
+  }
+  const disabledSavedReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  if (await page.getByLabel("Server-visible pipeline path").inputValue() !== disabledPath) {
+    throw new Error("Disabled-Hop file identity changed before saved disk reopen");
+  }
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const disabledSavedReopenResponse = await disabledSavedReopenPending;
+  const disabledSavedReopened = await disabledSavedReopenResponse.json();
+  const disabledDiskSource = disabledSavedReopened.nodes?.find((node) => node.id === "source");
+  if (!disabledSavedReopenResponse.ok() || !disabledDiskSource ||
+      disabledDiskSource.x !== disabledMovedSource.x ||
+      disabledDiskSource.y !== disabledMovedSource.y ||
+      !disabledSavedReopened.edges?.some((edge) =>
+        edge.id === disabledEdge.id && edge.enabled === false)) {
+    throw new Error("Real Hop disk reopen lost moved coordinates or disabled connection");
+  }
+  await page.waitForFunction((edgeId) => {
+    const edge = [...document.querySelectorAll(".react-flow__edge")]
+      .find((element) => element.getAttribute("data-id") === edgeId);
+    return Boolean(edge?.classList.contains("hop-edge-disabled") &&
+      edge.textContent?.includes("已停用"));
+  }, disabledEdge.id, { timeout: 8000 });
+  console.log("Disabled-Hop edit/save proof passed: real semantic move -> native XML disk save -> reopen preserves disabled Hop and Chinese dashed link.");
+
+
+  // A real pipeline can contain both executable and disabled Hop links.
+  // Verify per-edge isolation: a disabled branch must not gray out an active
+  // sibling, and a semantic move/save/reopen must preserve both wire flags.
+  const nativeSink = enabledXml.match(/<transform><name>sink<\/name>[\s\S]*?<\/transform>/)?.[0];
+  if (!nativeSink) throw new Error("Native sink transform fixture not found");
+  const branchSink = nativeSink.replace("<name>sink</name>", "<name>旁路输出</name>")
+    .replace("<yloc>160</yloc>", "<yloc>320</yloc>");
+  if (branchSink === nativeSink || !branchSink.includes("<name>旁路输出</name>")) {
+    throw new Error("Could not construct second native Hop transform");
+  }
+  const mixedXml = enabledXml
+    .replace("</order>", "<hop><from>source</from><to>旁路输出</to><enabled>N</enabled></hop></order>")
+    .replace("<transform_error_handling/>", branchSink + "<transform_error_handling/>");
+  if (mixedXml === enabledXml || !mixedXml.includes(branchSink)) {
+    throw new Error("Could not construct mixed enabled/disabled native Hop fixture");
+  }
+  const mixedPath = join(unicodeDirectory, "双分支 Hop 状态.hpl");
+  await writeFile(mixedPath, mixedXml);
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByLabel("Server-visible pipeline path").fill(mixedPath);
+  const mixedOpenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const mixedOpenResponse = await mixedOpenPending;
+  if (!mixedOpenResponse.ok()) throw new Error("Mixed native Hop pipeline open failed");
+  const mixedGraph = await mixedOpenResponse.json();
+  const activeLink = mixedGraph.edges?.find((edge) => edge.source === "source" && edge.target === "sink");
+  const inactiveLink = mixedGraph.edges?.find((edge) => edge.source === "source" && edge.target === "旁路输出");
+  if (mixedGraph.nodes?.length !== 3 || mixedGraph.edges?.length !== 2 ||
+      !activeLink || activeLink.enabled === false || !inactiveLink || inactiveLink.enabled !== false) {
+    throw new Error("Authoritative graph lost independent enabled/disabled Hop semantics");
+  }
+  await page.waitForFunction(([activeId, inactiveId]) => {
+    const edges = [...document.querySelectorAll(".react-flow__edge")];
+    const active = edges.find((element) => element.getAttribute("data-id") === activeId);
+    const inactive = edges.find((element) => element.getAttribute("data-id") === inactiveId);
+    const activePath = active?.querySelector(".react-flow__edge-path");
+    const inactivePath = inactive?.querySelector(".react-flow__edge-path");
+    return Boolean(active && inactive && activePath && inactivePath &&
+      !active.classList.contains("hop-edge-disabled") &&
+      !active.textContent?.includes("已停用") &&
+      !getComputedStyle(activePath).strokeDasharray.includes("8") &&
+      inactive.classList.contains("hop-edge-disabled") &&
+      inactive.textContent?.includes("已停用") &&
+      getComputedStyle(inactivePath).strokeDasharray.includes("8"));
+  }, [activeLink.id, inactiveLink.id], { timeout: 8000 });
+
+  // Use an independently authoritative add edit. The active and disabled
+  // branches must survive an unrelated real Hop mutation before disk save.
+  const mixedAddPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/edit/add$").test(new URL(response.url()).pathname));
+  await page.locator(".transform-group").getByRole("button", { name: "TableInput" }).click();
+  const mixedAddResponse = await mixedAddPending;
+  if (!mixedAddResponse.ok()) throw new Error("Mixed Hop semantic TableInput add failed");
+  const editedMixed = await mixedAddResponse.json();
+  const addedMixedNode = editedMixed.nodes?.find((node) =>
+    node.pluginId === "TableInput" && !mixedGraph.nodes.some((previous) => previous.id === node.id));
+  if (!addedMixedNode || editedMixed.nodes?.length !== 4 || editedMixed.edges?.length !== 2 ||
+      !editedMixed.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
+      !editedMixed.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
+    throw new Error("Mixed Hop add changed independent Y/N branch identities");
+  }
+  // Verify that native enabled/disabled Hop flags survive semantic edit
+  // history, not only a direct add/save/reopen. Use real toolbar actions.
+  const mixedAddUndoPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/edit/undo$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "撤销（Undo）" }).click();
+  const mixedAddUndoResponse = await mixedAddUndoPending;
+  const mixedAddUndone = await mixedAddUndoResponse.json();
+  if (!mixedAddUndoResponse.ok() ||
+      mixedAddUndone.nodes.some((node) => node.id === addedMixedNode.id) ||
+      !mixedAddUndone.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
+      !mixedAddUndone.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
+    throw new Error("Mixed Hop undo altered original Y/N branches");
+  }
+  const mixedAddRedoPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/edit/redo$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "重做（Redo）" }).click();
+  const mixedAddRedoResponse = await mixedAddRedoPending;
+  const mixedAddRedone = await mixedAddRedoResponse.json();
+  if (!mixedAddRedoResponse.ok() ||
+      !mixedAddRedone.nodes.some((node) => node.id === addedMixedNode.id) ||
+      !mixedAddRedone.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
+      !mixedAddRedone.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
+    throw new Error("Mixed Hop redo lost added transform or native Y/N branches");
+  }
+  console.log("Mixed-Hop undo/redo proof passed: native Y/N edges retain identity across real add history.");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "visible" });
+  const mixedSavePending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new RegExp("/api/pipelines/[^/]+/save$").test(new URL(response.url()).pathname));
+  await page.getByRole("button", { name: "保存（Save）", exact: true }).click();
+  const mixedSaveResponse = await mixedSavePending;
+  if (!mixedSaveResponse.ok()) throw new Error("Mixed Hop native disk save failed");
+  await page.locator(".dirty-state.is-dirty").waitFor({ state: "hidden" });
+  const savedMixedXml = await readFile(mixedPath, "utf8");
+  if ((savedMixedXml.match(/<enabled>Y<\/enabled>/g) ?? []).length !== 1 ||
+      (savedMixedXml.match(/<enabled>N<\/enabled>/g) ?? []).length !== 1) {
+    throw new Error("Mixed native Hop XML lost independent Y/N flags on disk");
+  }
+  const mixedReopenPending = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/pipelines/open");
+  await page.getByRole("button", { name: "Choose pipeline" }).click();
+  await page.getByRole("button", { name: "Open pipeline" }).click();
+  const mixedReopenResponse = await mixedReopenPending;
+  if (!mixedReopenResponse.ok()) throw new Error("Mixed Hop disk reopen failed");
+  const mixedReopened = await mixedReopenResponse.json();
+  const diskAdded = mixedReopened.nodes?.find((node) => node.id === addedMixedNode.id);
+  if (!diskAdded || diskAdded.pluginId !== "TableInput" ||
+      diskAdded.x !== addedMixedNode.x || diskAdded.y !== addedMixedNode.y ||
+      mixedReopened.nodes?.length !== 4 || mixedReopened.edges?.length !== 2 ||
+      !mixedReopened.edges.some((edge) => edge.id === activeLink.id && edge.enabled !== false) ||
+      !mixedReopened.edges.some((edge) => edge.id === inactiveLink.id && edge.enabled === false)) {
+    throw new Error("Mixed Hop disk reopen lost added transform or Y/N edge identity");
+  }
+  await page.waitForFunction(([activeId, inactiveId]) => {
+    const edges = [...document.querySelectorAll(".react-flow__edge")];
+    const active = edges.find((element) => element.getAttribute("data-id") === activeId);
+    const inactive = edges.find((element) => element.getAttribute("data-id") === inactiveId);
+    return Boolean(active && inactive && !active.classList.contains("hop-edge-disabled") &&
+      !active.textContent?.includes("已停用") &&
+      inactive.classList.contains("hop-edge-disabled") && inactive.textContent?.includes("已停用"));
+  }, [activeLink.id, inactiveLink.id], { timeout: 8000 });
+  console.log("Mixed-Hop native proof passed: active Y and disabled N branches -> React Flow isolation -> real TableInput add -> XML save -> disk reopen.");
+
 
   const rapRequests = requests.filter((url) => {
     const path = new URL(url).pathname;

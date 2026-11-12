@@ -140,7 +140,20 @@ export function App() {
     return () => controller.abort();
   }, [pipelinePath, pipelineOpenRevision]);
 
-  const edges = useMemo<Edge[]>(() => document.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })), [document]);
+  // Disabled Hop connections remain in the authoritative graph, but must not
+  // look executable. This is display-only: never change Hop edge identity or XML.
+  const edges = useMemo<Edge[]>(() => document.edges.map((edge) => {
+    const disabled = edge.enabled === false;
+    return {
+      id: edge.id, source: edge.source, target: edge.target,
+      ...(disabled ? {
+        className: "hop-edge-disabled",
+        label: "已停用",
+        labelStyle: { fill: "#64748b", fontSize: 11 },
+        style: { stroke: "#94a3b8", strokeDasharray: "8 6", strokeWidth: 2 },
+      } : {}),
+    };
+  }), [document]);
   const onNodesChange = useCallback((changes: NodeChange<Node>[]) => setNodes((current) => applyNodeChanges(changes, current)), []);
   const onNodeDragStop = useCallback((_: unknown, node: Node) => {
     if (source.kind !== "server" || savingRef.current) {

@@ -508,6 +508,28 @@ button { cursor: pointer; }
   border-left: 1px solid #e1e5ec;
   box-shadow: -16px 0 42px rgb(28 38 61 / 11%);
 }
+/* Only the generic editor is adjustable. The native Hop configuration remains server-owned. */
+.generic-config { width: min(var(--config-panel-width, 600px), calc(100% - 248px)); }
+.config-resize-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 14px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+.config-resize-grip::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 24px);
+  left: 4px;
+  width: 4px;
+  height: 48px;
+  border-radius: 4px;
+  background: #c7d1e2;
+}
 .config-heading { display: flex; align-items: flex-start; justify-content: space-between; }
 .config-heading > div { display: grid; gap: 3px; }
 .config-heading strong { font-size: 14px; color: #222c42; }
@@ -540,6 +562,67 @@ button { cursor: pointer; }
 }
 .generic-config > header strong { font-size: 15px; color: #212b40; }
 .generic-config > header small { color: #9ca4b2; font-size: 10px; word-break: break-all; }
+/* Native Hop identifiers are available on demand, not competing with the Chinese form title. */
+.generic-config .config-developer-details { font-size: 11px; color: #657188; }
+.generic-config .config-developer-details summary { cursor: pointer; width: fit-content; }
+.generic-config .config-developer-details > summary { font-weight: 600; }
+.generic-config .config-developer-content {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #e6ebf3;
+  border-radius: 8px;
+  background: #f8fafd;
+}
+.generic-config .config-developer-content p {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 0 7px;
+}
+.generic-config .config-developer-content code { overflow-wrap: anywhere; color: #34415b; font-size: 11px; }
+.generic-config .config-property-keys { margin-top: 7px; }
+.generic-config .config-property-keys ul {
+  display: grid;
+  gap: 5px;
+  max-height: 145px;
+  overflow-y: auto;
+  margin: 8px 0 0;
+  padding-left: 17px;
+}
+.generic-config .config-property-keys li { overflow-wrap: anywhere; }
+.generic-config .config-property-keys li span { margin-right: 7px; }
+
+.config-field-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px 8px;
+}
+.config-field-search input[type="search"] { min-width: 0; }
+.config-field-search button {
+  border: 1px solid #d5dbe6;
+  border-radius: 7px;
+  background: #fff;
+  color: #445066;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.config-field-search small {
+  grid-column: 1 / -1;
+  color: #64748b;
+  font-size: 11px;
+}
+.config-search-empty { color: #64748b; font-size: 12px; margin: 10px 0; }
+.config-sql-source-notice {
+  margin: 0;
+  padding: 9px 11px;
+  border-left: 3px solid #5474a5;
+  border-radius: 5px;
+  background: #f1f5fb;
+  color: #344761;
+  font-size: 12px;
+  line-height: 1.55;
+}
 .generic-config fieldset {
   display: grid;
   gap: 11px;
@@ -555,6 +638,25 @@ button { cursor: pointer; }
   font-size: 11px;
   font-weight: 700;
 }
+.generic-config .config-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 5px;
+  padding: 3px 5px;
+  background: transparent;
+  color: #53627b;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.generic-config .config-group-toggle > span { width: 12px; color: #6480b2; }
+.generic-config .config-group-toggle small { color: #8390a4; font-size: 10px; font-weight: 500; }
+.generic-config .config-group-toggle:focus-visible { outline: 2px solid #5379bd; outline-offset: 2px; }
+.generic-config .config-group-toggle:disabled { cursor: default; opacity: 0.8; }
+.generic-config .config-group-fields { display: grid; gap: 11px; }
+.generic-config .config-group-fields[hidden] { display: none; }
 .generic-config label { display: grid; gap: 6px; color: #445066; font-size: 11px; font-weight: 600; }
 .generic-config label > span { color: #4c576d; }
 .generic-config input:not([type="checkbox"]),
@@ -574,9 +676,63 @@ button { cursor: pointer; }
 .generic-config footer {
   display: flex;
   justify-content: flex-end;
+  align-items: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: auto;
   padding-top: 6px;
+}
+.generic-config .config-change-count {
+  color: #5b6b85;
+  font-size: 11px;
+  font-weight: 600;
+}
+.generic-config .config-change-review {
+  min-width: 0;
+  margin-right: auto;
+  display: grid;
+  gap: 4px;
+}
+.generic-config .config-change-review summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #42618e;
+  font-size: 11px;
+}
+.generic-config .config-change-review ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  max-height: 100px;
+  overflow-y: auto;
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: #4d5b73;
+  font-size: 11px;
+}
+
+.generic-config .config-invalid-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+  margin-right: auto;
+  color: #984447;
+  font-size: 11px;
+  font-weight: 600;
+}
+.generic-config .config-invalid-summary button {
+  border: 1px solid #e8bdc0;
+  border-radius: 5px;
+  background: #fff6f6;
+  padding: 4px 8px;
+  color: #8c343b;
+  font-size: 11px;
+  font-weight: 600;
+}
+.generic-config .config-invalid-summary button:focus-visible {
+  outline: 2px solid #b75d63;
+  outline-offset: 2px;
 }
 
 @media (max-width: 980px) {
@@ -627,6 +783,7 @@ button { cursor: pointer; }
     max-width: calc(100vw - 212px);
   }
   .config-panel { width: min(420px, calc(100% - 184px)); padding: 14px; }
+  .config-resize-grip { display: none; }
 }
 
 /* On narrow handsets, prioritize controls and let configuration use the full
@@ -645,4 +802,37 @@ button { cursor: pointer; }
   .canvas-chrome { left: 162px; }
   .preview-note { left: 50%; max-width: calc(100vw - 24px); }
   .config-panel { width: 100%; }
+}
+
+/* Lazy local Monaco editor: opt-in, preserves the original Hop SQL draft input. */
+.generic-config .config-sql-workbench {
+  border: 1px solid #dce4f1;
+  background: #f8faff;
+  border-radius: 9px;
+  padding: 10px 12px;
+}
+.generic-config .config-sql-workbench > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  color: #30558d;
+}
+.generic-config .config-sql-workbench > summary:focus-visible {
+  outline: 2px solid #5379bd;
+  outline-offset: 3px;
+}
+.generic-config .config-sql-workbench > p {
+  color: #596983;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 8px 0 10px;
+}
+.generic-config .config-sql-monaco {
+  width: 100%;
+  min-width: 0;
+  height: 260px;
+  border: 1px solid #d5dbe6;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #fff;
 }

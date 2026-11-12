@@ -47,10 +47,357 @@ try {
       await panel.getByRole("button", { name: "保存配置（Save）", exact: true }).count() !== 1) {
     throw new Error("Real TableInput configuration dialog lacks Chinese-first action names");
   }
+  // Genuine browser interaction with the resizable right-side configuration surface.
+  // Resizing must never issue Hop config/write or disturb the native .hpl draft.
+  await page.setViewportSize({ width: 1365, height: 768 });
+  const grip = panel.getByRole("separator", { name: "调整配置面板宽度" });
+  await grip.waitFor({ state: "visible" });
+  const initialPanelBox = await panel.boundingBox();
+  const gripBox = await grip.boundingBox();
+  if (!initialPanelBox || !gripBox || Math.abs(initialPanelBox.width - 600) > 4) {
+    throw new Error("Desktop configuration panel did not open at the expected 600px width");
+  }
+  const dragX = gripBox.x + gripBox.width / 2;
+  const dragY = gripBox.y + gripBox.height / 2;
+  await page.mouse.move(dragX, dragY);
+  await page.mouse.down();
+  await page.mouse.move(dragX - 110, dragY, { steps: 6 });
+  await page.mouse.up();
+  const widenedBox = await panel.boundingBox();
+  if (!widenedBox || widenedBox.width < initialPanelBox.width + 80) {
+    throw new Error("Dragging the configuration grip did not expand the real editor");
+  }
+  await grip.focus();
+  await grip.press("ArrowRight");
+  const keyboardBox = await panel.boundingBox();
+  if (!keyboardBox || Math.abs(keyboardBox.width - (widenedBox.width - 24)) > 3) {
+    throw new Error("Keyboard resizing did not shrink the configuration panel by 24px");
+  }
+  await page.setViewportSize({ width: 760, height: 768 });
+  const narrowBox = await panel.boundingBox();
+  if (!narrowBox || narrowBox.width > 421 || await grip.isVisible()) {
+    throw new Error("Narrow viewport failed to use the safe fixed-width configuration layout");
+  }
+  await page.setViewportSize({ width: 1365, height: 768 });
+  if (requests.some(({ url, method }) => method === "POST" && new URL(url).pathname.endsWith("/config/write"))) {
+    throw new Error("Resizing must not write native Hop configuration");
+  }
+  console.log("V4 config resize proof passed: pointer, keyboard, narrow-screen fallback, no Hop write.");
   const connection = panel.locator(`#config-${connectionDescriptor.javaField}`);
   const sqlField = panel.locator(`#config-${sqlDescriptor.javaField}`);
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
   if (await sqlField.inputValue() !== "SELECT id, name FROM customers") throw new Error("Authoritative SQL not visible");
+
+  // SQL workbench is optional and locally bundled; opening/editing it must
+  // preserve the original native textarea, not POST an unsaved Hop config.
+  const sqlWorkbench = panel.locator(".config-sql-workbench");
+  const workbenchDetails = sqlWorkbench.locator("summary");
+  if (await sqlWorkbench.count() !== 1 ||
+      await sqlWorkbench.evaluate(element => element.open)) {
+    throw new Error("TableInput SQL workbench must exist but remain opt-in");
+  }
+  const workbenchWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeWorkbench = workbenchWrites();
+  const originalWorkbenchSql = await sqlField.inputValue();
+  await workbenchDetails.click();
+  await sqlWorkbench.locator(".monaco-editor").waitFor({ state: "visible", timeout: 20000 });
+  const monacoInput = sqlWorkbench.locator(".monaco-editor textarea.inputarea");
+  await monacoInput.waitFor({ state: "attached" });
+  await sqlWorkbench.locator(".monaco-editor").click({ position: { x: 70, y: 80 } });
+  await page.keyboard.press("ControlOrMeta+A");
+  const monacoSql = "SELECT 17 AS flow_value /* 中文 SQL 编辑器 */";
+  await page.keyboard.insertText(monacoSql);
+  await page.waitForFunction(({ id, expected }) => {
+    const field = document.getElementById(id);
+    return field && "value" in field && field.value === expected;
+  }, { id: `config-${sqlDescriptor.javaField}`, expected: monacoSql });
+  await sqlField.fill(originalWorkbenchSql);
+  await workbenchDetails.click();
+  if (await sqlField.inputValue() !== originalWorkbenchSql ||
+      workbenchWrites() !== writesBeforeWorkbench) {
+    throw new Error("Optional SQL editor lost the native draft or issued a server write");
+  }
+  console.log("V4 optional SQL Monaco proof passed: local editor, native draft sync, zero server writes.");
+
+  // A missing optional Monaco chunk must never crash the native Hop editor
+  // or discard an in-progress SQL draft. Separate Chromium context avoids the
+  // successful Monaco import in the main proof leaking into this failure case.
+  const offlinePage = await browser.newPage();
+  let blockedSqlChunks = 0;
+  let offlineConfigWrites = 0;
+  offlinePage.on("request", request => {
+    if (request.method() === "POST" &&
+        new URL(request.url()).pathname.endsWith("/config/write")) offlineConfigWrites++;
+  });
+  try {
+    await offlinePage.route(/\/src\/editor\/SqlWorkbench\.tsx(?:\?.*)?$/, route => {
+      blockedSqlChunks++;
+      return route.abort("failed");
+    });
+    await offlinePage.goto("http://127.0.0.1:5173", { waitUntil: "networkidle" });
+    const offlineOpen = offlinePage.waitForResponse(r => match(r, "/api/pipelines/open"));
+    await offlinePage.getByLabel("Server-visible pipeline path").fill(pipelinePath);
+    await offlinePage.getByRole("button", { name: "Open pipeline" }).click();
+    if (!(await offlineOpen).ok()) throw new Error("Unable to open native Hop pipeline while simulating offline Monaco");
+    const offlineNode = offlinePage.locator('.react-flow__node[data-id="table-input"]');
+    await offlineNode.waitFor({ state: "visible" });
+    await offlineNode.click();
+    const offlineRead = offlinePage.waitForResponse(r => match(r, "/config/read"));
+    await offlinePage.getByRole("button", { name: "Configure" }).click();
+    if (!(await offlineRead).ok()) throw new Error("Native config/read failed in offline editor case");
+    const offlinePanel = offlinePage.locator("form.generic-config");
+    await offlinePanel.waitFor({ state: "visible" });
+    const offlineSql = offlinePanel.locator(`#config-${sqlDescriptor.javaField}`);
+    const oldValue = await offlineSql.inputValue();
+    await offlinePanel.locator(".config-sql-workbench > summary").click();
+    await offlinePanel.getByRole("alert", { name: "" })
+      .filter({ hasText: "专业 SQL 编辑器未能加载" })
+      .waitFor({ state: "visible", timeout: 15000 });
+    if (blockedSqlChunks !== 1) {
+      throw new Error("Did not genuinely interrupt the local Monaco editor chunk");
+    }
+    const fallbackDraft = "SELECT 99 /* Monaco failed but Hop edit survived */";
+    await offlineSql.fill(fallbackDraft);
+    if (await offlineSql.inputValue() !== fallbackDraft || oldValue === fallbackDraft) {
+      throw new Error("Native SQL textarea stopped working after optional Monaco failure");
+    }
+    await offlinePanel.getByRole("button", { name: "取消配置（Cancel）" }).click();
+    if (offlineConfigWrites !== 0) {
+      throw new Error("Failed SQL editor unexpectedly wrote native Hop configuration");
+    }
+    console.log("V4 SQL Monaco offline fallback proof passed: optional chunk failed, native form stayed usable, zero server writes.");
+  } finally {
+    await offlinePage.close();
+  }
+
+  // Native Hop configuration groups may be collapsed by mouse or keyboard.
+  // Searching must reveal a matching control without losing the user's group
+  // preference, and neither collapse nor expansion may mutate Hop configuration.
+  const sqlGroup = sqlField.locator("xpath=ancestor::fieldset[1]");
+  const groupToggle = sqlGroup.locator(".config-group-toggle");
+  const groupWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeGroup = groupWrites();
+  const originalGroupSql = await sqlField.inputValue();
+  const groupDraftSql = "SELECT id FROM customers /* 分组折叠未保存草稿 */";
+  if (await groupToggle.getAttribute("aria-expanded") !== "true" ||
+      !await sqlField.isVisible()) throw new Error("Native SQL group must start expanded");
+  await sqlField.fill(groupDraftSql);
+  await groupToggle.focus();
+  await groupToggle.press("Enter");
+  if (await groupToggle.getAttribute("aria-expanded") !== "false" ||
+      await sqlField.isVisible() || groupWrites() !== writesBeforeGroup) {
+    throw new Error("Keyboard collapse must hide SQL without writing native Hop config");
+  }
+  const groupFinder = panel.getByRole("searchbox", { name: "查找配置字段" });
+  await groupFinder.fill("sql");
+  if (!await sqlField.isVisible() || !await groupToggle.isDisabled() ||
+      await groupToggle.getAttribute("aria-expanded") !== "true" ||
+      await sqlField.inputValue() !== groupDraftSql) {
+    throw new Error("Searching a collapsed group must reveal and retain its unsaved SQL draft");
+  }
+  await panel.getByRole("button", { name: "清除字段查找" }).click();
+  if (await sqlField.isVisible() || await groupToggle.getAttribute("aria-expanded") !== "false") {
+    throw new Error("Clearing config search must restore the user's collapsed group");
+  }
+  await groupToggle.click();
+  if (!await sqlField.isVisible() || await sqlField.inputValue() !== groupDraftSql ||
+      await groupToggle.getAttribute("aria-expanded") !== "true") {
+    throw new Error("Reopening a group lost the unsaved native SQL draft");
+  }
+  await sqlField.fill(originalGroupSql);
+  if (groupWrites() !== writesBeforeGroup) {
+    throw new Error("Group collapse, search, and restore must not write Hop configuration");
+  }
+  console.log("V4 config group collapse proof passed: keyboard toggle, search reveal, draft retained, no Hop write.");
+
+  // Count only actual unsaved field changes, independently of search filtering.
+  // Never show native Hop values or send a config/write until the user saves.
+  const changeSummary = panel.locator(".config-change-count[role=status]");
+  const countWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeCount = countWrites();
+  if (await changeSummary.count() !== 0) throw new Error("Fresh native Hop config must not show unsaved changes");
+  await sqlField.fill("SELECT id FROM customers /* 未保存计数 */");
+  if (await changeSummary.innerText() !== "已修改 1 项（未保存）") {
+    throw new Error("First edited native SQL field was not counted");
+  }
+  await connection.fill("Warehouse_临时");
+  if (await changeSummary.innerText() !== "已修改 2 项（未保存）") {
+    throw new Error("Second edited native connection field was not counted");
+  }
+  await panel.getByRole("searchbox", { name: "查找配置字段" }).fill("sql");
+  if (await connection.isVisible() || await changeSummary.innerText() !== "已修改 2 项（未保存）") {
+    throw new Error("Filtering fields must not hide unsaved changes outside the search");
+  }
+  // A user can review exactly which native fields are unsaved even when the
+  // field finder hides one of them. Never render values or write Hop data.
+  const review = panel.locator(".config-change-review");
+  await review.locator("summary").click();
+  const changedNames = await review.locator('ul[aria-label="未保存字段清单"] li').allInnerTexts();
+  if (changedNames.length !== 2 || !changedNames.includes("连接") || !changedNames.includes("SQL") ||
+      (await review.innerText()).includes("Warehouse_临时") ||
+      (await review.innerText()).includes("SELECT id FROM customers") ||
+      countWrites() !== writesBeforeCount) {
+    throw new Error("Unsaved field review must list only native field labels, including filtered fields");
+  }
+  await panel.getByRole("button", { name: "清除字段查找" }).click();
+  await connection.fill("Warehouse");
+  if (await changeSummary.innerText() !== "已修改 1 项（未保存）" ||
+      JSON.stringify(await review.locator("li").allInnerTexts()) !== JSON.stringify(["SQL"])) {
+    throw new Error("Restoring native connection did not remove it from unsaved field review");
+  }
+  await sqlField.fill("SELECT id, name FROM customers");
+  if (await changeSummary.count() !== 0 || await review.count() !== 0 ||
+      countWrites() !== writesBeforeCount) {
+    throw new Error("Restored native SQL draft must clear review and count without writing Hop");
+  }
+  console.log("V4 unsaved config count proof passed: actual field differences, filtered draft retention, revert, no values or Hop write.");
+  console.log("V4 unsaved field review proof passed: labels only, filtered fields retained, live revert, no Hop write.");
+
+  // Native TableInput prioritizes a nonempty HopVfs SQL file, but both sources
+  // must remain untouched until the user explicitly saves the configuration.
+  const sqlFileDescriptor = initial.descriptor?.properties?.find(p => p.key === "sql_from_file");
+  if (!sqlFileDescriptor || !initial.descriptor.className.endsWith(".TableInputMeta")) {
+    throw new Error("Authoritative TableInput SQL source descriptor missing");
+  }
+  const sqlFileField = panel.locator(`#config-${sqlFileDescriptor.javaField}`);
+  const sourceNotice = panel.locator(".config-sql-source-notice[role=status]");
+  const originalSqlFile = await sqlFileField.inputValue();
+  const originalInlineSql = await sqlField.inputValue();
+  const writesBeforeSource = countWrites();
+  if ((await sourceNotice.count() > 0) !== (originalSqlFile.trim().length > 0)) {
+    throw new Error("SQL source notice disagrees with the native Hop file source");
+  }
+  await sqlFileField.fill("   ");
+  if (await sourceNotice.count() !== 0) {
+    throw new Error("Whitespace-only SQL file draft must not activate file precedence");
+  }
+  const unsavedSqlFile = "/tmp/未保存 SQL 来源.sql";
+  await sqlFileField.fill(unsavedSqlFile);
+  const noticeText = await sourceNotice.innerText();
+  if (!await sourceNotice.isVisible() || !noticeText.includes("文件内容优先") ||
+      noticeText.includes(unsavedSqlFile) || noticeText.includes(originalInlineSql) ||
+      countWrites() !== writesBeforeSource) {
+    throw new Error("Native SQL file precedence guidance leaked values or wrote Hop");
+  }
+  const inlineSourceDraft = "SELECT id FROM customers /* 保留内联 SQL 草稿 */";
+  await sqlField.fill(inlineSourceDraft);
+  if (!await sourceNotice.isVisible() || await sqlField.inputValue() !== inlineSourceDraft ||
+      await sqlFileField.inputValue() !== unsavedSqlFile || countWrites() !== writesBeforeSource) {
+    throw new Error("File source guidance discarded an unsaved inline SQL draft");
+  }
+  await sqlField.fill(originalInlineSql);
+  // The native fixture omits sql_from_file: its undefined wire value displays
+  // as an empty input, but filling "" is not a wire-level revert. Cancel/reopen
+  // proves the authoritative original is retained without changing that contract.
+  await panel.getByRole("button", { name: "Cancel" }).click();
+  const sourceRecoveryPending = page.waitForResponse(r => match(r, "/config/read"));
+  await node.click();
+  await page.getByRole("button", { name: "Configure" }).click();
+  const sourceRecoveryResponse = await sourceRecoveryPending;
+  const sourceRecovered = await sourceRecoveryResponse.json();
+  if (!sourceRecoveryResponse.ok() ||
+      JSON.stringify(sourceRecovered.config) !== JSON.stringify(initial.config)) {
+    throw new Error("Canceling SQL file source draft changed authoritative Hop config");
+  }
+  await panel.waitFor({ state: "visible" });
+  if ((await sourceNotice.count() > 0) !== (originalSqlFile.trim().length > 0) ||
+      await sqlFileField.inputValue() !== originalSqlFile ||
+      await sqlField.inputValue() !== originalInlineSql ||
+      await changeSummary.count() !== 0 || countWrites() !== writesBeforeSource) {
+    throw new Error("Cancel/reopen failed to restore original SQL sources without Hop writes");
+  }
+  console.log("V4 native SQL source notice proof passed: whitespace, file precedence, inline draft retained, no value leak or Hop write.");
+
+
+  // Developer-only identifiers must not crowd the Chinese configuration heading.
+  // This is a disclosure of schema keys, never of the native Hop configuration values.
+  const developerDetails = panel.locator("details.config-developer-details");
+  const developerSummary = developerDetails.locator(":scope > summary");
+  const javaClass = developerDetails.locator("code").filter({ hasText: initial.descriptor.className }).first();
+  const developerWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeDeveloper = developerWrites();
+  if (await developerDetails.evaluate(element => element.open) || await javaClass.isVisible()) {
+    throw new Error("Raw Hop class details must be collapsed by default");
+  }
+  await developerSummary.click();
+  if (!await javaClass.isVisible() ||
+      !await developerDetails.getByText("table-input", { exact: true }).isVisible()) {
+    throw new Error("Developer disclosure did not reveal real Hop class and node identity");
+  }
+  const rawKeys = developerDetails.locator("details.config-property-keys");
+  await rawKeys.locator("summary").click();
+  const displayedKeys = await rawKeys.locator("code").allTextContents();
+  if (displayedKeys.length !== initial.descriptor.properties.length ||
+      !displayedKeys.includes("sql") || displayedKeys.includes("Warehouse") ||
+      displayedKeys.some(key => key.includes("SELECT id, name FROM customers"))) {
+    throw new Error("Developer disclosure must list only authoritative descriptor keys, never Hop values");
+  }
+  const developerDraft = "SELECT id FROM customers /* 开发者详情草稿 */";
+  await sqlField.fill(developerDraft);
+  await developerSummary.focus();
+  await developerSummary.press("Enter");
+  if (await developerDetails.evaluate(element => element.open) ||
+      await sqlField.inputValue() !== developerDraft ||
+      developerWrites() !== writesBeforeDeveloper) {
+    throw new Error("Keyboard developer disclosure changed a real Hop draft or wrote configuration");
+  }
+  await sqlField.fill("SELECT id, name FROM customers");
+  console.log("V4 developer disclosure proof passed: collapsed raw identifiers, keyboard toggle, key-only metadata, draft preserved, no Hop write.");
+
+  // Search only descriptor labels/keys: real Hop values and secrets must never
+  // enter search suggestions. Filtering must not submit or discard an unsaved draft.
+  const fieldFinder = panel.getByRole("searchbox", { name: "查找配置字段" });
+  const finderWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeFinder = finderWrites();
+  await fieldFinder.fill("sql");
+  const sqlMatches = await panel.locator("fieldset label").count();
+  // TableInput exposes both sql and sql_from_file; the match count is not one.
+  if (!await sqlField.isVisible() || await connection.isVisible() ||
+      sqlMatches === 0 || sqlMatches >= initial.descriptor.properties.length) {
+    throw new Error("Real TableInput SQL field finder did not narrow the configuration form");
+  }
+  // Search Enter focuses the first matching native control; the explicit
+  // navigation action cycles every visible result without writing to Hop.
+  const matchingControls = panel.locator("fieldset label input, fieldset label textarea, fieldset label select");
+  const isFocused = async (control) => control.evaluate(element => element === document.activeElement);
+  await fieldFinder.press("Enter");
+  if (!await isFocused(matchingControls.first()) || finderWrites() !== writesBeforeFinder) {
+    throw new Error("Search Enter must focus the first matching control without a Hop write");
+  }
+  const nextMatch = panel.getByRole("button", { name: "定位下一匹配字段" });
+  for (let index = 1; index <= sqlMatches; index++) {
+    await nextMatch.click();
+    if (!await isFocused(matchingControls.nth(index % sqlMatches))) {
+      throw new Error("Field finder next-result navigation lost visible descriptor order");
+    }
+  }
+  const temporaryDraft = "SELECT id FROM customers /* 未保存的字段查找草稿 */";
+  await sqlField.fill(temporaryDraft);
+  await fieldFinder.fill("连接");
+  if (!await connection.isVisible() || await sqlField.isVisible()) {
+    throw new Error("Chinese field search did not switch visible configuration fields");
+  }
+  await nextMatch.click();
+  if (!await isFocused(connection)) throw new Error("Chinese connection field cannot be focused from the finder");
+  await fieldFinder.fill("__no_such_config_field__");
+  if (!await nextMatch.isDisabled() ||
+      !await panel.locator(".config-search-empty[role=status]").isVisible() ||
+      await panel.locator("fieldset").count() !== 0) {
+    throw new Error("Unmatched config field query must show a safe empty state");
+  }
+  await panel.getByRole("button", { name: "清除字段查找" }).click();
+  if (!await sqlField.isVisible() || !await connection.isVisible() ||
+      await sqlField.inputValue() !== temporaryDraft) {
+    throw new Error("Clearing field search lost the unsaved real Hop SQL draft");
+  }
+  await sqlField.fill("SELECT id, name FROM customers");
+  if (finderWrites() !== writesBeforeFinder) throw new Error("Field search/draft navigation wrote Hop configuration");
+  console.log("V4 config field finder navigation proof passed: Enter focus, ordered next/wrap, empty disabled, draft preserved, no Hop write.");
   // A malformed LIST JSON draft must fail closed in the real Hop editor:
   // no config/write, no enabled Save, and Cancel must restore server state.
   // This tests the existing JSON fallback, not unverified typed LIST editing.
@@ -67,6 +414,37 @@ try {
       configWriteCount() !== writesBeforeInvalid) {
     throw new Error("Malformed LIST JSON must disable Save without sending config/write");
   }
+  // A collapsed group must not trap an invalid native LIST JSON draft.
+  // The recovery control reveals and focuses the real field without config/write.
+  const invalidSummary = panel.locator(".config-invalid-summary[role=status]");
+  const invalidToggle = listField.locator("xpath=ancestor::fieldset[1]").locator(".config-group-toggle");
+  if (!await invalidSummary.isVisible() ||
+      !(await invalidSummary.innerText()).includes("有 1 项 JSON 格式错误")) {
+    throw new Error("Invalid native LIST JSON must show an actionable Chinese error summary");
+  }
+  await invalidToggle.click();
+  if (await listField.isVisible() || await invalidToggle.getAttribute("aria-expanded") !== "false") {
+    throw new Error("Invalid LIST JSON group did not collapse before recovery");
+  }
+  await invalidSummary.getByRole("button", { name: "定位错误字段" }).click();
+  await listField.waitFor({ state: "visible" });
+  await page.waitForFunction(id => document.activeElement?.id === id, await listField.getAttribute("id"));
+  if (await invalidToggle.getAttribute("aria-expanded") !== "true" ||
+      configWriteCount() !== writesBeforeInvalid) {
+    throw new Error("Error navigation must reveal and focus the invalid field without writing Hop");
+  }
+  await listField.fill(originalListText);
+  if (await invalidSummary.count() !== 0 ||
+      !await panel.getByRole("button", { name: "Save" }).isEnabled() ||
+      configWriteCount() !== writesBeforeInvalid) {
+    throw new Error("Correcting native LIST JSON must clear the error summary without Hop writes");
+  }
+  await listField.fill('[{"name":');
+  if (!await invalidSummary.isVisible() ||
+      await panel.getByRole("button", { name: "Save" }).isEnabled()) {
+    throw new Error("A second malformed LIST draft must still fail closed");
+  }
+  console.log("V4 invalid JSON recovery proof passed: collapsed field reveal, keyboard focus, correction, no Hop write.");
   await panel.getByRole("button", { name: "Cancel" }).click();
   const invalidRecoveryPending = page.waitForResponse(r => match(r, "/config/read"));
   await node.click();
@@ -99,6 +477,7 @@ try {
   const reread = await rereadResponse.json();
   if (!rereadResponse.ok() || reread.config?.sql !== sql) throw new Error("Authoritative re-read mismatch");
   if (await sqlField.inputValue() !== sql) throw new Error("Authoritative re-read not visible");
+  if (await changeSummary.count() !== 0) throw new Error("Saved authoritative SQL must clear the unsaved field count");
   if (await page.evaluate(() => Object.prototype.hasOwnProperty.call(window, "__hopModernXss"))) {
     throw new Error("SQL-like HTML escaped from the configuration textarea into executable script");
   }
