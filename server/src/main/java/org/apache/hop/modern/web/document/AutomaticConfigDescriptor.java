@@ -40,7 +40,8 @@ public final class AutomaticConfigDescriptor {
             metadata.groupKey(), metadata.password(), metadata.storeWithName(), metadata.storeWithCode(),
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
-            new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD)));
+            new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
+            nativeNumericDefault(type, key, shape)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), canonicalWireLists(type));
@@ -58,6 +59,16 @@ public final class AutomaticConfigDescriptor {
           new WireListContract("fields.meta", "/fields/meta", "/fields/meta/{index}"));
       default -> List.of();
     };
+  }
+
+  /** Defaults verified on the pinned native TableInputField Java constructor. */
+  private static Integer nativeNumericDefault(Class<?> owner, String key, Shape shape) {
+    if (shape == Shape.NUMBER
+        && owner.getName().equals("org.apache.hop.pipeline.transforms.tableinput.TableInputField")
+        && ("length".equals(key) || "precision".equals(key))) {
+      return -1;
+    }
+    return null;
   }
 
   private static Class<?> itemType(Field field, HopMetadataProperty metadata) {
@@ -114,5 +125,6 @@ public final class AutomaticConfigDescriptor {
   public record Property(String key, String javaField, Shape shape, String javaType, String groupKey,
       boolean sensitive, boolean storeWithName, boolean storeWithCode, boolean defaultBoolean,
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
-      List<Property> elementProperties, List<Option> options, LayoutHint layout) {}
+      List<Property> elementProperties, List<Option> options, LayoutHint layout,
+      Integer nativeNumberDefault) {}
 }
