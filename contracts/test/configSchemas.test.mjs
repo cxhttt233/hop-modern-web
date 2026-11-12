@@ -1,7 +1,7 @@
 // V4 contract regression: this file intentionally validates only browser/server transport shape.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findConfigSchema, listConfigSchemas } from "../dist/index.js";
+import { findConfigSchema, listConfigSchemas, resolveNativeWireListItem } from "../dist/index.js";
 
 test("registry exposes the first real config targets", () => {
   assert.deepEqual(
@@ -37,4 +37,41 @@ test("Database Connection marks password transport as sensitive", () => {
   assert.ok(schema);
   const password = schema.fields.find(({ key }) => key === "rdbms.password");
   assert.equal(password?.sensitive, true);
+});
+
+test("native LIST address resolver never guesses paths or overwrites a sibling list", () => {
+  const descriptor = {
+    wireLists: [
+      { descriptorPath: "fields.field", listPointer: "/fields/field",
+        itemPointerTemplate: "/fields/field/{index}" },
+      { descriptorPath: "fields.remove", listPointer: "/fields/remove",
+        itemPointerTemplate: "/fields/remove/{index}" },
+    ],
+  };
+  assert.deepEqual(resolveNativeWireListItem(descriptor, "fields.field", 2), {
+    listPointer: "/fields/field",
+    itemPointer: "/fields/field/2",
+  });
+  assert.deepEqual(resolveNativeWireListItem(descriptor, "fields.remove", 2), {
+    listPointer: "/fields/remove",
+    itemPointer: "/fields/remove/2",
+  });
+  assert.equal(resolveNativeWireListItem(descriptor, "fields.meta", 0), null,
+    "unknown fields must not guess a native JSON path");
+  for (const invalid of [-1, 1.25, Number.NaN, Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => resolveNativeWireListItem(descriptor, "fields.field", invalid),
+      RangeError);
+  }
+  assert.throws(() => resolveNativeWireListItem({ wireLists: [
+    ...descriptor.wireLists, descriptor.wireLists[0],
+  ] }, "fields.field", 0), /Ambiguous native LIST/);
+  assert.throws(() => resolveNativeWireListItem({ wireLists: [{
+    descriptorPath: "fields.field", listPointer: "/fields/~bad",
+    itemPointerTemplate: "/fields/~bad/{index}",
+  }] }, "fields.field", 0), /Invalid producer-owned/);
+  assert.throws(() => resolveNativeWireListItem({ wireLists: [{
+    descriptorPath: "fields.field", listPointer: "/fields/field",
+    itemPointerTemplate: "/fields/other/{index}",
+  }] }, "fields.field", 0), /Invalid producer-owned/);
 });
