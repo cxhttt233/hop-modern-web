@@ -18,7 +18,17 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import org.apache.hop.core.database.Database;
+import org.apache.hop.core.database.DatabaseMeta;
+import org.apache.hop.core.database.DatabasePluginType;
+import org.apache.hop.core.encryption.HopTwoWayPasswordEncoder;
+import org.apache.hop.core.logging.LoggingObject;
+import org.apache.hop.databases.h2.H2DatabaseMeta;
+import org.apache.hop.metadata.serializer.json.JsonMetadataProvider;
+import org.apache.hop.pipeline.transform.TransformMeta;
+import org.apache.hop.pipeline.transforms.tableinput.TableInputMeta;
 import java.time.Duration;
 import java.time.Instant;
 import org.apache.hop.core.HopClientEnvironment;
@@ -100,6 +110,59 @@ class ModernWebServerExecutionHttpTest {
     assertDoesNotThrow(() -> Instant.parse(terminal.path("start").asText()));
     assertDoesNotThrow(() -> Instant.parse(terminal.path("end").asText()));
     assertTrue(terminal.path("durationMillis").asLong(-1) >= 0);
+  }
+
+  @Test
+  void executesTableInputWithNativePersistedProjectMetadataOverHttp() throws Exception {
+    // The metadata path is selected via ModernWebServer production wiring, not
+    // through the manually injected MemoryMetadataProvider used by engine-only tests.
+    DatabasePluginType.getInstance().registerClassPathPlugin(H2DatabaseMeta.class);
+    var variables = new Variables();
+    Path metadataDir = Files.createDirectory(tempDir.resolve("project-metadata"));
+    var persisted = new JsonMetadataProvider(
+        new HopTwoWayPasswordEncoder(), metadataDir.toString(), variables);
+    var warehouse = new DatabaseMeta(
+        "Warehouse", "H2", "Native", "", "mem:server-project-http;DB_CLOSE_DELAY=-1", "", "", "");
+    persisted.getSerializer(DatabaseMeta.class).save(warehouse);
+
+    try (Database db = new Database(new LoggingObject("project-http-proof"), variables, warehouse)) {
+      db.connect();
+      db.execStatement("CREATE TABLE PROJECT_HTTP_PROOF(ID INT PRIMARY KEY, NAME VARCHAR(32))");
+      db.execStatement("INSERT INTO PROJECT_HTTP_PROOF VALUES(7, 'native-metadata')");
+    }
+
+    var input = new TableInputMeta();
+    input.setConnection("Warehouse");
+    input.setSql("SELECT ID, NAME FROM PROJECT_HTTP_PROOF");
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("project-http-proof");
+    pipeline.addTransform(new TransformMeta("TableInput", "native-source", input));
+    Path pipelineFile = tempDir.resolve("project-http-proof.hpl");
+    new PipelineDocumentStore(persisted, variables).save(pipelineFile, pipeline);
+
+    IHopMetadataProvider fromServerConfig =
+        ModernWebServer.selectMetadataProvider(variables, metadataDir.toString());
+    server = GrizzlyHttpServerFactory.createHttpServer(
+        URI.create("http://127.0.0.1:0/"),
+        ModernWebServer.createResourceConfig(variables, fromServerConfig), false);
+    server.start();
+    int port = server.getListeners().iterator().next().getPort();
+    URI base = URI.create("http://127.0.0.1:" + port + "/");
+
+    var opened = postJson(
+        base.resolve("api/pipelines/open"),
+        JSON.writeValueAsString(new OpenRequest(pipelineFile.toString())));
+    assertEquals(200, opened.statusCode(), opened.body());
+    String documentId = JSON.readTree(opened.body()).path("id").asText();
+    assertTrue(!documentId.isBlank());
+
+    var started = postNoBody(base.resolve("api/executions/pipelines/" + documentId));
+    assertEquals(202, started.statusCode(), started.body());
+    String executionId = JSON.readTree(started.body()).path("id").asText();
+    assertTrue(!executionId.isBlank());
+    JsonNode terminal = awaitTerminal(base, executionId);
+    assertEquals("completed", terminal.path("state").asText(), terminal.toString());
+    assertEquals(0, terminal.path("errors").asInt(-1), terminal.toString());
   }
 
   @Test
