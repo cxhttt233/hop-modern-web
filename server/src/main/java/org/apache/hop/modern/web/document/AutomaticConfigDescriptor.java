@@ -41,7 +41,7 @@ public final class AutomaticConfigDescriptor {
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
             new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
-            nativeNumericDefault(type, key, shape)));
+            nativeNumericDefault(type, key, shape), nativeBooleanDefault(type, key, shape)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), canonicalWireLists(type));
@@ -67,6 +67,16 @@ public final class AutomaticConfigDescriptor {
         && owner.getName().equals("org.apache.hop.pipeline.transforms.tableinput.TableInputField")
         && ("length".equals(key) || "precision".equals(key))) {
       return -1;
+    }
+    return null;
+  }
+
+  /** Native SortRowsField defaults: ascending and caseSensitive both true. */
+  private static Boolean nativeBooleanDefault(Class<?> owner, String key, Shape shape) {
+    if (shape == Shape.BOOLEAN
+        && owner.getName().equals("org.apache.hop.pipeline.transforms.sort.SortRowsField")
+        && ("ascending".equals(key) || "case_sensitive".equals(key))) {
+      return true;
     }
     return null;
   }
@@ -126,5 +136,5 @@ public final class AutomaticConfigDescriptor {
       boolean sensitive, boolean storeWithName, boolean storeWithCode, boolean defaultBoolean,
       String enumNameWhenNotFound, String elementJavaType, List<Property> children,
       List<Property> elementProperties, List<Option> options, LayoutHint layout,
-      Integer nativeNumberDefault) {}
+      Integer nativeNumberDefault, Boolean nativeBooleanDefault) {}
 }
