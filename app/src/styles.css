@@ -836,3 +836,17 @@ button { cursor: pointer; }
   overflow: hidden;
   background: #fff;
 }
+
+/* Native Hop field tables are horizontal, scrollable, and draft-only until explicit Save. */
+.generic-config .config-native-list-field { display: grid; gap: 8px; min-width: 0; }
+.generic-config .config-native-list-field > strong { color: #4c576d; font-size: 11px; }
+.generic-config .config-native-list-scroll { overflow-x: auto; max-width: 100%; border: 1px solid #dfe6f1; border-radius: 8px; background: #fff; }
+.generic-config .config-native-list table { width: 100%; min-width: 610px; border-collapse: collapse; text-align: left; }
+.generic-config .config-native-list th, .generic-config .config-native-list td { padding: 7px; border-bottom: 1px solid #e7eaf0; }
+.generic-config .config-native-list th { font-size: 11px; color: #526178; background: #f5f7fb; }
+.generic-config .config-native-list td input:not([type="checkbox"]),
+.generic-config .config-native-list td select { min-width: 95px; width: 100%; padding: 6px; }
+.generic-config .config-native-list-actions { white-space: nowrap; }
+.generic-config .config-native-list-actions button { margin-right: 3px; padding: 5px; }
+.generic-config .config-native-list-add { margin-top: 9px; }
+.generic-config .config-native-list-empty { display: block; margin-top: 9px; color: #718096; }
