@@ -88,6 +88,38 @@ try {
   if (await connection.inputValue() !== "Warehouse") throw new Error("Authoritative connection not visible");
   if (await sqlField.inputValue() !== "SELECT id, name FROM customers") throw new Error("Authoritative SQL not visible");
 
+  // SQL workbench is optional and locally bundled; opening/editing it must
+  // preserve the original native textarea, not POST an unsaved Hop config.
+  const sqlWorkbench = panel.locator(".config-sql-workbench");
+  const workbenchDetails = sqlWorkbench.locator("summary");
+  if (await sqlWorkbench.count() !== 1 ||
+      await sqlWorkbench.evaluate(element => element.open)) {
+    throw new Error("TableInput SQL workbench must exist but remain opt-in");
+  }
+  const workbenchWrites = () => requests.filter(({ url, method }) =>
+    method === "POST" && new URL(url).pathname.endsWith("/config/write")).length;
+  const writesBeforeWorkbench = workbenchWrites();
+  const originalWorkbenchSql = await sqlField.inputValue();
+  await workbenchDetails.click();
+  await sqlWorkbench.locator(".monaco-editor").waitFor({ state: "visible", timeout: 20000 });
+  const monacoInput = sqlWorkbench.locator(".monaco-editor textarea.inputarea");
+  await monacoInput.waitFor({ state: "attached" });
+  await sqlWorkbench.locator(".monaco-editor").click({ position: { x: 70, y: 80 } });
+  await page.keyboard.press("ControlOrMeta+A");
+  const monacoSql = "SELECT 17 AS flow_value /* 中文 SQL 编辑器 */";
+  await page.keyboard.insertText(monacoSql);
+  await page.waitForFunction(({ id, expected }) => {
+    const field = document.getElementById(id);
+    return field && "value" in field && field.value === expected;
+  }, { id: `config-${sqlDescriptor.javaField}`, expected: monacoSql });
+  await sqlField.fill(originalWorkbenchSql);
+  await workbenchDetails.click();
+  if (await sqlField.inputValue() !== originalWorkbenchSql ||
+      workbenchWrites() !== writesBeforeWorkbench) {
+    throw new Error("Optional SQL editor lost the native draft or issued a server write");
+  }
+  console.log("V4 optional SQL Monaco proof passed: local editor, native draft sync, zero server writes.");
+
   // Native Hop configuration groups may be collapsed by mouse or keyboard.
   // Searching must reveal a matching control without losing the user's group
   // preference, and neither collapse nor expansion may mutate Hop configuration.
