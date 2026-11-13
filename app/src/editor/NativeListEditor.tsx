@@ -62,6 +62,8 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                 : column.shape === "ENUM" && options.length > 0
                 ? <select aria-label={aria} disabled={disabled} value={val == null ? "" : String(val)}
                     onChange={e => edit(index, column, e.target.value)}>
+                    {!options.some(opt => opt.value === String(val ?? "")) &&
+                      <option value={String(val ?? "")}>{String(val ?? "") || "（空值）"}（原始值，未列入选项）</option>}
                     {options.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                   </select>
                 : <input aria-label={aria} disabled={disabled}
