@@ -20,6 +20,7 @@ import org.apache.hop.modern.web.document.PipelineEditResource;
 import org.apache.hop.modern.web.document.PipelineDocumentStore;
 import org.apache.hop.modern.web.document.PipelineGraphAdapter;
 import org.apache.hop.modern.web.document.PipelineOpenResource;
+import org.apache.hop.modern.web.document.WorkspaceFileResource;
 import org.glassfish.grizzly.http.server.HttpServer;
 import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
 import org.glassfish.jersey.jackson.JacksonFeature;
@@ -58,6 +59,7 @@ public final class ModernWebServer {
     PipelineEditResource editResource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
     return new ResourceConfig()
         .register(openResource)
+        .register(new WorkspaceFileResource())
         .register(configResource)
         .register(editResource)
         .register(JacksonFeature.class);
