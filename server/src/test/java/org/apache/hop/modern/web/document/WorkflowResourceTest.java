@@ -50,6 +50,31 @@ class WorkflowResourceTest {
   }
 
   @Test
+  void nativeActionInventorySurvivesDescriptionSaveAndReopen() throws Exception {
+    var store = new WorkflowDocumentStore(
+        mock(IHopMetadataProvider.class), Variables.getADefaultVariableSpace());
+    Path path = tempDir.resolve("two-actions.hwf");
+    try (var input = getClass().getResourceAsStream("/workflows/two-actions.hwf")) {
+      assertTrue(input != null, "native Workflow fixture must be on the test classpath");
+      Files.copy(input, path);
+    }
+    var resource = new WorkflowResource(store);
+    var opened = (WorkflowResource.Snapshot) resource.open(
+        new WorkflowResource.OpenRequest(path.toString())).getEntity();
+    assertEquals(2, opened.actions().size());
+    assertEquals("Start", opened.actions().get(0).name());
+    assertEquals("Second start", opened.actions().get(1).name());
+    assertEquals(200, opened.actions().get(1).x());
+    assertEquals(100, opened.actions().get(1).y());
+    resource.edit(new WorkflowResource.EditRequest(opened.id(), "saved without dropping nodes"));
+    assertEquals(200, resource.save(new WorkflowResource.SaveRequest(opened.id())).getStatus());
+    var reopened = (WorkflowResource.Snapshot) resource.open(
+        new WorkflowResource.OpenRequest(path.toString())).getEntity();
+    assertEquals("saved without dropping nodes", reopened.description());
+    assertEquals(opened.actions(), reopened.actions());
+  }
+
+  @Test
   void rejectsWrongFileExtensionWithoutOverwritingIt() throws Exception {
     var store = new WorkflowDocumentStore(
         mock(IHopMetadataProvider.class), Variables.getADefaultVariableSpace());
