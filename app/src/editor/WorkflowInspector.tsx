@@ -3,14 +3,16 @@ import { useState } from "react";
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean };
 
 async function command<T>(operation: "open" | "edit" | "save", body: object): Promise<T> {
-  const response = await fetch(`/api/workflows/${operation}`, {
+  const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => ({})) as { error?: string };
-    throw new Error(detail.error || `Workflow ${operation} failed (${response.status})`);
+    throw new Error(response.status === 404 && !detail.error
+      ? "Workflow 接口尚未部署到当前测试后端（HTTP 404），请先部署 Java 服务。"
+      : detail.error || `Workflow ${operation} failed (${response.status})`);
   }
   return response.json() as Promise<T>;
 }
@@ -21,6 +23,11 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const hasUnappliedChanges = Boolean(workflow && description !== (workflow.description ?? ""));
+  const hasUnsavedChanges = hasUnappliedChanges || Boolean(workflow?.dirty);
+  function closeSafely() {
+    if (!hasUnsavedChanges || window.confirm("Workflow 存在未保存的修改，确定放弃并关闭吗？")) onClose();
+  }
 
   async function execute(action: () => Promise<WorkflowSnapshot>) {
     setBusy(true);
@@ -43,12 +50,13 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ margin: 0 }}>Workflow · .hwf</h2>
-        <button type="button" onClick={onClose}>关闭</button>
+        <button type="button" onClick={closeSafely} disabled={busy}>关闭</button>
       </div>
       <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。节点画布编辑尚未开放。</p>
       <form onSubmit={event => {
         event.preventDefault();
         if (!path.trim()) return;
+        if (hasUnsavedChanges && !window.confirm("打开其他 Workflow 会放弃当前未保存的修改，确定继续吗？")) return;
         void execute(() => command("open", { path: path.trim() }));
       }}>
         <label htmlFor="workflow-path">服务器上的 .hwf 路径</label>
@@ -73,7 +81,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
             onClick={() => void execute(() => command("save", { id: workflow.id }))}>
             保存 .hwf
           </button>
-          <span role="status">{workflow.dirty ? "未保存" : "已保存"}</span>
+          <span role="status">{hasUnappliedChanges ? "有尚未应用的修改" : workflow.dirty ? "已应用，尚未保存到磁盘" : "已保存"}</span>
         </div>
       </div>}
       {error && <p role="alert" style={{ color: "#b91c1c" }}>{error}</p>}
