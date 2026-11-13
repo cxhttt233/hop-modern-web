@@ -39,7 +39,9 @@ public final class WorkspacePaths {
   public Path destinationFile(String relativeName) throws IOException {
     Path candidate = lexicalCandidate(relativeName);
     Path parent = candidate.getParent().toRealPath();
-    ensureWithinRoot(parent);
+    if (!parent.startsWith(root)) {
+      throw new IllegalArgumentException("Destination parent escapes workspace");
+    }
     if (!Files.isDirectory(parent)) {
       throw new IllegalArgumentException("Destination parent is not a directory");
     }
@@ -56,7 +58,7 @@ public final class WorkspacePaths {
   }
 
   private Path lexicalCandidate(String name) {
-    if (name == null || name.isBlank() || name.indexOf('\\0') >= 0) {
+    if (name == null || name.isBlank() || name.indexOf('\0') >= 0) {
       throw new IllegalArgumentException("Document name is required");
     }
     Path input = Path.of(name);
