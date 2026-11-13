@@ -447,7 +447,7 @@ export function App() {
             <div className="palette-search">
               <span aria-hidden="true">⌕</span>
               <input aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setPaletteQuery(""); }} />
-              {paletteQuery && <button type="button" aria-label="清除组件搜索" title="清除搜索（Esc）" onClick={() => setPaletteQuery("")}>×</button>
+              {paletteQuery && <button type="button" aria-label="清除组件搜索" title="清除搜索（Esc）" onClick={() => setPaletteQuery("")}>×</button>}
             </div>
             <div className="transform-list">
               {paletteQuery.trim() && filteredTransforms.length === 0 && (
