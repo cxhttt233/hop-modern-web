@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -28,18 +28,20 @@ function NativeNumberCell({ value, fallback, disabled, aria, onCommit }: {
   const original = value == null ? "" : String(value);
   const [draft, setDraft] = useState(original);
   const [editing, setEditing] = useState(false);
+  const canceled = useRef(false);
   useEffect(() => { if (!editing) setDraft(original); }, [original, editing]);
   const commit = () => {
     setEditing(false);
+    if (canceled.current) { canceled.current = false; setDraft(original); return; }
     const next = draft.trim() === "" ? fallback : Number(draft);
     if (Number.isFinite(next)) { setDraft(String(next)); if (next !== Number(original)) onCommit(next); }
     else setDraft(original);
   };
   return <input type="number" step="any" aria-label={aria} disabled={disabled}
-    value={draft} onFocus={() => setEditing(true)} onChange={event => setDraft(event.target.value)}
+    value={draft} onFocus={() => { canceled.current = false; setEditing(true); }} onChange={event => setDraft(event.target.value)}
     onBlur={commit} onKeyDown={event => {
       if (event.key === "Enter") { event.currentTarget.blur(); }
-      if (event.key === "Escape") { setDraft(original); setEditing(false); event.currentTarget.blur(); }
+      if (event.key === "Escape") { canceled.current = true; setDraft(original); setEditing(false); event.currentTarget.blur(); }
     }} />;
 }
 
