@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSPropertie
 
 import { SqlWorkbenchBoundary } from "./SqlWorkbenchBoundary";
 import { NativeListEditor, canEditNativeList } from "./NativeListEditor";
+import { NativeScalarNumberInput } from "./NativeScalarNumberInput";
 import { NativeObjectListEditor, canEditSelectValuesObject } from "./NativeObjectListEditor";
 import { readNativeWireList, writeNativeWireList, resolveNativeWireListItem, type HopNativeWireDescriptor } from "@hop-modern/contracts";
 import type { ConfigPropertyDescriptor as NativeConfigPropertyDescriptor } from "./configDescriptor";
@@ -196,7 +197,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const field = (p: ConfigPropertyDescriptor) => {
     const value = draft[p.key]; const id = `config-${p.javaField}`;
     if (p.shape === "BOOLEAN") return <input id={id} disabled={disabled} type="checkbox" checked={Boolean(value)} onChange={(e) => set(p.key, e.target.checked)} />;
-    if (p.shape === "NUMBER") return <input id={id} disabled={disabled} type="number" value={value == null ? "" : String(value)} onChange={(e) => set(p.key, e.target.value === "" ? undefined : Number(e.target.value))} />;
+    if (p.shape === "NUMBER") return <NativeScalarNumberInput id={id} disabled={disabled} value={value} onChange={next => set(p.key, next)} />;
     if (p.shape === "OBJECT" && !rawListEditors[p.key] &&
         canEditSelectValuesObject(descriptor, p, value)) {
       return <NativeObjectListEditor descriptor={descriptor} property={p} value={value}
