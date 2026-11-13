@@ -22,6 +22,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import org.apache.hop.core.exception.HopMissingPluginsException;
 import org.apache.hop.core.exception.HopXmlException;
@@ -32,6 +33,8 @@ import org.apache.hop.pipeline.editor.PipelineEditor;
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
 public final class PipelineOpenResource {
+  private static final long MAX_PIPELINE_BYTES = 16L * 1024 * 1024;
+
   private final PipelineDocumentStore store;
   private final PipelineGraphAdapter graphAdapter;
   private final PipelineDocumentRegistry registry;
@@ -63,6 +66,13 @@ public final class PipelineOpenResource {
       }
       if (!Files.isRegularFile(path)) {
         return error(400, "invalid_path", "path must reference a file");
+      }
+
+      if (!path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".hpl")) {
+        return error(400, "invalid_file_type", "only .hpl pipeline files can be opened");
+      }
+      if (Files.size(path) > MAX_PIPELINE_BYTES) {
+        return error(413, "file_too_large", "pipeline file exceeds the 16 MiB limit");
       }
 
       byte[] bytes = Files.readAllBytes(path);
