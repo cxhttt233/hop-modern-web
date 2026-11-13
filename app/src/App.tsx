@@ -400,6 +400,10 @@ export function App() {
             if (savingRef.current || pendingMutationsRef.current > 0) return;
             const path = pipelinePathDraft.trim();
             if (!path) return;
+            // Opening another file (or reloading this one) discards local edits.
+            // beforeunload only protects navigation away from the browser tab.
+            if (source.kind === "server" && dirty &&
+                !window.confirm("当前流程有未保存的修改。继续打开将丢失这些修改，确定继续吗？")) return;
             if (path === pipelinePath) setPipelineOpenRevision((current) => current + 1);
             else setPipelinePath(path);
             setShowOpenPanel(false);
