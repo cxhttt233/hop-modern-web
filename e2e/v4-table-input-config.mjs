@@ -235,7 +235,7 @@ try {
   // field finder hides one of them. Never render values or write Hop data.
   const review = panel.locator(".config-change-review");
   await review.locator("summary").click();
-  const changedNames = await review.locator('ul[aria-label="未保存字段清单"] li').allInnerTexts();
+  const changedNames = await review.locator('ul[aria-label="未保存字段清单"] li span').allInnerTexts();
   if (changedNames.length !== 2 || !changedNames.includes("连接") || !changedNames.includes("SQL") ||
       (await review.innerText()).includes("Warehouse_临时") ||
       (await review.innerText()).includes("SELECT id FROM customers") ||
@@ -245,11 +245,12 @@ try {
   await panel.getByRole("button", { name: "清除字段查找" }).click();
   await connection.fill("Warehouse");
   if (await changeSummary.innerText() !== "已修改 1 项（未保存）" ||
-      JSON.stringify(await review.locator("li").allInnerTexts()) !== JSON.stringify(["SQL"])) {
+      JSON.stringify(await review.locator("li span").allInnerTexts()) !== JSON.stringify(["SQL"])) {
     throw new Error("Restoring native connection did not remove it from unsaved field review");
   }
-  await sqlField.fill("SELECT id, name FROM customers");
-  if (await changeSummary.count() !== 0 || await review.count() !== 0 ||
+  await review.getByRole("button", { name: "撤销SQL的修改" }).click();
+  if (await sqlField.inputValue() !== originalGroupSql ||
+      await changeSummary.count() !== 0 || await review.count() !== 0 ||
       countWrites() !== writesBeforeCount) {
     throw new Error("Restored native SQL draft must clear review and count without writing Hop");
   }
