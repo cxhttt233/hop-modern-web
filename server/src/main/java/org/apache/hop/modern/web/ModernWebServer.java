@@ -14,6 +14,7 @@ import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
+import org.apache.hop.modern.web.document.DatabaseConnectionValidationResource;
 import org.apache.hop.modern.web.document.PipelineConfigResource;
 import org.apache.hop.modern.web.document.PipelineDocumentRegistry;
 import org.apache.hop.modern.web.document.PipelineEditResource;
@@ -58,6 +59,7 @@ public final class ModernWebServer {
     PipelineEditResource editResource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
     return new ResourceConfig()
         .register(openResource)
+        .register(new DatabaseConnectionValidationResource())
         .register(configResource)
         .register(editResource)
         .register(JacksonFeature.class);
