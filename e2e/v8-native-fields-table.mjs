@@ -42,10 +42,10 @@ try {
   if (await table.locator("tbody tr").count() !== 1 || writes() !== before) {
     throw new Error("Adding a native field must be a local draft only");
   }
-  await table.getByRole("textbox", { name: "字段 第1行 name" }).fill("黄河流量");
-  await table.getByRole("spinbutton", { name: "字段 第1行 type" }).fill("2");
-  await table.getByRole("spinbutton", { name: "字段 第1行 length" }).fill("18");
-  await table.getByRole("textbox", { name: "字段 第1行 format" }).fill("0.00");
+  await table.getByRole("textbox", { name: "字段 第1行 字段名称" }).fill("黄河流量");
+  await table.getByRole("spinbutton", { name: "字段 第1行 数据类型" }).fill("2");
+  await table.getByRole("spinbutton", { name: "字段 第1行 长度" }).fill("18");
+  await table.getByRole("textbox", { name: "字段 第1行 格式" }).fill("0.00");
   if (writes() !== before) throw new Error("Native field edits wrote Hop before Save");
   const write = page.waitForResponse(response => isPost(response, "/config/write"));
   await panel.getByRole("button", { name: "保存配置（Save）" }).click();
@@ -92,7 +92,7 @@ try {
     throw new Error("Native fields not preserved across actual Hop .hpl disk reopen");
   }
   await table.waitFor({ state: "visible" });
-  await table.getByRole("textbox", { name: "字段 第1行 name" }).fill("未保存的草稿");
+  await table.getByRole("textbox", { name: "字段 第1行 字段名称" }).fill("未保存的草稿");
   await panel.getByRole("button", { name: "取消配置（Cancel）" }).click();
   await page.locator('.react-flow__node[data-id="table-input"]').click();
   const canceledRead = page.waitForResponse(response => isPost(response, "/config/read"));
