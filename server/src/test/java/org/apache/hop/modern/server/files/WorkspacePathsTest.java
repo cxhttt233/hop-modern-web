@@ -17,6 +17,8 @@ class WorkspacePathsTest {
     WorkspacePaths paths = new WorkspacePaths(root);
     assertEquals(existing.toRealPath(), paths.existingFile("nested/flow.hpl"));
     assertEquals(nested.resolve("new.hwf"), paths.destinationFile("nested/new.hwf"));
+    assertEquals(root.resolve("new.hpl"), paths.destinationFile("new.hpl"));
+    assertEquals(existing.toRealPath(), paths.existingFile("nested/flow.hpl"));
   }
 
   @Test void rejectsTraversalAndAbsolutePaths() throws Exception {
@@ -26,6 +28,8 @@ class WorkspacePathsTest {
     assertThrows(IllegalArgumentException.class, () -> paths.destinationFile(temporary.resolve("x.hpl").toString()));
     assertThrows(IllegalArgumentException.class, () -> paths.destinationFile("."));
     assertThrows(IllegalArgumentException.class, () -> paths.destinationFile(""));
+    assertThrows(IllegalArgumentException.class, () -> paths.destinationFile(null));
+    assertThrows(IllegalArgumentException.class, () -> paths.destinationFile("bad\\u0000name.hpl"));
   }
 
   @Test void rejectsSymlinkEscapeForReadAndWrite() throws Exception {
