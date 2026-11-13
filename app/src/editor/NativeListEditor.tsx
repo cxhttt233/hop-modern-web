@@ -1,3 +1,5 @@
+
+import { useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -25,6 +27,13 @@ export function canEditNativeList(value: unknown, properties: ConfigPropertyDesc
  * Hop's Java serializer remains authoritative for JSON/XML persistence and validation.
  */
 export function NativeListEditor({ title, value: rows, properties, disabled, onChange }: Props) {
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLocaleLowerCase();
+  const visibleRows = rows.map((entry, index) => ({ entry, index })).filter(({ entry }) =>
+    !query || properties.some(column => {
+      const value = (entry as Record<string, unknown>)[column.key];
+      return value != null && String(value).toLocaleLowerCase().includes(query);
+    }));
   const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) =>
     onChange(rows.map((row, i) => i === index ?
       { ...(row as Record<string, unknown>), [column.key]: nextValue } : row));
@@ -45,11 +54,16 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
       p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
       p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]))]);
   return <div className="config-native-list">
+    {rows.length > 5 && <div className="config-native-list-filter">
+      <input type="search" aria-label={`${title} 搜索字段行`} placeholder="搜索字段名称或配置值" value={search}
+        onChange={event => setSearch(event.target.value)} />
+      <small aria-live="polite">显示 {visibleRows.length} / {rows.length} 行</small>
+    </div>}
     <div className="config-native-list-scroll">
       <table aria-label={title + "原生字段列表"}>
         <thead><tr><th scope="col">序号</th>{properties.map(column =>
           <th scope="col" key={column.key}>{LABELS[column.key] ?? column.key}</th>)}<th scope="col">操作</th></tr></thead>
-        <tbody>{rows.map((entry, index) => {
+        <tbody>{visibleRows.map(({ entry, index }) => {
           const row = entry as Record<string, unknown>;
           return <tr key={index}><th scope="row">{index + 1}</th>{properties.map(column => {
             const val = row[column.key];
@@ -91,7 +105,8 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
       </table>
     </div>
     {rows.length === 0 && <small className="config-native-list-empty">当前没有字段行</small>}
-    {rows.length > 0 && <small aria-live="polite">共 {rows.length} 行字段</small>}
+    {rows.length > 0 && visibleRows.length === 0 && <small className="config-native-list-empty">没有匹配的字段，请修改搜索条件</small>}
+    {rows.length > 0 && <small>共 {rows.length} 行字段，搜索只影响显示，不改变保存内容</small>}
     <button type="button" className="config-native-list-add" disabled={disabled} onClick={add}>
       添加字段行
     </button>
