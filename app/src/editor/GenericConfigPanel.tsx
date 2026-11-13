@@ -92,6 +92,27 @@ export function applyGenericConfigDraft(original: Record<string, unknown>, descr
   }, { ...original });
 }
 
+/** Keep typed JSON stable while editing; do not reformat valid intermediate text. */
+function StructuredJsonEditor({ value, shape, disabled, onChange }: {
+  value: unknown; shape: "LIST" | "OBJECT"; disabled?: boolean;
+  onChange: (value: unknown, invalid: boolean) => void;
+}) {
+  const [text, setText] = useState(() => typeof value === "string" ? value :
+    JSON.stringify(value ?? (shape === "LIST" ? [] : {}), null, 2));
+  const update = (raw: string) => {
+    setText(raw);
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      const valid = shape === "LIST" ? Array.isArray(parsed) :
+        parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+      if (!valid) throw new Error("shape");
+      onChange(parsed, false);
+    } catch { onChange(raw, true); }
+  };
+  return <textarea disabled={disabled} rows={shape === "LIST" ? 8 : 6}
+    value={text} onChange={event => update(event.target.value)} />;
+}
+
 export function GenericConfigPanel({ descriptor, config, transformName, transformId, disabled, onCancel, onSave }: GenericConfigPanelProps) {
   const nativeValue = (p: ConfigPropertyDescriptor): unknown =>
     p.shape === "LIST" && resolveNativeWireListItem(descriptor, p.key, 0) ?
@@ -209,16 +230,11 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
         disabled={disabled} onChange={rows => set(p.key, rows)} />;
     }
     if (p.shape === "OBJECT" || p.shape === "LIST") {
-      const text = typeof value === "string" ? value : JSON.stringify(value ?? (p.shape === "LIST" ? [] : {}), null, 2);
-      return <textarea id={id} disabled={disabled} rows={p.shape === "LIST" ? 8 : 6} value={text} onChange={(e) => {
-        const raw = e.target.value;
-        try {
-          const parsed: unknown = JSON.parse(raw);
-          const valid = p.shape === "LIST" ? Array.isArray(parsed) : !!parsed && typeof parsed === "object" && !Array.isArray(parsed);
-          if (!valid) throw new Error("shape");
-          set(p.key, parsed); setInvalid((old) => ({ ...old, [p.key]: false }));
-        } catch { set(p.key, raw); setInvalid((old) => ({ ...old, [p.key]: true })); }
-      }} />;
+      return <StructuredJsonEditor key={p.key} shape={p.shape} disabled={disabled}
+        value={value} onChange={(next, isInvalid) => {
+          set(p.key, next);
+          setInvalid((old) => ({ ...old, [p.key]: isInvalid }));
+        }} />;
     }
     const long = /sql|query|script|description|expression/i.test(p.key);
     if (long) return <textarea id={id} disabled={disabled} rows={6} value={value == null ? "" : String(value)} onChange={(e) => set(p.key, e.target.value)} />;
