@@ -199,7 +199,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     if (p.shape === "NUMBER") return <input id={id} disabled={disabled} type="number" value={value == null ? "" : String(value)} onChange={(e) => set(p.key, e.target.value === "" ? undefined : Number(e.target.value))} />;
     if (p.shape === "OBJECT" && !rawListEditors[p.key] &&
         canEditSelectValuesObject(descriptor, p, value)) {
-      return <NativeObjectListEditor descriptor={descriptor} property={p} value={value}
+      return <NativeObjectListEditor descriptor={descriptor} property={p} value={(value ?? {}) as Record<string, unknown>}
         disabled={disabled} onChange={next => set(p.key, next)} />;
     }
     if (p.shape === "LIST" && !rawListEditors[p.key] &&
