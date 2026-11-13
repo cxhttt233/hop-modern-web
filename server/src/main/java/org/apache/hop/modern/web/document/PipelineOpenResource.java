@@ -1,3 +1,5 @@
+[Reading 195 lines from start (total: 195 lines, 0 remaining)]
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with
@@ -26,6 +28,7 @@ import java.util.Objects;
 import org.apache.hop.core.exception.HopMissingPluginsException;
 import org.apache.hop.core.exception.HopXmlException;
 import org.apache.hop.pipeline.editor.PipelineEditor;
+import org.apache.hop.modern.server.files.WorkspacePaths;
 
 /** Minimal browser transport for opening and semantically editing a real pipeline. */
 @Path("/api/pipelines")
@@ -33,6 +36,7 @@ import org.apache.hop.pipeline.editor.PipelineEditor;
 @Produces(MediaType.APPLICATION_JSON)
 public final class PipelineOpenResource {
   private final PipelineDocumentStore store;
+  private final WorkspacePaths workspacePaths;
   private final PipelineGraphAdapter graphAdapter;
   private final PipelineDocumentRegistry registry;
 
@@ -44,7 +48,14 @@ public final class PipelineOpenResource {
       PipelineDocumentStore store,
       PipelineGraphAdapter graphAdapter,
       PipelineDocumentRegistry registry) {
+    this(store, graphAdapter, registry, null);
+  }
+
+  public PipelineOpenResource(
+      PipelineDocumentStore store, PipelineGraphAdapter graphAdapter,
+      PipelineDocumentRegistry registry, WorkspacePaths workspacePaths) {
     this.store = Objects.requireNonNull(store, "store");
+    this.workspacePaths = workspacePaths;
     this.graphAdapter = Objects.requireNonNull(graphAdapter, "graphAdapter");
     this.registry = Objects.requireNonNull(registry, "registry");
   }
@@ -57,7 +68,9 @@ public final class PipelineOpenResource {
     }
 
     try {
-      java.nio.file.Path path = java.nio.file.Path.of(request.path()).toAbsolutePath().normalize();
+      java.nio.file.Path path = workspacePaths == null
+          ? java.nio.file.Path.of(request.path()).toAbsolutePath().normalize()
+          : workspacePaths.existingFile(request.path());
       if (!Files.exists(path)) {
         return error(404, "not_found", "pipeline file was not found");
       }
@@ -71,8 +84,8 @@ public final class PipelineOpenResource {
       PipelineDocument document = new PipelineDocument(id, path, store.open(path));
       registry.put(document);
       return Response.ok(graphAdapter.project(document, revision)).build();
-    } catch (InvalidPathException e) {
-      return error(400, "invalid_path", "path is invalid");
+    } catch (IllegalArgumentException e) {
+      return error(400, "invalid_path", "path must reference a file within the workspace");
     } catch (NoSuchFileException e) {
       return error(404, "not_found", "pipeline file was not found");
     } catch (HopXmlException | HopMissingPluginsException e) {
