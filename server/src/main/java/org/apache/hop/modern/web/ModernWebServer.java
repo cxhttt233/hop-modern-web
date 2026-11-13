@@ -20,6 +20,7 @@ import org.apache.hop.modern.web.document.PipelineEditResource;
 import org.apache.hop.modern.web.document.PipelineDocumentStore;
 import org.apache.hop.modern.web.document.PipelineGraphAdapter;
 import org.apache.hop.modern.web.document.PipelineOpenResource;
+import org.apache.hop.modern.web.document.WorkflowPreviewResource;
 import org.glassfish.grizzly.http.server.HttpServer;
 import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
 import org.glassfish.jersey.jackson.JacksonFeature;
@@ -56,10 +57,21 @@ public final class ModernWebServer {
     PipelineConfigResource configResource =
         new PipelineConfigResource(registry, metadataProvider);
     PipelineEditResource editResource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
-    return new ResourceConfig()
+    ResourceConfig resources = new ResourceConfig()
         .register(openResource)
         .register(configResource)
         .register(editResource)
         .register(JacksonFeature.class);
+    // Opt-in only: never expose arbitrary host filesystem paths by default.
+    String workflowRoot = System.getenv("HOP_MODERN_WORKFLOW_ROOT");
+    if (workflowRoot != null && !workflowRoot.isBlank()) {
+      try {
+        resources.register(new WorkflowPreviewResource(
+            java.nio.file.Path.of(workflowRoot), metadataProvider, variables));
+      } catch (java.io.IOException e) {
+        throw new IllegalStateException("configured workflow root is inaccessible", e);
+      }
+    }
+    return resources;
   }
 }
