@@ -346,6 +346,7 @@ export function App() {
       })
       .catch((error: unknown) => {
         setConfigError(error instanceof Error ? error.message : "Pipeline save failed");
+        setSaveStatus("保存失败，请重试");
       })
       .finally(() => {
         savingRef.current = false;
@@ -431,7 +432,7 @@ export function App() {
           <strong title={isRealGraph ? pipelinePath : undefined}>{displayPipelineName}</strong>
           {isRealGraph && <button type="button" aria-label="复制当前流程路径" title={pipelinePath} onClick={() => { void copyPipelinePath(); }}>复制路径</button>}
           {isRealGraph && pathCopyStatus && <span role="status">{pathCopyStatus}</span>}
-          {isRealGraph && dirty && <span className="dirty-state is-dirty" role="status">未保存</span>}
+          {isRealGraph && dirty && <span className="dirty-state is-dirty" role="status">{saveStatus || "未保存"}</span>}
           {isRealGraph && !dirty && saveStatus && <span className="dirty-state" role="status">{saveStatus}</span>}
         </div>
 
