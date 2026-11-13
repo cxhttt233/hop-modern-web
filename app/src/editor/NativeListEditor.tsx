@@ -34,6 +34,12 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     changed.splice(to, 0, item);
     onChange(changed);
   };
+  // Duplicate the entire native row, including properties not shown in the editor.
+  // This lets users add similar fields without silently dropping Hop metadata.
+  const duplicate = (index: number) => {
+    const row = rows[index] as Record<string, unknown>;
+    onChange([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
+  };
   const add = () => onChange([...rows, Object.fromEntries(properties.map(p =>
     [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
       p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) : (p.nativeStringDefault ?? "")]))]);
@@ -71,6 +77,9 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                 disabled={disabled || index === 0} onClick={() => move(index, index - 1)}>↑</button>
               <button type="button" aria-label={title + " 下移第" + (index + 1) + "行"}
                 disabled={disabled || index === rows.length - 1} onClick={() => move(index, index + 1)}>↓</button>
+              <button type="button" aria-label={title + " 复制第" + (index + 1) + "行"}
+                title="复制此行并保留原生属性" disabled={disabled}
+                onClick={() => duplicate(index)}>复制</button>
               <button type="button" aria-label={title + " 删除第" + (index + 1) + "行"}
                 disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))}>删除</button>
             </td></tr>;
