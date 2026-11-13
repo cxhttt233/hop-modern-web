@@ -348,6 +348,19 @@ export function App() {
       });
   }, [dirty, document.id, reconcileGraph, source]);
 
+  // Browser refresh, tab close and external navigation can discard unsaved edits.
+  // Only warn for authoritative server documents; sample graphs are read-only.
+  // Modern browsers display their own localized confirmation text.
+  useEffect(() => {
+    if (source.kind !== "server" || !dirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirty, source.kind]);
+
   // Familiar editor shortcut. Keep native input behavior and never bypass
   // the existing dirty/in-flight mutation guards in saveDocument.
   useEffect(() => {
