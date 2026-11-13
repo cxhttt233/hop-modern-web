@@ -153,8 +153,12 @@ export function resolveNativeWireListItem(
   // A producer must never assign one wire container to two distinct
   // descriptor paths: otherwise editing either table silently edits the other.
   // This is a cross-entry invariant, not just a duplicate descriptor-path check.
+  // Native LIST write containers must be disjoint. Even a strict ancestor
+  // path aliases its nested descendant and may overwrite its sibling data.
   if (descriptor.wireLists?.some(entry =>
-      entry !== contract && entry.listPointer === contract.listPointer)) {
+      entry !== contract && (entry.listPointer === contract.listPointer ||
+        entry.listPointer.startsWith(contract.listPointer + "/") ||
+        contract.listPointer.startsWith(entry.listPointer + "/")))) {
     throw new Error("Aliased native LIST wire pointer: " + contract.listPointer);
   }
   if (!contract.listPointer.startsWith("/") ||
