@@ -71,7 +71,7 @@ public final class WorkflowPreviewResource {
       }
     } catch (NoSuchFileException e) {
       return error(404, "not_found", "workflow file was not found");
-    } catch (java.nio.file.InvalidPathException | IllegalArgumentException e) {
+    } catch (IllegalArgumentException e) {
       return error(400, "invalid_path", "workflow path is invalid");
     } catch (Exception e) {
       return error(422, "invalid_workflow", "workflow could not be parsed");
