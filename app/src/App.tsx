@@ -387,6 +387,15 @@ export function App() {
         <div className="editor-actions">
           <button type="button" aria-label="打开流程（Choose pipeline）" disabled={saving || pendingMutations > 0} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
           {isRealGraph && <>
+            <button type="button" aria-label="重新打开当前流程（Reload pipeline）"
+              title="重新从服务器读取当前流程；未保存的修改需要确认"
+              disabled={saving || pendingMutations > 0}
+              onClick={() => {
+                if (dirty && !window.confirm("当前流程有未保存的修改。重新打开将丢失这些修改，确定继续吗？")) return;
+                setPipelinePathDraft(pipelinePath);
+                setShowOpenPanel(false);
+                setPipelineOpenRevision((current) => current + 1);
+              }}>重新打开</button>
             <button type="button" aria-label="适配画布（Fit canvas）" disabled={!flow || nodes.length === 0} title="将当前流程的全部节点适配到可见画布" onClick={() => { void flow?.fitView({ padding: 0.18, maxZoom: 1, duration: 250 }); }}>适配画布</button>
             <button type="button" aria-label="撤销（Undo）" disabled={saving} onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
             <button type="button" aria-label="重做（Redo）" disabled={saving} onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
