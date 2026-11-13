@@ -83,6 +83,11 @@ export function applyGenericConfigDraft(original: Record<string, unknown>, descr
       return Array.isArray(value) && JSON.stringify(value) !== JSON.stringify(unchanged)
         ? writeNativeWireList(next, descriptor, property.key, value) : next;
     }
+    // Preserve untouched native metadata verbatim. Writing every visible field can
+    // materialize absent keys as undefined and change the serialized Hop document
+    // even when the user only edited a different property.
+    const originalValue = read(original, property.key);
+    if (Object.is(value, originalValue) || JSON.stringify(value) === JSON.stringify(originalValue)) return next;
     return write(next, property.key, value);
   }, { ...original });
 }
