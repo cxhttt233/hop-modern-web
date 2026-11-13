@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 class ModernWebServerTest {
   @Test
-  void bindsLoopbackAndRegistersPipelineOpenResource() {
+  void bindsLoopbackAndRegistersPipelineOpenResource() throws Exception {
     assertEquals("127.0.0.1", ModernWebServer.DEFAULT_URI.getHost());
     ResourceConfig config = ModernWebServer.createResourceConfig();
     assertTrue(
