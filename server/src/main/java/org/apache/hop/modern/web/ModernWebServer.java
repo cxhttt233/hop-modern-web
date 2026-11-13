@@ -7,6 +7,9 @@
 package org.apache.hop.modern.web;
 
 import java.net.URI;
+import java.io.IOException;
+import java.nio.file.Path;
+import org.apache.hop.modern.server.files.WorkspacePaths;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
@@ -46,13 +49,19 @@ public final class ModernWebServer {
     PluginRegistry.init();
   }
 
-  static ResourceConfig createResourceConfig() {
+  static ResourceConfig createResourceConfig() throws IOException {
     IVariables variables = Variables.getADefaultVariableSpace();
     IHopMetadataProvider metadataProvider = new MemoryMetadataProvider();
     PipelineDocumentStore store = new PipelineDocumentStore(metadataProvider, variables);
     PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
     PipelineOpenResource openResource =
-        new PipelineOpenResource(store, new PipelineGraphAdapter(), registry);
+        new PipelineOpenResource(
+            store,
+            new PipelineGraphAdapter(),
+            registry,
+            new WorkspacePaths(
+                Path.of(System.getProperty(
+                    "hop.modern.workspace", System.getProperty("user.dir")))));
     PipelineConfigResource configResource =
         new PipelineConfigResource(registry, metadataProvider);
     PipelineEditResource editResource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
