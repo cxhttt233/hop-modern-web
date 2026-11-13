@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -25,10 +26,16 @@ export function canEditNativeList(value: unknown, properties: ConfigPropertyDesc
  * Hop's Java serializer remains authoritative for JSON/XML persistence and validation.
  */
 export function NativeListEditor({ title, value: rows, properties, disabled, onChange }: Props) {
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLocaleLowerCase();
+  const visibleRows = rows.map((entry, index) => ({ entry, index })).filter(({ entry }) =>
+    !needle || properties.some(column => String((entry as Record<string, unknown>)[column.key] ?? "")
+      .toLocaleLowerCase().includes(needle)));
   const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) =>
     onChange(rows.map((row, i) => i === index ?
       { ...(row as Record<string, unknown>), [column.key]: nextValue } : row));
   const move = (from: number, to: number) => {
+    if (needle) return; // Hidden neighbors must never be reordered implicitly.
     const changed = [...rows];
     const [item] = changed.splice(from, 1);
     changed.splice(to, 0, item);
@@ -45,11 +52,17 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
       p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
       p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]))]);
   return <div className="config-native-list">
+    <div className="config-native-list-filter">
+      <input type="search" aria-label={title + " 搜索字段行"} placeholder="筛选字段配置"
+        value={query} onChange={event => setQuery(event.target.value)} />
+      {needle && <button type="button" onClick={() => setQuery("")}>清除筛选</button>}
+      <small aria-live="polite">{needle ? `匹配 ${visibleRows.length} / ${rows.length} 行；清除筛选后可调整顺序` : `共 ${rows.length} 行字段`}</small>
+    </div>
     <div className="config-native-list-scroll">
       <table aria-label={title + "原生字段列表"}>
         <thead><tr><th scope="col">序号</th>{properties.map(column =>
           <th scope="col" key={column.key}>{LABELS[column.key] ?? column.key}</th>)}<th scope="col">操作</th></tr></thead>
-        <tbody>{rows.map((entry, index) => {
+        <tbody>{visibleRows.map(({ entry, index }) => {
           const row = entry as Record<string, unknown>;
           return <tr key={index}><th scope="row">{index + 1}</th>{properties.map(column => {
             const val = row[column.key];
@@ -78,9 +91,9 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
             }</td>;
           })}<td className="config-native-list-actions">
               <button type="button" aria-label={title + " 上移第" + (index + 1) + "行"}
-                title="上移一行" disabled={disabled || index === 0} onClick={() => move(index, index - 1)}>↑</button>
+                title="上移一行" disabled={disabled || Boolean(needle) || index === 0} onClick={() => move(index, index - 1)}>↑</button>
               <button type="button" aria-label={title + " 下移第" + (index + 1) + "行"}
-                title="下移一行" disabled={disabled || index === rows.length - 1} onClick={() => move(index, index + 1)}>↓</button>
+                title="下移一行" disabled={disabled || Boolean(needle) || index === rows.length - 1} onClick={() => move(index, index + 1)}>↓</button>
               <button type="button" aria-label={title + " 复制第" + (index + 1) + "行"}
                 title="复制此行并保留原生属性" disabled={disabled}
                 onClick={() => duplicate(index)}>复制</button>
