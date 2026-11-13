@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -25,6 +26,17 @@ export function canEditNativeList(value: unknown, properties: ConfigPropertyDesc
  * Hop's Java serializer remains authoritative for JSON/XML persistence and validation.
  */
 export function NativeListEditor({ title, value: rows, properties, disabled, onChange }: Props) {
+  const [deletedRow, setDeletedRow] = useState<{ index: number; row: unknown } | null>(null);
+  const remove = (index: number) => {
+    setDeletedRow({ index, row: rows[index] });
+    onChange(rows.filter((_, i) => i !== index));
+  };
+  const undoDelete = () => {
+    if (!deletedRow) return;
+    const insertAt = Math.min(deletedRow.index, rows.length);
+    onChange([...rows.slice(0, insertAt), deletedRow.row, ...rows.slice(insertAt)]);
+    setDeletedRow(null);
+  };
   const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) =>
     onChange(rows.map((row, i) => i === index ?
       { ...(row as Record<string, unknown>), [column.key]: nextValue } : row));
@@ -85,11 +97,15 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                 title="复制此行并保留原生属性" disabled={disabled}
                 onClick={() => duplicate(index)}>复制</button>
               <button type="button" aria-label={title + " 删除第" + (index + 1) + "行"}
-                title="删除此行" disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))}>删除</button>
+                title="删除此行（可撤销）" disabled={disabled} onClick={() => remove(index)}>删除</button>
             </td></tr>;
         })}</tbody>
       </table>
     </div>
+    {deletedRow && <div className="config-native-list-undo" role="status">
+      已删除第 {deletedRow.index + 1} 行（保存前可撤销）
+      <button type="button" disabled={disabled} onClick={undoDelete}>撤销删除</button>
+    </div>}
     {rows.length === 0 && <small className="config-native-list-empty">当前没有字段行</small>}
     {rows.length > 0 && <small aria-live="polite">共 {rows.length} 行字段</small>}
     <button type="button" className="config-native-list-add" disabled={disabled} onClick={add}>

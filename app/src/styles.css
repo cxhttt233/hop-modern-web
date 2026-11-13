@@ -850,6 +850,8 @@ button { cursor: pointer; }
 .generic-config .config-native-list-actions button { margin-right: 3px; padding: 5px; }
 .generic-config .config-native-list-add { margin-top: 9px; }
 .generic-config .config-native-list-empty { display: block; margin-top: 9px; color: #718096; }
+.generic-config .config-native-list-undo { display: flex; align-items: center; gap: 10px; margin-top: 9px; color: #465b77; font-size: 12px; }
+.generic-config .config-native-list-undo button { padding: 4px 9px; border: 1px solid #bccde5; border-radius: 5px; background: #fff; color: #245ba0; cursor: pointer; }
 
 /* Nested Select Values editor: distinct native ordered tables, never guessed JSON keys. */
 .generic-config .config-native-object-lists { display: grid; gap: 12px; min-width: 0; }
