@@ -16,9 +16,10 @@ function asRecord(value: unknown): value is Record<string, unknown> {
 export function canEditSelectValuesObject(
   descriptor: HopNativeWireDescriptor & { className: string },
   property: ConfigPropertyDescriptor, value: unknown,
-): value is Record<string, unknown> {
+): value is Record<string, unknown> | null | undefined {
   if (descriptor.className !== "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" ||
-      property.key !== "fields" || property.shape !== "OBJECT" || !asRecord(value)) return false;
+      property.key !== "fields" || property.shape !== "OBJECT" ||
+      (value != null && !asRecord(value))) return false;
   const children = property.children ?? [];
   // Never discard a future native property by pretending that the UI owns it.
   if (children.length !== 4 ||
@@ -30,7 +31,7 @@ export function canEditSelectValuesObject(
     // A wire pointer must be explicitly attested by the server, not guessed from groupKey.
     const pointer = resolveNativeWireListItem(descriptor, propertyPath, 0)?.listPointer;
     if (pointer !== "/fields/" + key) return false;
-    const rows = value[key];
+    const rows = asRecord(value) ? value[key] : undefined;
     return canEditNativeList(rows == null ? [] : rows, child.elementProperties ?? []);
   });
 }
