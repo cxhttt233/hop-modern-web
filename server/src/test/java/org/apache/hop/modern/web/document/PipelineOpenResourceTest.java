@@ -29,6 +29,32 @@ class PipelineOpenResourceTest {
   @TempDir Path tempDir;
 
   @Test
+  void refusesNonPipelineFilesBeforeParsing() throws Exception {
+    Path file = tempDir.resolve("secrets.txt");
+    Files.writeString(file, "not a pipeline");
+    PipelineDocumentStore store = new PipelineDocumentStore(
+        mock(IHopMetadataProvider.class), Variables.getADefaultVariableSpace());
+    PipelineOpenResource resource = new PipelineOpenResource(store, new PipelineGraphAdapter());
+    Response response = resource.open(new PipelineOpenResource.OpenRequest(file.toString()));
+    assertEquals(400, response.getStatus());
+    assertEquals("invalid_file_type", ((PipelineOpenResource.ErrorResponse) response.getEntity()).code());
+  }
+
+  @Test
+  void refusesOversizedPipelineBeforeReadingIntoMemory() throws Exception {
+    Path file = tempDir.resolve("oversized.hpl");
+    try (java.io.RandomAccessFile output = new java.io.RandomAccessFile(file.toFile(), "rw")) {
+      output.setLength(16L * 1024 * 1024 + 1);
+    }
+    PipelineDocumentStore store = new PipelineDocumentStore(
+        mock(IHopMetadataProvider.class), Variables.getADefaultVariableSpace());
+    PipelineOpenResource resource = new PipelineOpenResource(store, new PipelineGraphAdapter());
+    Response response = resource.open(new PipelineOpenResource.OpenRequest(file.toString()));
+    assertEquals(413, response.getStatus());
+    assertEquals("file_too_large", ((PipelineOpenResource.ErrorResponse) response.getEntity()).code());
+  }
+
+  @Test
   void opensRealHplAsBrowserGraphWithStableIdAndContentRevision() throws Exception {
     IVariables variables = Variables.getADefaultVariableSpace();
     PipelineDocumentStore store =
