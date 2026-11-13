@@ -46,4 +46,23 @@ class PipelineDocumentStoreTest {
     assertEquals(file.toString(), reloaded.getFilename());
     assertFalse(reloaded.hasChanged());
   }
+
+  @Test
+  void replacingExistingHplLeavesNoTemporaryFiles() throws Exception {
+    IVariables variables = Variables.getADefaultVariableSpace();
+    PipelineDocumentStore store =
+        new PipelineDocumentStore(mock(IHopMetadataProvider.class), variables);
+    Path file = tempDir.resolve("existing.hpl");
+    Files.writeString(file, "original content");
+
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("replacement");
+    store.save(file, pipeline);
+
+    assertTrue(Files.readString(file).contains("replacement"));
+    try (var paths = Files.list(tempDir)) {
+      assertEquals(1, paths.count(), "successful save must clean up staging files");
+    }
+    assertEquals("replacement", store.open(file).getName());
+  }
 }
