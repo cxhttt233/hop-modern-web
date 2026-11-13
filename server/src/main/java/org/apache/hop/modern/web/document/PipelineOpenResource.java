@@ -18,6 +18,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import org.apache.hop.modern.server.files.WorkspacePaths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -57,7 +59,7 @@ public final class PipelineOpenResource {
     }
 
     try {
-      java.nio.file.Path path = java.nio.file.Path.of(request.path()).toAbsolutePath().normalize();
+      Path path = resolveDocumentPath(request.path());
       if (!Files.exists(path)) {
         return error(404, "not_found", "pipeline file was not found");
       }
@@ -71,6 +73,8 @@ public final class PipelineOpenResource {
       PipelineDocument document = new PipelineDocument(id, path, store.open(path));
       registry.put(document);
       return Response.ok(graphAdapter.project(document, revision)).build();
+    } catch (IllegalArgumentException e) {
+      return error(400, "invalid_path", "path must stay inside the configured workspace");
     } catch (InvalidPathException e) {
       return error(400, "invalid_path", "path is invalid");
     } catch (NoSuchFileException e) {
@@ -82,6 +86,28 @@ public final class PipelineOpenResource {
     } catch (RuntimeException e) {
       return error(500, "server_error", "pipeline could not be opened");
     }
+  }
+
+  /**
+   * Constrain browser file paths when a workspace root is configured.
+   * The legacy absolute-path mode remains available for existing local setups.
+   */
+  static Path resolveDocumentPath(String suppliedPath) throws IOException {
+    String configuredRoot = System.getProperty("hop.modern.workspace");
+    if (configuredRoot == null || configuredRoot.isBlank()) {
+      return Path.of(suppliedPath).toAbsolutePath().normalize();
+    }
+    Path root = Path.of(configuredRoot);
+    Path requested = Path.of(suppliedPath);
+    if (requested.isAbsolute()) {
+      // Accept absolute paths only when they still resolve under the workspace.
+      Path normalizedRoot = root.toAbsolutePath().normalize();
+      if (!requested.normalize().startsWith(normalizedRoot)) {
+        throw new IllegalArgumentException("Path is outside workspace");
+      }
+      requested = normalizedRoot.relativize(requested.normalize());
+    }
+    return new WorkspacePaths(root).existingFile(requested.toString());
   }
 
   @POST
