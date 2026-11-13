@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -26,21 +26,22 @@ function NativeTextCell({ value, aria, disabled, onCommit }: {
   const [draft, setDraft] = useState(value);
   const [editing, setEditing] = useState(false);
   const [composing, setComposing] = useState(false);
+  const cancelled = useRef(false);
   useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
   const commit = () => {
-    if (composing) return;
+    if (composing || cancelled.current) { cancelled.current = false; return; }
     setEditing(false);
     if (draft !== value) onCommit(draft);
   };
   return <input type="text" aria-label={aria} disabled={disabled} value={draft}
-    onFocus={() => setEditing(true)}
+    onFocus={() => { cancelled.current = false; setEditing(true); }}
     onChange={e => setDraft(e.target.value)}
     onCompositionStart={() => setComposing(true)}
     onCompositionEnd={e => { setComposing(false); setDraft(e.currentTarget.value); }}
     onBlur={() => { if (!composing) commit(); }}
     onKeyDown={e => {
       if (e.key === "Escape" && !composing) {
-        setDraft(value); setEditing(false); e.currentTarget.blur();
+        cancelled.current = true; setDraft(value); setEditing(false); e.currentTarget.blur();
       } else if (e.key === "Enter" && !composing && !e.nativeEvent.isComposing) {
         e.currentTarget.blur();
       }
@@ -59,9 +60,9 @@ function NativeNumberCell({ value, fallback, disabled, aria, onCommit }: {
   const canonical = value == null ? "" : String(value);
   const [draft, setDraft] = useState(canonical);
   useEffect(() => setDraft(canonical), [canonical]);
-  const [cancelled, setCancelled] = useState(false);
+  const cancelled = useRef(false);
   const commit = () => {
-    if (cancelled) { setCancelled(false); return; }
+    if (cancelled.current) { cancelled.current = false; return; }
     const normalized = draft.trim();
     if (normalized === "") {
       if (value !== fallback) onCommit(fallback);
@@ -78,12 +79,12 @@ function NativeNumberCell({ value, fallback, disabled, aria, onCommit }: {
   };
   return <input type="number" step="any" aria-label={aria} disabled={disabled}
     value={draft} onChange={event => setDraft(event.target.value)}
-    onFocus={() => setCancelled(false)}
+    onFocus={() => { cancelled.current = false; }}
     onBlur={commit}
     onKeyDown={event => {
       if (event.key === "Enter") event.currentTarget.blur();
       if (event.key === "Escape") {
-        setCancelled(true);
+        cancelled.current = true;
         setDraft(canonical);
         event.currentTarget.blur();
       }
