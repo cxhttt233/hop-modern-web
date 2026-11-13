@@ -348,6 +348,21 @@ export function App() {
       });
   }, [dirty, document.id, reconcileGraph, source]);
 
+  // Familiar editor shortcut. Keep native input behavior and never bypass
+  // the existing dirty/in-flight mutation guards in saveDocument.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "s") return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true'], [role='dialog']"))) return;
+      if (source.kind !== "server") return;
+      event.preventDefault();
+      saveDocument();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [saveDocument, source.kind]);
+
   const configured = nodes.find((node) => node.id === configId);
   const isRealGraph = source.kind === "server";
   const displayPipelineName = isRealGraph ? (document.name || "未命名流程") : "未打开流程";
