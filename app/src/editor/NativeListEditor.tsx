@@ -42,15 +42,16 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
   };
   const add = () => onChange([...rows, Object.fromEntries(properties.map(p =>
     [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
-      p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) : (p.nativeStringDefault ?? "")]))]);
+      p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
+      p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]))]);
   return <div className="config-native-list">
     <div className="config-native-list-scroll">
       <table aria-label={title + "原生字段列表"}>
-        <thead><tr>{properties.map(column =>
+        <thead><tr><th scope="col">序号</th>{properties.map(column =>
           <th scope="col" key={column.key}>{LABELS[column.key] ?? column.key}</th>)}<th scope="col">操作</th></tr></thead>
         <tbody>{rows.map((entry, index) => {
           const row = entry as Record<string, unknown>;
-          return <tr key={index}>{properties.map(column => {
+          return <tr key={index}><th scope="row">{index + 1}</th>{properties.map(column => {
             const val = row[column.key];
             const aria = title + " 第" + (index + 1) + "行 " + column.key;
             const options = column.options ?? [];
@@ -65,11 +66,14 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                   </select>
                 : <input aria-label={aria} disabled={disabled}
                     type={column.shape === "NUMBER" ? "number" : "text"}
-                    step={column.shape === "NUMBER" ? "1" : undefined}
+                    step={column.shape === "NUMBER" ? "any" : undefined}
                     value={val == null ? "" : String(val)}
                     onChange={e => {
                       const raw = e.target.value;
-                      edit(index, column, column.shape === "NUMBER" ? (raw === "" ? 0 : Number(raw)) : raw);
+                      // Do not push NaN or Infinity into the authoritative native config.
+                      const number = Number(raw);
+                      if (column.shape === "NUMBER" && !Number.isFinite(number)) return;
+                      edit(index, column, column.shape === "NUMBER" ? (raw === "" ? (column.nativeNumberDefault ?? 0) : number) : raw);
                     }} />
             }</td>;
           })}<td className="config-native-list-actions">
@@ -87,6 +91,7 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
       </table>
     </div>
     {rows.length === 0 && <small className="config-native-list-empty">当前没有字段行</small>}
+    {rows.length > 0 && <small aria-live="polite">共 {rows.length} 行字段</small>}
     <button type="button" className="config-native-list-add" disabled={disabled} onClick={add}>
       添加字段行
     </button>
