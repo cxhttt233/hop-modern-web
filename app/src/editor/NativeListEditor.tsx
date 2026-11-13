@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -18,6 +19,28 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export function canEditNativeList(value: unknown, properties: ConfigPropertyDescriptor[]): value is unknown[] {
   return Array.isArray(value) && value.every(isRecord) && properties.length > 0 &&
     properties.every(p => !p.sensitive && ["STRING", "NUMBER", "BOOLEAN", "ENUM"].includes(p.shape));
+}
+
+/** Keep intermediate number input (empty, minus, decimal) out of persisted Hop metadata. */
+function NativeNumberCell({ value, fallback, disabled, aria, onCommit }: {
+  value: unknown; fallback: number; disabled?: boolean; aria: string; onCommit: (value: number) => void;
+}) {
+  const original = value == null ? "" : String(value);
+  const [draft, setDraft] = useState(original);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setDraft(original); }, [original, editing]);
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim() === "" ? fallback : Number(draft);
+    if (Number.isFinite(next)) { setDraft(String(next)); if (next !== Number(original)) onCommit(next); }
+    else setDraft(original);
+  };
+  return <input type="number" step="any" aria-label={aria} disabled={disabled}
+    value={draft} onFocus={() => setEditing(true)} onChange={event => setDraft(event.target.value)}
+    onBlur={commit} onKeyDown={event => {
+      if (event.key === "Enter") { event.currentTarget.blur(); }
+      if (event.key === "Escape") { setDraft(original); setEditing(false); event.currentTarget.blur(); }
+    }} />;
 }
 
 /**
@@ -64,17 +87,13 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                     onChange={e => edit(index, column, e.target.value)}>
                     {options.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                   </select>
-                : <input aria-label={aria} disabled={disabled}
-                    type={column.shape === "NUMBER" ? "number" : "text"}
-                    step={column.shape === "NUMBER" ? "any" : undefined}
+                : column.shape === "NUMBER"
+                ? <NativeNumberCell aria={aria} disabled={disabled} value={val}
+                    fallback={column.nativeNumberDefault ?? 0}
+                    onCommit={next => edit(index, column, next)} />
+                : <input aria-label={aria} disabled={disabled} type="text"
                     value={val == null ? "" : String(val)}
-                    onChange={e => {
-                      const raw = e.target.value;
-                      // Do not push NaN or Infinity into the authoritative native config.
-                      const number = Number(raw);
-                      if (column.shape === "NUMBER" && !Number.isFinite(number)) return;
-                      edit(index, column, column.shape === "NUMBER" ? (raw === "" ? (column.nativeNumberDefault ?? 0) : number) : raw);
-                    }} />
+                    onChange={event => edit(index, column, event.target.value)} />
             }</td>;
           })}<td className="config-native-list-actions">
               <button type="button" aria-label={title + " 上移第" + (index + 1) + "行"}
