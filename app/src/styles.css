@@ -858,3 +858,7 @@ button { cursor: pointer; }
 .generic-config .config-native-list-section > h4 { font-size: 12px; margin: 0; color: #394b6b; }
 .generic-config .config-native-select-unspecified { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
 .generic-config .config-native-list-mode { justify-self: start; }
+
+.generic-config .config-native-list-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.generic-config .config-native-list-toolbar input { flex: 1 1 190px; min-width: 0; padding: 7px 9px; }
+.generic-config .config-native-list-toolbar small { color: #526178; white-space: nowrap; }
