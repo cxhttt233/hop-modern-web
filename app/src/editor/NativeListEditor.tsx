@@ -40,10 +40,16 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     const row = rows[index] as Record<string, unknown>;
     onChange([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
   };
-  const add = () => onChange([...rows, Object.fromEntries(properties.map(p =>
+  // A new row is created from attested defaults, never from another row's
+  // hidden native metadata. Insertion preserves all existing row objects.
+  const blankRow = () => Object.fromEntries(properties.map(p =>
     [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
       p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
-      p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]))]);
+      p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]));
+  const add = () => onChange([...rows, blankRow()]);
+  const insertAfter = (index: number) => onChange([
+    ...rows.slice(0, index + 1), blankRow(), ...rows.slice(index + 1),
+  ]);
   return <div className="config-native-list">
     <div className="config-native-list-scroll">
       <table aria-label={title + "原生字段列表"}>
@@ -81,6 +87,9 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                 title="上移一行" disabled={disabled || index === 0} onClick={() => move(index, index - 1)}>↑</button>
               <button type="button" aria-label={title + " 下移第" + (index + 1) + "行"}
                 title="下移一行" disabled={disabled || index === rows.length - 1} onClick={() => move(index, index + 1)}>↓</button>
+              <button type="button" aria-label={title + " 在第" + (index + 1) + "行后插入空行"}
+                title="在此行后插入空行" disabled={disabled}
+                onClick={() => insertAfter(index)}>插入</button>
               <button type="button" aria-label={title + " 复制第" + (index + 1) + "行"}
                 title="复制此行并保留原生属性" disabled={disabled}
                 onClick={() => duplicate(index)}>复制</button>
