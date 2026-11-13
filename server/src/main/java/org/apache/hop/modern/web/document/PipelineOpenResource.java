@@ -1,5 +1,3 @@
-[Reading 195 lines from start (total: 195 lines, 0 remaining)]
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with
