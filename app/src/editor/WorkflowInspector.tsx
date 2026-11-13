@@ -1,6 +1,7 @@
 import { useState } from "react";
 
-type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean };
+type WorkflowAction = { name: string; type: string; x: number; y: number };
+type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[] };
 
 async function command<T>(operation: "open" | "edit" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
@@ -70,6 +71,18 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
       </form>
       {workflow && <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
         <strong>{workflow.name || "未命名工作流"}</strong>
+        <section aria-label="工作流节点概览" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: 12 }}>
+          <strong>工作流节点 · {workflow.actions?.length ?? 0}</strong>
+          <p style={{ margin: "6px 0", fontSize: 13 }}>以下节点来自原生 .hwf 文件，当前为只读概览，保存描述不会改变节点。</p>
+          {(workflow.actions?.length ?? 0) === 0
+            ? <p style={{ margin: 0 }}>此工作流没有节点。</p>
+            : <ol style={{ maxHeight: 160, overflowY: "auto", margin: "8px 0 0", paddingLeft: 22 }}>
+                {workflow.actions?.map((action, index) =>
+                  <li key={index}>{action.name || "未命名节点"} · {action.type || "未知类型"}
+                    <small style={{ marginLeft: 8, opacity: .65 }}>({action.x}, {action.y})</small>
+                  </li>)}
+              </ol>}
+        </section>
         <small title={workflow.path}>{workflow.path}</small>
         <label htmlFor="workflow-description">工作流描述</label>
         <textarea id="workflow-description" rows={5} value={description}
