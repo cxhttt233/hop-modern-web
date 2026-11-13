@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -14,6 +15,37 @@ const LABELS: Record<string, string> = {
 };
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * Chinese IME text remains local until composition is finished. This prevents
+ * intermediate pinyin from being persisted as Hop native configuration.
+ */
+function NativeTextCell({ value, aria, disabled, onCommit }: {
+  value: string; aria: string; disabled?: boolean; onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  const [composing, setComposing] = useState(false);
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+  const commit = () => {
+    if (composing) return;
+    setEditing(false);
+    if (draft !== value) onCommit(draft);
+  };
+  return <input type="text" aria-label={aria} disabled={disabled} value={draft}
+    onFocus={() => setEditing(true)}
+    onChange={e => setDraft(e.target.value)}
+    onCompositionStart={() => setComposing(true)}
+    onCompositionEnd={e => { setComposing(false); setDraft(e.currentTarget.value); }}
+    onBlur={() => { if (!composing) commit(); }}
+    onKeyDown={e => {
+      if (e.key === "Escape" && !composing) {
+        setDraft(value); setEditing(false); e.currentTarget.blur();
+      } else if (e.key === "Enter" && !composing && !e.nativeEvent.isComposing) {
+        e.currentTarget.blur();
+      }
+    }} />;
+}
 
 export function canEditNativeList(value: unknown, properties: ConfigPropertyDescriptor[]): value is unknown[] {
   return Array.isArray(value) && value.every(isRecord) && properties.length > 0 &&
@@ -64,16 +96,17 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                     onChange={e => edit(index, column, e.target.value)}>
                     {options.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                   </select>
-                : <input aria-label={aria} disabled={disabled}
-                    type={column.shape === "NUMBER" ? "number" : "text"}
-                    step={column.shape === "NUMBER" ? "any" : undefined}
+                : column.shape === "STRING"
+                ? <NativeTextCell aria={aria} disabled={disabled}
+                    value={val == null ? "" : String(val)}
+                    onCommit={next => edit(index, column, next)} />
+                : <input aria-label={aria} disabled={disabled} type="number" step="any"
                     value={val == null ? "" : String(val)}
                     onChange={e => {
                       const raw = e.target.value;
-                      // Do not push NaN or Infinity into the authoritative native config.
                       const number = Number(raw);
-                      if (column.shape === "NUMBER" && !Number.isFinite(number)) return;
-                      edit(index, column, column.shape === "NUMBER" ? (raw === "" ? (column.nativeNumberDefault ?? 0) : number) : raw);
+                      if (!Number.isFinite(number)) return;
+                      edit(index, column, raw === "" ? (column.nativeNumberDefault ?? 0) : number);
                     }} />
             }</td>;
           })}<td className="config-native-list-actions">
