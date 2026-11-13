@@ -29,7 +29,7 @@ class WorkspacePathsTest {
     assertThrows(IllegalArgumentException.class, () -> paths.destinationFile("."));
     assertThrows(IllegalArgumentException.class, () -> paths.destinationFile(""));
     assertThrows(IllegalArgumentException.class, () -> paths.destinationFile(null));
-    assertThrows(IllegalArgumentException.class, () -> paths.destinationFile("bad\\u0000name.hpl"));
+    assertThrows(IllegalArgumentException.class, () -> paths.destinationFile("bad" + (char) 0 + "name.hpl"));
   }
 
   @Test void rejectsSymlinkEscapeForReadAndWrite() throws Exception {
