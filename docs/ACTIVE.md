@@ -27,6 +27,7 @@
 1. 选**一个真实用户障碍**。读取本页、涉及的**最多 2–5 个生产文件**、当前分支/最新 CI 的**必要摘要**。无需批量遍历 Issues/PR 评论/Actions；之前没变化的状态不重查。
 2. 直接做代码→相应测试→提交；无权限的执行/跨用户文件/连接凭据不要暴露。被平台明确拒绝过的**同一操作**不可换入口重试；没有命中该操作时**不主动去读或枚举历史拒绝清单**，专注独立开发。
 3. 交接仅输出：**用户场景—变更 commit—实际测试—下一步**。跨模块有明确 API 依赖时才联系 T5；不要对 Issue #5 每轮追加长篇历史状态。
+   **避免上下文再膨胀**：不要扫描 GitHub 全仓 Issue 列表/全量 PR/review、历史 Actions 翻页，也不要为“预防阻断”检索旧拒绝事项。当前变更没有涉及该风险时不读取；涉及时仅检查同一操作的具体证据。
 4. 真实测试失败要修，不能删除/跳过正确性或安全负例伪造绿灯。普通开发/非特权隔离 staging 无需额外人工 APPROVED；涉及执行、用户文件、凭据/跨用户权限时先验证身份与隔离后再开放。
 
 **深入参考（按需，不每轮读取）**：[`docs/product-delivery-board.md`](product-delivery-board.md)（详细功能矩阵）、[`docs/architecture.md`](architecture.md)（产品边界）；唯一技术架构 `cxhttt233/hop@design/web-modern-architecture:docs/web-modern-architecture-plan.md` blob `d29641632498bf560564c789b253dc39b91c16cd`。
