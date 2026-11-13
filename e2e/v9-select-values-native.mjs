@@ -45,23 +45,23 @@ try {
   const before = writes();
 
   await selected.getByRole("button", { name: "添加字段行" }).click();
-  await selected.getByRole("textbox", { name: "选取与重命名字段 第1行 name" }).fill("上游流量");
+  await selected.getByRole("textbox", { name: "选取与重命名字段 第1行 字段名称" }).fill("上游流量");
   await selected.getByRole("textbox", { name: "选取与重命名字段 第1行 rename" }).fill("flow_before");
-  if (await selected.getByRole("spinbutton", { name: "选取与重命名字段 第1行 length" }).inputValue() !== "-2") {
+  if (await selected.getByRole("spinbutton", { name: "选取与重命名字段 第1行 长度" }).inputValue() !== "-2") {
     throw new Error("SelectField native undefined length should be -2, not 0 or -1");
   }
   await selected.getByRole("button", { name: "添加字段行" }).click();
-  await selected.getByRole("textbox", { name: "选取与重命名字段 第2行 name" }).fill("备用流量");
+  await selected.getByRole("textbox", { name: "选取与重命名字段 第2行 字段名称" }).fill("备用流量");
   await selected.getByRole("button", { name: "选取与重命名字段 上移第2行" }).click();
 
   await removed.getByRole("button", { name: "添加字段行" }).click();
-  await removed.getByRole("textbox", { name: "移除字段 第1行 name" }).fill("临时字段");
+  await removed.getByRole("textbox", { name: "移除字段 第1行 字段名称" }).fill("临时字段");
 
   await changed.getByRole("button", { name: "添加字段行" }).click();
-  await changed.getByRole("textbox", { name: "转换字段元数据 第1行 name" }).fill("flow_before");
-  await changed.getByRole("textbox", { name: "转换字段元数据 第1行 type" }).fill("Number");
-  await changed.getByRole("spinbutton", { name: "转换字段元数据 第1行 length" }).fill("12");
-  if (await changed.getByRole("spinbutton", { name: "转换字段元数据 第1行 precision" }).inputValue() !== "-1") {
+  await changed.getByRole("textbox", { name: "转换字段元数据 第1行 字段名称" }).fill("flow_before");
+  await changed.getByRole("textbox", { name: "转换字段元数据 第1行 数据类型" }).fill("Number");
+  await changed.getByRole("spinbutton", { name: "转换字段元数据 第1行 长度" }).fill("12");
+  if (await changed.getByRole("spinbutton", { name: "转换字段元数据 第1行 精度" }).inputValue() !== "-1") {
     throw new Error("SelectMetadataChange native undefined precision should be -1");
   }
   await panel.getByRole("checkbox", { name: "同时保留并排序未选择的字段" }).check();
@@ -99,7 +99,7 @@ try {
   const persisted = (await (await diskRead).json()).config;
   if (!verify(persisted)) throw new Error("SelectValues native three-list edit not preserved in actual .hpl XML");
   await selected.getByRole("table").waitFor({ state: "visible" });
-  await removed.getByRole("textbox", { name: "移除字段 第1行 name" }).fill("不要保存");
+  await removed.getByRole("textbox", { name: "移除字段 第1行 字段名称" }).fill("不要保存");
   await panel.getByRole("button", { name: "取消配置（Cancel）" }).click();
   await page.locator('.react-flow__node[data-id="select-values"]').click();
   const canceled = page.waitForResponse(r => post(r, "/config/read"));
