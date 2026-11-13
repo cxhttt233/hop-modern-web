@@ -57,12 +57,17 @@ class PipelineDocumentStoreTest {
 
     PipelineMeta pipeline = new PipelineMeta();
     pipeline.setName("replacement");
+    pipeline.setDescription("overwritten pipeline contents");
     store.save(file, pipeline);
 
-    assertTrue(Files.readString(file).contains("replacement"));
+    assertTrue(Files.readString(file).contains("overwritten pipeline contents"));
     try (var paths = Files.list(tempDir)) {
       assertEquals(1, paths.count(), "successful save must clean up staging files");
     }
-    assertEquals("replacement", store.open(file).getName());
+    // Hop derives the loaded pipeline name from its filename ("existing.hpl").
+    // Check a persisted property independent of that name instead.
+    PipelineMeta reloaded = store.open(file);
+    assertEquals("existing", reloaded.getName());
+    assertEquals("overwritten pipeline contents", reloaded.getDescription());
   }
 }
