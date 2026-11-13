@@ -12,7 +12,9 @@ async function command<T>(operation: "open" | "edit" | "save", body: object): Pr
     const detail = await response.json().catch(() => ({})) as { error?: string };
     throw new Error(response.status === 404 && !detail.error
       ? "Workflow 接口尚未部署到当前测试后端（HTTP 404），请先部署 Java 服务。"
-      : detail.error || `Workflow ${operation} failed (${response.status})`);
+      : response.status === 409
+        ? "文件已被其他进程修改，无法覆盖。请先备份当前描述，再重新打开文件。"
+        : detail.error || `Workflow ${operation} failed (${response.status})`);
   }
   return response.json() as Promise<T>;
 }
@@ -77,8 +79,15 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
             onClick={() => void execute(() => command("edit", { id: workflow.id, description }))}>
             应用修改
           </button>
-          <button type="button" disabled={busy || !workflow.dirty || description !== (workflow.description ?? "")}
-            onClick={() => void execute(() => command("save", { id: workflow.id }))}>
+          <button type="button" disabled={busy || !hasUnsavedChanges}
+            onClick={() => void execute(async () => {
+              // Save is a single user action: apply the current textarea draft first.
+              // Never write the disk if applying the edit fails.
+              const latest = hasUnappliedChanges
+                ? await command<WorkflowSnapshot>("edit", { id: workflow.id, description })
+                : workflow;
+              return command<WorkflowSnapshot>("save", { id: latest.id });
+            })}>
             保存 .hwf
           </button>
           <span role="status">{hasUnappliedChanges ? "有尚未应用的修改" : workflow.dirty ? "已应用，尚未保存到磁盘" : "已保存"}</span>
