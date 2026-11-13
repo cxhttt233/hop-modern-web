@@ -363,6 +363,26 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [saveDocument, source.kind]);
 
+  // Open is a frequent editor action. Keep it available from the keyboard
+  // without hijacking typing in forms or the browser's native shortcuts.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && showOpenPanel) {
+        setShowOpenPanel(false);
+        return;
+      }
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "o") return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true'], [role='dialog']"))) return;
+      if (savingRef.current || pendingMutationsRef.current > 0) return;
+      event.preventDefault();
+      setPipelinePathDraft(pipelinePath);
+      setShowOpenPanel(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pipelinePath, showOpenPanel]);
+
   const configured = nodes.find((node) => node.id === configId);
   const isRealGraph = source.kind === "server";
   const displayPipelineName = isRealGraph ? (document.name || "未命名流程") : "未打开流程";
