@@ -73,10 +73,10 @@ public final class PipelineOpenResource {
       PipelineDocument document = new PipelineDocument(id, path, store.open(path));
       registry.put(document);
       return Response.ok(graphAdapter.project(document, revision)).build();
-    } catch (IllegalArgumentException e) {
-      return error(400, "invalid_path", "path must stay inside the configured workspace");
     } catch (InvalidPathException e) {
       return error(400, "invalid_path", "path is invalid");
+    } catch (IllegalArgumentException e) {
+      return error(400, "invalid_path", "path must stay inside the configured workspace");
     } catch (NoSuchFileException e) {
       return error(404, "not_found", "pipeline file was not found");
     } catch (HopXmlException | HopMissingPluginsException e) {
