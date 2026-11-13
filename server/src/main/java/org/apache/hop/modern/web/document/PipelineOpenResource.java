@@ -23,6 +23,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import org.apache.hop.modern.server.files.WorkspacePaths;
 import org.apache.hop.core.exception.HopMissingPluginsException;
 import org.apache.hop.core.exception.HopXmlException;
 import org.apache.hop.pipeline.editor.PipelineEditor;
@@ -33,17 +34,27 @@ import org.apache.hop.pipeline.editor.PipelineEditor;
 @Produces(MediaType.APPLICATION_JSON)
 public final class PipelineOpenResource {
   private final PipelineDocumentStore store;
+  private final WorkspacePaths workspacePaths;
   private final PipelineGraphAdapter graphAdapter;
   private final PipelineDocumentRegistry registry;
 
   public PipelineOpenResource(PipelineDocumentStore store, PipelineGraphAdapter graphAdapter) {
-    this(store, graphAdapter, new PipelineDocumentRegistry());
+    this(store, graphAdapter, new PipelineDocumentRegistry(), null);
   }
 
   public PipelineOpenResource(
       PipelineDocumentStore store,
       PipelineGraphAdapter graphAdapter,
       PipelineDocumentRegistry registry) {
+    this(store, graphAdapter, registry, null);
+  }
+
+  public PipelineOpenResource(
+      PipelineDocumentStore store,
+      PipelineGraphAdapter graphAdapter,
+      PipelineDocumentRegistry registry,
+      WorkspacePaths workspacePaths) {
+    this.workspacePaths = workspacePaths;
     this.store = Objects.requireNonNull(store, "store");
     this.graphAdapter = Objects.requireNonNull(graphAdapter, "graphAdapter");
     this.registry = Objects.requireNonNull(registry, "registry");
@@ -57,7 +68,10 @@ public final class PipelineOpenResource {
     }
 
     try {
-      java.nio.file.Path path = java.nio.file.Path.of(request.path()).toAbsolutePath().normalize();
+      java.nio.file.Path path =
+          workspacePaths == null
+              ? java.nio.file.Path.of(request.path()).toAbsolutePath().normalize()
+              : workspacePaths.existingFile(request.path());
       if (!Files.exists(path)) {
         return error(404, "not_found", "pipeline file was not found");
       }
@@ -73,6 +87,8 @@ public final class PipelineOpenResource {
       return Response.ok(graphAdapter.project(document, revision)).build();
     } catch (InvalidPathException e) {
       return error(400, "invalid_path", "path is invalid");
+    } catch (IllegalArgumentException e) {
+      return error(400, "invalid_path", "path must identify a file within the workspace");
     } catch (NoSuchFileException e) {
       return error(404, "not_found", "pipeline file was not found");
     } catch (HopXmlException | HopMissingPluginsException e) {
