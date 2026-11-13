@@ -166,6 +166,13 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     typeof draft.sql_from_file === "string" && draft.sql_from_file.trim().length > 0;
   const set = (key: string, value: unknown) => setDraft((old) => ({ ...old, [key]: value }));
   const label = (p: ConfigPropertyDescriptor) => localLabel(p.key);
+  // Restore one field from the authoritative read snapshot, without touching other drafts.
+  // For native wire lists, nativeValue returns the normalized editor rows.
+  const resetField = (property: ConfigPropertyDescriptor) => {
+    setDraft((current) => ({ ...current, [property.key]: nativeValue(property) }));
+    setInvalid((current) => ({ ...current, [property.key]: false }));
+    setRawListEditors((current) => ({ ...current, [property.key]: false }));
+  };
   // Focus only visible descriptor-owned controls. Never inspect configuration values
   // or invoke a Hop edit/write request when navigating between search results.
   const focusNextMatchingField = () => {
@@ -330,7 +337,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
       <details>
         <summary>查看未保存字段</summary>
         <ul aria-label="未保存字段清单">{changedFields.map((property) =>
-          <li key={property.key}>{label(property)}</li>)}</ul>
+          <li key={property.key}><span>{label(property)}</span><button type="button" disabled={disabled} aria-label={`撤销${label(property)}的修改`} onClick={() => resetField(property)}>撤销此项</button></li>)}</ul>
       </details>
     </div>}{invalidProperties.length > 0 && <div className="config-invalid-summary" role="status" aria-live="polite">
       <span>有 {invalidProperties.length} 项 JSON 格式错误，暂不能保存</span>
