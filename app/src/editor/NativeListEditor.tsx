@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -25,6 +26,19 @@ export function canEditNativeList(value: unknown, properties: ConfigPropertyDesc
  * Hop's Java serializer remains authoritative for JSON/XML persistence and validation.
  */
 export function NativeListEditor({ title, value: rows, properties, disabled, onChange }: Props) {
+  const [bulkNames, setBulkNames] = useState("");
+  const nameProperty = properties.find(p => p.key === "name" && p.shape === "STRING");
+  const defaultRow = () => Object.fromEntries(properties.map(p =>
+    [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
+      p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
+      p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]));
+  const bulkAdd = () => {
+    if (!nameProperty) return;
+    const names = bulkNames.split(/\r?\n/).map(name => name.trim()).filter(Boolean);
+    if (!names.length) return;
+    onChange([...rows, ...names.map(name => ({ ...defaultRow(), [nameProperty.key]: name }))]);
+    setBulkNames("");
+  };
   const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) =>
     onChange(rows.map((row, i) => i === index ?
       { ...(row as Record<string, unknown>), [column.key]: nextValue } : row));
@@ -40,10 +54,7 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     const row = rows[index] as Record<string, unknown>;
     onChange([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
   };
-  const add = () => onChange([...rows, Object.fromEntries(properties.map(p =>
-    [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
-      p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
-      p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]))]);
+  const add = () => onChange([...rows, defaultRow()]);
   return <div className="config-native-list">
     <div className="config-native-list-scroll">
       <table aria-label={title + "原生字段列表"}>
@@ -95,5 +106,14 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     <button type="button" className="config-native-list-add" disabled={disabled} onClick={add}>
       添加字段行
     </button>
+    {nameProperty && <div className="config-native-list-bulk">
+      <label>批量添加字段名称（每行一个）
+        <textarea rows={3} disabled={disabled} value={bulkNames}
+          onChange={event => setBulkNames(event.target.value)}
+          placeholder="每行输入一个字段名称；其余列使用 Hop 原生默认值" />
+      </label>
+      <button type="button" disabled={disabled || !bulkNames.trim()}
+        onClick={bulkAdd}>批量添加</button>
+    </div>}
   </div>;
 }
