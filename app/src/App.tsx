@@ -78,6 +78,7 @@ export function App() {
   const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("");
   const [pathCopyStatus, setPathCopyStatus] = useState("");
   const savingRef = useRef(false);
   // Save must not race with an in-flight authoritative edit/config write.
@@ -121,6 +122,7 @@ export function App() {
     setConfigError(undefined);
     setConfigLoading(false);
     setDirty(false);
+    setSaveStatus("");
     if (!pipelinePath) {
       setSource({ kind: "sample" });
       return;
@@ -334,11 +336,13 @@ export function App() {
     // A fast double-click must never issue two concurrent disk saves.
     savingRef.current = true;
     setSaving(true);
+    setSaveStatus("");
     setConfigError(undefined);
     savePipeline(document.id)
       .then((graph) => {
         reconcileGraph(graph);
         setDirty(false);
+        setSaveStatus("已保存到服务器");
       })
       .catch((error: unknown) => {
         setConfigError(error instanceof Error ? error.message : "Pipeline save failed");
@@ -387,6 +391,10 @@ export function App() {
   const configured = nodes.find((node) => node.id === configId);
   const isRealGraph = source.kind === "server";
   const displayPipelineName = isRealGraph ? (document.name || "未命名流程") : "未打开流程";
+  useEffect(() => {
+    if (dirty) setSaveStatus("");
+  }, [dirty]);
+
   const copyPipelinePath = async () => {
     if (!isRealGraph) return;
     try {
@@ -424,6 +432,7 @@ export function App() {
           {isRealGraph && <button type="button" aria-label="复制当前流程路径" title={pipelinePath} onClick={() => { void copyPipelinePath(); }}>复制路径</button>}
           {isRealGraph && pathCopyStatus && <span role="status">{pathCopyStatus}</span>}
           {isRealGraph && dirty && <span className="dirty-state is-dirty" role="status">未保存</span>}
+          {isRealGraph && !dirty && saveStatus && <span className="dirty-state" role="status">{saveStatus}</span>}
         </div>
 
         <div className="editor-actions">
