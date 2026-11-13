@@ -10,6 +10,7 @@ test("registry exposes the first real config targets", () => {
       "transform:TableInput",
       "transform:SelectValues",
       "transform:SortRows",
+      "transform:RowGenerator",
       "metadata:DatabaseMeta",
     ],
   );
@@ -205,4 +206,49 @@ test("native LIST resolver rejects ancestor and descendant writable containers",
   assert.deepEqual(resolveNativeWireListItem(siblings, "left", 0),
     { listPointer: "/fields/field", itemPointer: "/fields/field/0" },
     "segment boundaries must not confuse similarly prefixed sibling paths");
+});
+
+test("RowGenerator exposes native fields, including legacy nullif value key", () => {
+  const schema = findConfigSchema("transform", "RowGenerator");
+  assert.ok(schema);
+  assert.equal(schema.tier, "T1");
+  assert.deepEqual(
+    schema.fields.filter(({ control }) => control !== "EditableTable").map(({ key }) => key),
+    ["limit", "never_ending", "interval_in_ms", "row_time_field", "last_time_field"],
+  );
+  const table = schema.fields.find(({ key }) => key === "fields.field");
+  assert.equal(table?.control, "EditableTable");
+  assert.deepEqual(table?.columns?.map(({ key }) => key), [
+    "name", "type", "format", "length", "precision", "currency",
+    "decimal", "group", "nullif", "set_empty_string",
+  ]);
+  assert.equal(table?.columns?.find(({ key }) => key === "nullif")?.valueType, "string");
+  assert.equal(table?.columns?.find(({ key }) => key === "set_empty_string")?.valueType, "boolean");
+  assert.equal(table?.columns?.some(({ key }) => key === "value"), false,
+    "native Hop serialization uses nullif, not the Java property name value");
+});
+
+test("RowGenerator native list round-trip preserves values and unknown Hop properties", () => {
+  const descriptor = { wireLists: [{
+    descriptorPath: "fields.field",
+    listPointer: "/fields/field",
+    itemPointerTemplate: "/fields/field/{index}",
+  }] };
+  const original = {
+    limit: "10", never_ending: false, opaque: { keep: "native" },
+    fields: { field: [
+      { name: "station", type: "String", nullif: "黄河", set_empty_string: false,
+        extra_native_property: 123 },
+    ], sibling: "keep" },
+  };
+  const rows = readNativeWireList(original, descriptor, "fields.field");
+  const saved = writeNativeWireList(original, descriptor, "fields.field",
+    [{ ...rows[0], nullif: "长江", set_empty_string: true }]);
+  assert.deepEqual(readNativeWireList(saved, descriptor, "fields.field"), [
+    { name: "station", type: "String", nullif: "长江", set_empty_string: true,
+      extra_native_property: 123 },
+  ]);
+  assert.equal(saved.fields.sibling, "keep");
+  assert.deepEqual(saved.opaque, original.opaque);
+  assert.equal(original.fields.field[0].nullif, "黄河");
 });
