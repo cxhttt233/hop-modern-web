@@ -78,6 +78,7 @@ export function App() {
   const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pathCopyStatus, setPathCopyStatus] = useState("");
   const savingRef = useRef(false);
   // Save must not race with an in-flight authoritative edit/config write.
   const pendingMutationsRef = useRef(0);
@@ -386,6 +387,25 @@ export function App() {
   const configured = nodes.find((node) => node.id === configId);
   const isRealGraph = source.kind === "server";
   const displayPipelineName = isRealGraph ? (document.name || "未命名流程") : "未打开流程";
+  const copyPipelinePath = async () => {
+    if (!isRealGraph) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(pipelinePath);
+      setPathCopyStatus("路径已复制");
+    } catch {
+      // HTTP test deployments may not expose the secure-context Clipboard API.
+      const input = window.document.createElement("textarea");
+      input.value = pipelinePath;
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      window.document.body.appendChild(input);
+      input.select();
+      const copied = window.document.execCommand("copy");
+      input.remove();
+      setPathCopyStatus(copied ? "路径已复制" : "复制失败，请通过打开面板查看路径");
+    }
+  };
 
   return (
     <main className="shell">
@@ -400,7 +420,9 @@ export function App() {
 
         <div className="file-identity" data-document-name={document.name}>
           <span className="file-dot" aria-hidden="true" />
-          <strong>{displayPipelineName}</strong>
+          <strong title={isRealGraph ? pipelinePath : undefined}>{displayPipelineName}</strong>
+          {isRealGraph && <button type="button" aria-label="复制当前流程路径" title={pipelinePath} onClick={() => { void copyPipelinePath(); }}>复制路径</button>}
+          {isRealGraph && pathCopyStatus && <span role="status">{pathCopyStatus}</span>}
           {isRealGraph && dirty && <span className="dirty-state is-dirty" role="status">未保存</span>}
         </div>
 
