@@ -175,3 +175,34 @@ test("SelectValues three native ordered lists stay independent and immutable", (
   assert.throws(() => writeNativeWireList(metadata, schema, "fields.other", []),
     /Unattested native LIST/);
 });
+
+test("native LIST resolver rejects ancestor and descendant writable containers", () => {
+  for (const [parent, child] of [
+    ["/fields", "/fields/field"],
+    ["/data/line", "/data/line/0/item"],
+  ]) {
+    const descriptor = { wireLists: [
+      { descriptorPath: "parent", listPointer: parent,
+        itemPointerTemplate: parent + "/{index}" },
+      { descriptorPath: "child", listPointer: child,
+        itemPointerTemplate: child + "/{index}" },
+    ] };
+    for (const path of ["parent", "child"]) {
+      assert.throws(() => resolveNativeWireListItem(descriptor, path, 0),
+        /Aliased native LIST wire pointer/,
+        "overlapping native LIST containers must fail closed in either direction");
+      assert.throws(() => writeNativeWireList({ fields: {} }, descriptor, path, []),
+        /Aliased native LIST wire pointer/,
+        "write must never mutate an overlapping native LIST path");
+    }
+  }
+  const siblings = { wireLists: [
+    { descriptorPath: "left", listPointer: "/fields/field",
+      itemPointerTemplate: "/fields/field/{index}" },
+    { descriptorPath: "right", listPointer: "/fields/fields",
+      itemPointerTemplate: "/fields/fields/{index}" },
+  ] };
+  assert.deepEqual(resolveNativeWireListItem(siblings, "left", 0),
+    { listPointer: "/fields/field", itemPointer: "/fields/field/0" },
+    "segment boundaries must not confuse similarly prefixed sibling paths");
+});
