@@ -463,7 +463,7 @@ export function App() {
               <strong>打开流程</strong>
               <small>输入服务器上的 .hpl 文件路径</small>
             </div>
-            <input aria-label="服务器流程路径（Server-visible pipeline path）" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="/workspace/example.hpl" autoFocus />
+            <input aria-label="服务器流程路径（Server-visible pipeline path）" value={pipelinePathDraft} onChange={(event) => setPipelinePathDraft(event.target.value)} placeholder="/workspace/example.hpl" autoFocus onFocus={(event) => event.currentTarget.select()} />
             {recentPipelinePaths.length > 0 && (
               <div className="pipeline-open-actions" role="group" aria-label="最近打开的流程" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
                 <small style={{ alignSelf: "center" }}>最近打开</small>
