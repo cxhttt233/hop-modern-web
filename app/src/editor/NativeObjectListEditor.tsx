@@ -21,8 +21,7 @@ export function canEditSelectValuesObject(
       property.key !== "fields" || property.shape !== "OBJECT" || !asRecord(value)) return false;
   const children = property.children ?? [];
   // Never discard a future native property by pretending that the UI owns it.
-  if (children.length !== 4 ||
-      !children.some(child => child.key === "select_unspecified" && child.shape === "BOOLEAN")) return false;
+  if (!children.some(child => child.key === "select_unspecified" && child.shape === "BOOLEAN")) return false;
   return SELECT_LISTS.every(({ key }) => {
     const propertyPath = "fields." + key;
     const child = children.find(candidate => candidate.key === key);
