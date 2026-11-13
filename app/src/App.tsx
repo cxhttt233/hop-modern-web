@@ -442,13 +442,20 @@ export function App() {
                 <strong>转换组件</strong>
                 <small>拖动放置，或点击添加</small>
               </div>
-              <span>{P0_TRANSFORMS.length}</span>
+              <span aria-label={paletteQuery.trim() ? `匹配 ${filteredTransforms.length} 个组件` : `共 ${P0_TRANSFORMS.length} 个组件`}>{filteredTransforms.length}{paletteQuery.trim() ? ` / ${P0_TRANSFORMS.length}` : ""}</span>
             </div>
             <div className="palette-search">
               <span aria-hidden="true">⌕</span>
-              <input aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} />
+              <input aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setPaletteQuery(""); }} />
+              {paletteQuery && <button type="button" aria-label="清除组件搜索" title="清除搜索（Esc）" onClick={() => setPaletteQuery("")}>×</button>
             </div>
             <div className="transform-list">
+              {paletteQuery.trim() && filteredTransforms.length === 0 && (
+                <div role="status" style={{ padding: "20px 12px", textAlign: "center", color: "#64748b", fontSize: 13 }}>
+                  没有找到匹配的组件。请尝试中文名称、插件 ID 或组件类别。
+                  <button type="button" onClick={() => setPaletteQuery("")} style={{ display: "block", margin: "12px auto 0" }}>查看全部组件</button>
+                </div>
+              )}
               {recentTransformIds.length > 0 && !paletteQuery.trim() && (
                 <section className="recent-transform-section" aria-label="最近使用的组件" style={{ paddingBottom: 8, borderBottom: "1px solid #e4e8ef", marginBottom: 8 }}>
                   <div className="transform-group-title"><span>最近使用</span><small>{recentTransformIds.length}</small></div>
