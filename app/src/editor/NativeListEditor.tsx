@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -25,6 +26,19 @@ export function canEditNativeList(value: unknown, properties: ConfigPropertyDesc
  * Hop's Java serializer remains authoritative for JSON/XML persistence and validation.
  */
 export function NativeListEditor({ title, value: rows, properties, disabled, onChange }: Props) {
+  // Undo consecutive deletions in reverse order, preserving hidden Hop row metadata.
+  const [deletedRows, setDeletedRows] = useState<Array<{ index: number; row: unknown }>>([]);
+  const remove = (index: number) => {
+    setDeletedRows(previous => [...previous, { index, row: rows[index] }]);
+    onChange(rows.filter((_, i) => i !== index));
+  };
+  const undoDelete = () => {
+    const last = deletedRows[deletedRows.length - 1];
+    if (!last) return;
+    const index = Math.min(last.index, rows.length);
+    onChange([...rows.slice(0, index), last.row, ...rows.slice(index)]);
+    setDeletedRows(previous => previous.slice(0, -1));
+  };
   const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) =>
     onChange(rows.map((row, i) => i === index ?
       { ...(row as Record<string, unknown>), [column.key]: nextValue } : row));
@@ -33,12 +47,14 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     const [item] = changed.splice(from, 1);
     changed.splice(to, 0, item);
     onChange(changed);
+    setDeletedRows([]);
   };
   // Duplicate the entire native row, including properties not shown in the editor.
   // This lets users add similar fields without silently dropping Hop metadata.
   const duplicate = (index: number) => {
     const row = rows[index] as Record<string, unknown>;
     onChange([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
+    setDeletedRows([]);
   };
   const add = () => onChange([...rows, Object.fromEntries(properties.map(p =>
     [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
@@ -85,11 +101,15 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                 title="复制此行并保留原生属性" disabled={disabled}
                 onClick={() => duplicate(index)}>复制</button>
               <button type="button" aria-label={title + " 删除第" + (index + 1) + "行"}
-                title="删除此行" disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))}>删除</button>
+                title="删除此行（可撤销）" disabled={disabled} onClick={() => remove(index)}>删除</button>
             </td></tr>;
         })}</tbody>
       </table>
     </div>
+    {deletedRows.length > 0 && <div className="config-native-list-undo" role="status">
+      已删除 {deletedRows.length} 行（可逐次撤销）
+      <button type="button" disabled={disabled} onClick={undoDelete}>撤销上次删除</button>
+    </div>}
     {rows.length === 0 && <small className="config-native-list-empty">当前没有字段行</small>}
     {rows.length > 0 && <small aria-live="polite">共 {rows.length} 行字段</small>}
     <button type="button" className="config-native-list-add" disabled={disabled} onClick={add}>
