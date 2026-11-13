@@ -14,6 +14,7 @@ import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
+import org.apache.hop.modern.server.files.WorkspaceFileCatalogResource;
 import org.apache.hop.modern.web.document.PipelineConfigResource;
 import org.apache.hop.modern.web.document.PipelineDocumentRegistry;
 import org.apache.hop.modern.web.document.PipelineEditResource;
@@ -57,6 +58,7 @@ public final class ModernWebServer {
         new PipelineConfigResource(registry, metadataProvider);
     PipelineEditResource editResource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
     return new ResourceConfig()
+        .register(new WorkspaceFileCatalogResource())
         .register(openResource)
         .register(configResource)
         .register(editResource)
