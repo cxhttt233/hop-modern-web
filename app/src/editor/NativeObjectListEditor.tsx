@@ -4,9 +4,9 @@ import { canEditNativeList, NativeListEditor } from "./NativeListEditor";
 
 /** The only nested-object table layout admitted by the pinned Hop producer. */
 const SELECT_LISTS = [
-  { key: "field", title: "选取与重命名字段" },
-  { key: "remove", title: "移除字段" },
-  { key: "meta", title: "转换字段元数据" },
+  { key: "field", title: "选取与重命名字段", hint: "指定输出字段及新名称；不在这里删除字段。" },
+  { key: "remove", title: "移除字段", hint: "仅列出需要从输出中排除的字段。" },
+  { key: "meta", title: "转换字段元数据", hint: "调整字段类型、长度、精度等元数据。" },
 ] as const;
 
 function asRecord(value: unknown): value is Record<string, unknown> {
@@ -48,14 +48,15 @@ export function NativeObjectListEditor({ descriptor, property, value, disabled, 
   const children = property.children ?? [];
   return <div className="config-native-object-lists">
     <p>原生字段操作将保持三组列表各自的顺序；修改仅暂存，保存配置时才写入 Hop。</p>
-    {SELECT_LISTS.map(({ key, title }) => {
+    {SELECT_LISTS.map(({ key, title, hint }) => {
       const child = children.find(item => item.key === key);
       if (!child) return null;
       const path = "fields." + key;
       // Producer-attested native path: defensive copy-on-write preserves every other list.
       const rows = readNativeWireList({ fields: value }, descriptor, path) ?? [];
       return <section className="config-native-list-section" key={key} aria-label={title}>
-        <h4>{title}</h4>
+        <h4>{title} <small aria-label={title + "行数"}>（{rows.length} 行）</small></h4>
+        <p className="config-native-list-hint">{hint}</p>
         <NativeListEditor title={title} properties={child.elementProperties ?? []} value={rows}
           disabled={disabled} onChange={nextRows => {
             const changed = writeNativeWireList({ fields: value }, descriptor, path, nextRows);
