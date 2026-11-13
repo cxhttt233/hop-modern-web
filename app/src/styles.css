@@ -1,3 +1,4 @@
+
 :root {
   font-family: Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #20273a;
@@ -858,3 +859,7 @@ button { cursor: pointer; }
 .generic-config .config-native-list-section > h4 { font-size: 12px; margin: 0; color: #394b6b; }
 .generic-config .config-native-select-unspecified { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
 .generic-config .config-native-list-mode { justify-self: start; }
+
+.generic-config .config-native-list-filter { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
+.generic-config .config-native-list-filter input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid #d5dbe6; border-radius: 7px; }
+.generic-config .config-native-list-filter small { flex-shrink: 0; color: #526178; }
