@@ -4,10 +4,10 @@
 
 | 任务 | 当前开发分支 | 方向 |
 |---|---|---|
-| T1 | `work/task-1-product-server-r3` | 文件、连接与服务端体验 |
-| T2 | `work/task-2-workflow-editor-r5` | Workflow 阅读、编辑、保存 |
-| T3 | `work/task-3-transform-schema-r4` | 实际可用的原生 Transform 配置 |
-| T4 | `work/task-4-product-ux-r3` | 中文表单、字段表格、交互体验 |
+| T1 | Agent 自主创建 | 文件、连接与服务端体验 |
+| T2 | Agent 自主创建 | Workflow 阅读、编辑、保存 |
+| T3 | Agent 自主创建 | 实际可用的原生 Transform 配置 |
+| T4 | Agent 自主创建 | 中文表单、字段表格、交互体验 |
 | T5 | `integration/product-mainline-20261112` | 产品集成及自主改进 |
 
 当前已进入集成分支：真实 Hop Pipeline 浏览器编辑/重开、TableInput 和 SelectValues 字段表、RowGenerator 配置 Schema、字段行复制、.hpl 原子保存。
