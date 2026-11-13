@@ -17,6 +17,7 @@ import jakarta.ws.rs.core.Response;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import org.apache.hop.modern.server.files.WorkspacePaths;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
@@ -27,6 +28,23 @@ import org.junit.jupiter.api.io.TempDir;
 
 class PipelineOpenResourceTest {
   @TempDir Path tempDir;
+
+  @Test
+  void workspaceOpenAllowsRelativeFilesButRejectsAbsoluteAndTraversal() throws Exception {
+    IVariables variables = Variables.getADefaultVariableSpace();
+    PipelineDocumentStore store =
+        new PipelineDocumentStore(mock(IHopMetadataProvider.class), variables);
+    PipelineOpenResource resource = new PipelineOpenResource(
+        store, new PipelineGraphAdapter(), new PipelineDocumentRegistry(),
+        new WorkspacePaths(tempDir));
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("workspace-test");
+    store.save(tempDir.resolve("safe.hpl"), pipeline);
+    assertEquals(200, resource.open(new PipelineOpenResource.OpenRequest("safe.hpl")).getStatus());
+    assertEquals(400, resource.open(new PipelineOpenResource.OpenRequest("../outside.hpl")).getStatus());
+    assertEquals(400, resource.open(new PipelineOpenResource.OpenRequest(
+        tempDir.resolve("safe.hpl").toString())).getStatus());
+  }
 
   @Test
   void opensRealHplAsBrowserGraphWithStableIdAndContentRevision() throws Exception {
