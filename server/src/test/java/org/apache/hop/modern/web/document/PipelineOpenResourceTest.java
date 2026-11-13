@@ -1,3 +1,5 @@
+[Reading 171 lines from start (total: 171 lines, 0 remaining)]
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with
@@ -17,6 +19,7 @@ import jakarta.ws.rs.core.Response;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import org.apache.hop.modern.server.files.WorkspacePaths;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
@@ -27,6 +30,23 @@ import org.junit.jupiter.api.io.TempDir;
 
 class PipelineOpenResourceTest {
   @TempDir Path tempDir;
+
+  @Test
+  void configuredWorkspaceAcceptsRelativeFileAndRejectsTraversal() throws Exception {
+    Path workspace = Files.createDirectory(tempDir.resolve("workspace"));
+    Path outside = tempDir.resolve("outside.hpl");
+    IVariables variables = Variables.getADefaultVariableSpace();
+    PipelineDocumentStore store =
+        new PipelineDocumentStore(mock(IHopMetadataProvider.class), variables);
+    store.save(workspace.resolve("inside.hpl"), new PipelineMeta());
+    store.save(outside, new PipelineMeta());
+    PipelineOpenResource resource = new PipelineOpenResource(
+        store, new PipelineGraphAdapter(), new PipelineDocumentRegistry(),
+        new WorkspacePaths(workspace));
+    assertEquals(200, resource.open(new PipelineOpenResource.OpenRequest("inside.hpl")).getStatus());
+    assertEquals(400, resource.open(new PipelineOpenResource.OpenRequest("../outside.hpl")).getStatus());
+    assertEquals(400, resource.open(new PipelineOpenResource.OpenRequest(outside.toString())).getStatus());
+  }
 
   @Test
   void opensRealHplAsBrowserGraphWithStableIdAndContentRevision() throws Exception {
