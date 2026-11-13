@@ -16,6 +16,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.util.Arrays;
+import java.util.List;
+import org.apache.hop.workflow.action.ActionMeta;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -96,8 +98,13 @@ public final class WorkflowResource {
   }
 
   private static Snapshot snapshot(String id, Opened document) {
+    List<ActionSummary> actions = document.workflow.getActions().stream()
+        .map(action -> new ActionSummary(action.getName(), action.getTypeDesc(),
+            action.getLocation() == null ? 0 : action.getLocation().x,
+            action.getLocation() == null ? 0 : action.getLocation().y))
+        .toList();
     return new Snapshot(id, document.file.toString(), document.workflow.getName(),
-        document.workflow.getDescription(), document.dirty);
+        document.workflow.getDescription(), document.dirty, actions);
   }
 
   private static Response error(int status, String message) {
@@ -107,7 +114,9 @@ public final class WorkflowResource {
   public record OpenRequest(String path) {}
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}
-  public record Snapshot(String id, String path, String name, String description, boolean dirty) {}
+  public record ActionSummary(String name, String type, int x, int y) {}
+  public record Snapshot(String id, String path, String name, String description, boolean dirty,
+      List<ActionSummary> actions) {}
 
   private static final class Opened {
     final java.nio.file.Path file;
