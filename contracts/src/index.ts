@@ -246,5 +246,6 @@ export {
   listConfigSchemas,
   selectValuesConfigSchema,
   sortRowsConfigSchema,
+  rowGeneratorConfigSchema,
   tableInputConfigSchema,
 } from "./configSchemas.js";

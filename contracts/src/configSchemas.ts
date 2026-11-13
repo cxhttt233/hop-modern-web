@@ -110,6 +110,43 @@ export const sortRowsConfigSchema: HopConfigSchema = {
 };
 
 /**
+ * RowGeneratorMeta / GeneratorField native @HopMetadataProperty mapping.
+ * The generated value column is historically serialized as "nullif", not "value".
+ * Keep this native key to make save/reopen lossless.
+ */
+export const rowGeneratorConfigSchema: HopConfigSchema = {
+  pluginId: "RowGenerator",
+  pluginType: "transform",
+  title: "Generate Rows",
+  tier: "T1",
+  fields: [
+    { key: "limit", label: "Row limit", control: "VariableInput", valueType: "string", variable: true },
+    { key: "never_ending", label: "Never stop generating", control: "VariableInput", valueType: "boolean" },
+    { key: "interval_in_ms", label: "Interval (ms)", control: "VariableInput", valueType: "string", variable: true },
+    { key: "row_time_field", label: "Current time field", control: "VariableInput", valueType: "string" },
+    { key: "last_time_field", label: "Previous time field", control: "VariableInput", valueType: "string" },
+    {
+      key: "fields.field",
+      label: "Generated fields",
+      control: "EditableTable",
+      valueType: "object[]",
+      columns: [
+        { key: "name", label: "Field", valueType: "string" },
+        { key: "type", label: "Type", valueType: "string" },
+        { key: "format", label: "Format", valueType: "string" },
+        { key: "length", label: "Length", valueType: "integer" },
+        { key: "precision", label: "Precision", valueType: "integer" },
+        { key: "currency", label: "Currency symbol", valueType: "string" },
+        { key: "decimal", label: "Decimal symbol", valueType: "string" },
+        { key: "group", label: "Grouping symbol", valueType: "string" },
+        { key: "nullif", label: "Value", valueType: "string" },
+        { key: "set_empty_string", label: "Set empty string", valueType: "boolean" },
+      ],
+    },
+  ],
+};
+
+/**
  * First real Metadata contract. DatabaseMeta stores its database implementation under `rdbms`;
  * standard connection fields below are BaseDatabaseMeta metadata properties. Password is marked
  * sensitive so browser/server transport can preserve Hop's encrypted representation.
@@ -134,6 +171,7 @@ const configSchemas: readonly HopConfigSchema[] = [
   tableInputConfigSchema,
   selectValuesConfigSchema,
   sortRowsConfigSchema,
+  rowGeneratorConfigSchema,
   databaseConnectionConfigSchema,
 ];
 
