@@ -1,3 +1,5 @@
+[Reading 76 lines from start (total: 76 lines, 0 remaining)]
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with
@@ -7,6 +9,8 @@
 package org.apache.hop.modern.web;
 
 import java.net.URI;
+import java.nio.file.Path;
+import org.apache.hop.modern.server.files.WorkspacePaths;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
@@ -51,8 +55,17 @@ public final class ModernWebServer {
     IHopMetadataProvider metadataProvider = new MemoryMetadataProvider();
     PipelineDocumentStore store = new PipelineDocumentStore(metadataProvider, variables);
     PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
+    String workspace = System.getProperty("hop.modern.workspace");
+    WorkspacePaths workspacePaths = null;
+    if (workspace != null && !workspace.isBlank()) {
+      try {
+        workspacePaths = new WorkspacePaths(Path.of(workspace));
+      } catch (java.io.IOException e) {
+        throw new IllegalStateException("Configured workspace is unavailable", e);
+      }
+    }
     PipelineOpenResource openResource =
-        new PipelineOpenResource(store, new PipelineGraphAdapter(), registry);
+        new PipelineOpenResource(store, new PipelineGraphAdapter(), registry, workspacePaths);
     PipelineConfigResource configResource =
         new PipelineConfigResource(registry, metadataProvider);
     PipelineEditResource editResource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
