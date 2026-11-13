@@ -11,7 +11,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.StandardCopyOption;
 import java.util.Objects;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopMissingPluginsException;
@@ -43,13 +43,23 @@ public final class PipelineDocumentStore {
   public void save(Path path, PipelineMeta pipeline) throws IOException, HopException {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(pipeline, "pipeline");
-    Files.writeString(
-        path,
-        pipeline.getXml(variables),
-        StandardCharsets.UTF_8,
-        StandardOpenOption.CREATE,
-        StandardOpenOption.TRUNCATE_EXISTING,
-        StandardOpenOption.WRITE);
+    // Serialize before touching the destination: a failed Hop serializer must not truncate it.
+    String xml = pipeline.getXml(variables);
+    Path target = path.toAbsolutePath().normalize();
+    Path parent = target.getParent();
+    Path temporary = Files.createTempFile(parent, ".hop-pipeline-", ".tmp");
+    try {
+      Files.writeString(temporary, xml, StandardCharsets.UTF_8);
+      // Do not silently fall back to a non-atomic replacement: the original must survive
+      // failures rather than being left partially written.
+      Files.move(
+          temporary,
+          target,
+          StandardCopyOption.ATOMIC_MOVE,
+          StandardCopyOption.REPLACE_EXISTING);
+    } finally {
+      Files.deleteIfExists(temporary);
+    }
     pipeline.setFilename(path.toString());
     pipeline.clearChanged();
   }
