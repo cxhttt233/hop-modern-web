@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -14,6 +15,80 @@ const LABELS: Record<string, string> = {
 };
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * Chinese IME text remains local until composition is finished. This prevents
+ * intermediate pinyin from being persisted as Hop native configuration.
+ */
+function NativeTextCell({ value, aria, disabled, onCommit }: {
+  value: string; aria: string; disabled?: boolean; onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  const [composing, setComposing] = useState(false);
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+  const commit = () => {
+    if (composing) return;
+    setEditing(false);
+    if (draft !== value) onCommit(draft);
+  };
+  return <input type="text" aria-label={aria} disabled={disabled} value={draft}
+    onFocus={() => setEditing(true)}
+    onChange={e => setDraft(e.target.value)}
+    onCompositionStart={() => setComposing(true)}
+    onCompositionEnd={e => { setComposing(false); setDraft(e.currentTarget.value); }}
+    onBlur={() => { if (!composing) commit(); }}
+    onKeyDown={e => {
+      if (e.key === "Escape" && !composing) {
+        setDraft(value); setEditing(false); e.currentTarget.blur();
+      } else if (e.key === "Enter" && !composing && !e.nativeEvent.isComposing) {
+        e.currentTarget.blur();
+      }
+    }} />;
+}
+
+/**
+ * Keep incomplete numeric input local until it can be committed. A controlled
+ * number input that writes 0 on every empty keystroke prevents entering
+ * negatives/decimals and can silently change an authoritative Hop value.
+ */
+function NativeNumberCell({ value, fallback, disabled, aria, onCommit }: {
+  value: unknown; fallback: number; disabled?: boolean; aria: string;
+  onCommit: (value: number) => void;
+}) {
+  const canonical = value == null ? "" : String(value);
+  const [draft, setDraft] = useState(canonical);
+  useEffect(() => setDraft(canonical), [canonical]);
+  const [cancelled, setCancelled] = useState(false);
+  const commit = () => {
+    if (cancelled) { setCancelled(false); return; }
+    const normalized = draft.trim();
+    if (normalized === "") {
+      if (value !== fallback) onCommit(fallback);
+      setDraft(String(fallback));
+      return;
+    }
+    const parsed = Number(normalized);
+    if (Number.isFinite(parsed)) {
+      if (parsed !== value) onCommit(parsed);
+      setDraft(String(parsed));
+    } else {
+      setDraft(canonical);
+    }
+  };
+  return <input type="number" step="any" aria-label={aria} disabled={disabled}
+    value={draft} onChange={event => setDraft(event.target.value)}
+    onFocus={() => setCancelled(false)}
+    onBlur={commit}
+    onKeyDown={event => {
+      if (event.key === "Enter") event.currentTarget.blur();
+      if (event.key === "Escape") {
+        setCancelled(true);
+        setDraft(canonical);
+        event.currentTarget.blur();
+      }
+    }} />;
+}
 
 export function canEditNativeList(value: unknown, properties: ConfigPropertyDescriptor[]): value is unknown[] {
   return Array.isArray(value) && value.every(isRecord) && properties.length > 0 &&
@@ -62,19 +137,17 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                 : column.shape === "ENUM" && options.length > 0
                 ? <select aria-label={aria} disabled={disabled} value={val == null ? "" : String(val)}
                     onChange={e => edit(index, column, e.target.value)}>
+                    {val != null && !options.some(opt => opt.value === String(val)) &&
+                      <option value={String(val)}>当前原生值：{String(val)}（未列入可选项）</option>}
                     {options.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                   </select>
-                : <input aria-label={aria} disabled={disabled}
-                    type={column.shape === "NUMBER" ? "number" : "text"}
-                    step={column.shape === "NUMBER" ? "any" : undefined}
+                : column.shape === "STRING"
+                ? <NativeTextCell aria={aria} disabled={disabled}
                     value={val == null ? "" : String(val)}
-                    onChange={e => {
-                      const raw = e.target.value;
-                      // Do not push NaN or Infinity into the authoritative native config.
-                      const number = Number(raw);
-                      if (column.shape === "NUMBER" && !Number.isFinite(number)) return;
-                      edit(index, column, column.shape === "NUMBER" ? (raw === "" ? (column.nativeNumberDefault ?? 0) : number) : raw);
-                    }} />
+                    onCommit={next => edit(index, column, next)} />
+                : <NativeNumberCell aria={aria} disabled={disabled}
+                    value={val} fallback={column.nativeNumberDefault ?? 0}
+                    onCommit={next => edit(index, column, next)} />
             }</td>;
           })}<td className="config-native-list-actions">
               <button type="button" aria-label={title + " 上移第" + (index + 1) + "行"}
