@@ -52,7 +52,7 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
           const row = entry as Record<string, unknown>;
           return <tr key={index}>{properties.map(column => {
             const val = row[column.key];
-            const aria = title + " 第" + (index + 1) + "行 " + column.key;
+            const aria = title + " 第" + (index + 1) + "行 " + (LABELS[column.key] ?? column.key);
             const options = column.options ?? [];
             return <td key={column.key}>{
               column.shape === "BOOLEAN"
@@ -74,14 +74,14 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
             }</td>;
           })}<td className="config-native-list-actions">
               <button type="button" aria-label={title + " 上移第" + (index + 1) + "行"}
-                disabled={disabled || index === 0} onClick={() => move(index, index - 1)}>↑</button>
+                title="上移一行" disabled={disabled || index === 0} onClick={() => move(index, index - 1)}>↑</button>
               <button type="button" aria-label={title + " 下移第" + (index + 1) + "行"}
-                disabled={disabled || index === rows.length - 1} onClick={() => move(index, index + 1)}>↓</button>
+                title="下移一行" disabled={disabled || index === rows.length - 1} onClick={() => move(index, index + 1)}>↓</button>
               <button type="button" aria-label={title + " 复制第" + (index + 1) + "行"}
                 title="复制此行并保留原生属性" disabled={disabled}
                 onClick={() => duplicate(index)}>复制</button>
               <button type="button" aria-label={title + " 删除第" + (index + 1) + "行"}
-                disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))}>删除</button>
+                title="删除此行" disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))}>删除</button>
             </td></tr>;
         })}</tbody>
       </table>
