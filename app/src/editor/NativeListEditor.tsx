@@ -62,6 +62,7 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
         value={query} onChange={event => setQuery(event.target.value)} />
       {needle && <button type="button" onClick={() => setQuery("")}>清除筛选</button>}
       <small aria-live="polite">{needle ? `匹配 ${visibleRows.length} / ${rows.length} 行` : `共 ${rows.length} 行字段`}</small>
+      {filtering && <small>筛选期间暂停行排序，清除筛选后可调整顺序</small>}
     </div>
     <div className="config-native-list-scroll">
       <table aria-label={title + "原生字段列表"}>
