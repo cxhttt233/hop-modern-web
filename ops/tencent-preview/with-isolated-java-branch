@@ -24,6 +24,13 @@ if [[ "${HMW_ISOLATED_ACTION_ABORT:-0}" == "1" ]]; then
   }
   EXTRA_CP="${EXTRA_CP}:$ABORT_JAR"
 fi
+# Explicit opt-in for the verified, side-effect-free SUCCESS action plugin.
+if [[ "${HMW_ISOLATED_ACTION_SUCCESS:-0}" == "1" ]]; then
+  SUCCESS_JAR="$LAB/vendor/action-plugin-proof/hop-action-success-2.20.0.jar"
+  [[ -f "$SUCCESS_JAR" ]] || { echo "Missing isolated Hop SUCCESS plugin" >&2; exit 69; }
+  printf '%s  %s\n' 'bae90ecf35d27c4c5ff0da115adb8e7a9ec985ec6249786c17b55d6b4ade2797' "$SUCCESS_JAR" | sha256sum --check --status || exit 65
+  EXTRA_CP="${EXTRA_CP}:$SUCCESS_JAR"
+fi
 if [ "$#" -lt 2 ]; then echo "Usage: with-isolated-java-branch <branch> <test-command> [args...]" >&2; exit 2; fi
 BRANCH=$1; shift
 git check-ref-format --branch "$BRANCH" >/dev/null

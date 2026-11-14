@@ -167,6 +167,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
             <label>节点类型 <select name="actionType" value={newActionType}
               onChange={event => setNewActionType(event.target.value)} disabled={busy}>
               <option value="DUMMY">空操作（DUMMY）</option>
+              <option value="SUCCESS">成功结束（SUCCESS）</option>
               <option value="ABORT">终止工作流（ABORT）</option>
             </select></label>
             {newActionType === "ABORT" && <>

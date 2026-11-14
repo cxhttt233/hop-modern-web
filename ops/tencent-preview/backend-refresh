@@ -25,6 +25,18 @@ if [[ ! -f "$ABORT_JAR" ]] || ! printf '%s  %s\n' "$ABORT_SHA" "$ABORT_JAR" | sh
     install -m 0644 "$TMP_JAR" "$ABORT_JAR"
   )
 fi
+# Official Hop 2.20 SUCCESS plugin, pinned to the verified Maven Central artifact.
+SUCCESS_JAR="$RUNTIME/lib/hop-action-success-2.20.0.jar"
+SUCCESS_SHA='bae90ecf35d27c4c5ff0da115adb8e7a9ec985ec6249786c17b55d6b4ade2797'
+if [[ ! -f "$SUCCESS_JAR" ]] || ! printf '%s  %s\n' "$SUCCESS_SHA" "$SUCCESS_JAR" | sha256sum --check --status; then
+  (
+    TMP_JAR=$(mktemp "$RUNTIME/lib/.hop-action-success-XXXXXXXX.jar")
+    trap 'rm -f "$TMP_JAR"' EXIT
+    curl -fsSL --retry 2 --max-time 30 https://repo.maven.apache.org/maven2/org/apache/hop/hop-action-success/2.20.0/hop-action-success-2.20.0.jar -o "$TMP_JAR"
+    printf '%s  %s\n' "$SUCCESS_SHA" "$TMP_JAR" | sha256sum --check --status || exit 65
+    install -m 0644 "$TMP_JAR" "$SUCCESS_JAR"
+  )
+fi
 CURRENT=$(readlink "$STORE/current" 2>/dev/null || true)
 if [[ "$CURRENT" == "builds/$SHA" && -f "$STORE/current/.built-ok" ]]; then
   echo "BACKEND_UNCHANGED $SHA"
