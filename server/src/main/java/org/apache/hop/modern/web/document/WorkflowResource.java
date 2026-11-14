@@ -99,6 +99,32 @@ public final class WorkflowResource {
   }
 
   @POST
+  @Path("/action-rename")
+  public Response renameAction(ActionRenameRequest request) {
+    if (request == null || request.id() == null || request.name() == null
+        || request.newName() == null || request.newName().isBlank()
+        || !request.newName().equals(request.newName().trim())) {
+      return error(400, "valid id, action name and nonblank new name are required");
+    }
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      var action = document.workflow.findAction(request.name());
+      if (action == null) return error(404, "workflow action not found");
+      if (request.name().equals(request.newName())) {
+        return Response.ok(snapshot(request.id(), document)).build();
+      }
+      if (document.workflow.findAction(request.newName()) != null) {
+        return error(409, "workflow action name already exists");
+      }
+      action.setName(request.newName());
+      document.workflow.setChanged();
+      document.dirty = true;
+      return Response.ok(snapshot(request.id(), document)).build();
+    }
+  }
+
+  @POST
   @Path("/hop-enabled")
   public Response setHopEnabled(HopEnabledRequest request) {
     if (request == null || request.id() == null || request.index() < 0) {
@@ -220,6 +246,7 @@ public final class WorkflowResource {
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}
   public record MoveRequest(String id, String name, int x, int y) {}
+  public record ActionRenameRequest(String id, String name, String newName) {}
   public record HopCreateRequest(String id, String from, String to) {}
   public record HopDeleteRequest(String id, int index, String from, String to) {}
   public record HopEnabledRequest(String id, int index, String from, String to, boolean enabled) {}
