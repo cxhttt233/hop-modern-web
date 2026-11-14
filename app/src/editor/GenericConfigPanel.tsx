@@ -102,6 +102,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const [draft, setDraft] = useState<Record<string, unknown>>(() => Object.fromEntries(
     descriptor.properties.filter((p) => !p.sensitive).map((p) => [p.key, nativeValue(p)])));
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
+  // Preserve the exact JSON text while editing; parsing must not reformat the cursor.
+  const [jsonTextDrafts, setJsonTextDrafts] = useState<Record<string, string>>({});
   // Explicit T0 escape hatch: malformed JSON validation remains available
   // without making the raw textarea the default for native typed LISTs.
   const [rawListEditors, setRawListEditors] = useState<Record<string, boolean>>({});
@@ -216,9 +218,10 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
         disabled={disabled} onChange={rows => set(p.key, rows)} />;
     }
     if (p.shape === "OBJECT" || p.shape === "LIST") {
-      const text = typeof value === "string" ? value : JSON.stringify(value ?? (p.shape === "LIST" ? [] : {}), null, 2);
+      const text = jsonTextDrafts[p.key] ?? (typeof value === "string" ? value : JSON.stringify(value ?? (p.shape === "LIST" ? [] : {}), null, 2));
       return <textarea id={id} disabled={disabled} rows={p.shape === "LIST" ? 8 : 6} value={text} onChange={(e) => {
         const raw = e.target.value;
+        setJsonTextDrafts((old) => ({ ...old, [p.key]: raw }));
         try {
           const parsed: unknown = JSON.parse(raw);
           const valid = p.shape === "LIST" ? Array.isArray(parsed) : !!parsed && typeof parsed === "object" && !Array.isArray(parsed);
