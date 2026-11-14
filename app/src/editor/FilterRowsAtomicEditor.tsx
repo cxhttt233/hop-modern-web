@@ -72,3 +72,60 @@ export function FilterRowsAtomicEditor({ value, disabled, onChange }: {
     <small>复杂的 AND/OR 条件树和常量值比较仍需原始 JSON 编辑；此表单不会展开或重写那些结构。</small>
   </div>;
 }
+
+
+// Native Hop Condition trees use the first child's operator '-' and subsequent
+// children 'AND' / 'OR'. Only expose a flat, recognized tree; nested or unknown
+// native structures remain in the original JSON editor without normalization.
+export function canEditCompositeFilterRows(className: string, property: ConfigPropertyDescriptor, value: unknown): value is Record<string, unknown> {
+  if (className !== "org.apache.hop.pipeline.transforms.filterrows.FilterRowsMeta" ||
+      property.key !== "compare" || property.shape !== "OBJECT" || !record(value)) return false;
+  const root = value.condition;
+  if (!record(root) || root.operator !== "-" || !record(root.conditions)) return false;
+  const children = root.conditions.condition;
+  if (!Array.isArray(children) || children.length < 2) return false;
+  return children.every((child, index) => record(child) &&
+    child.operator === (index === 0 ? "-" : child.operator) &&
+    (index === 0 || child.operator === "AND" || child.operator === "OR") &&
+    FUNCTIONS.some(([code]) => code === child.function) &&
+    typeof child.negated === "boolean" && typeof child.leftvalue === "string" &&
+    (!record(child.conditions) || !Array.isArray(child.conditions.condition) || child.conditions.condition.length === 0) &&
+    (child.value == null ? (child.rightvalue == null || typeof child.rightvalue === "string") :
+      record(child.value) && child.value.type === "Number" && typeof child.value.text === "string" && child.rightvalue == null));
+}
+
+export function FilterRowsCompositeEditor({ value, disabled, onChange }: {
+  value: Record<string, unknown>; disabled?: boolean;
+  onChange: (next: Record<string, unknown>) => void;
+}) {
+  const root = value.condition as Record<string, unknown>;
+  const container = root.conditions as Record<string, unknown>;
+  const children = container.condition as Record<string, unknown>[];
+  const change = (index: number, child: Record<string, unknown>) => {
+    const next = children.map((item, i) => i === index ? child : item);
+    onChange({ ...value, condition: { ...root, conditions: { ...container, condition: next } } });
+  };
+  return <div className="config-native-filter-condition" role="group" aria-label="过滤复合条件编辑">
+    <p>Apache Hop 原生条件树 · 按顺序组合 AND / OR。未知嵌套条件请使用高级 JSON。</p>
+    {children.map((child, index) => <fieldset key={index}>
+      <legend>条件 {index + 1}</legend>
+      {index > 0 && <label>逻辑连接
+        <select aria-label={`条件${index + 1}逻辑连接`} disabled={disabled} value={String(child.operator)}
+          onChange={e => change(index, { ...child, operator: e.target.value })}>
+          <option value="AND">并且 AND</option><option value="OR">或者 OR</option>
+        </select></label>}
+      <label>左侧字段<input aria-label={`条件${index + 1}左侧字段`} disabled={disabled} value={String(child.leftvalue)}
+        onChange={e => change(index, { ...child, leftvalue: e.target.value })}/></label>
+      <label>比较方式<select aria-label={`条件${index + 1}比较方式`} disabled={disabled} value={String(child.function)}
+        onChange={e => change(index, { ...child, function: e.target.value })}>
+        {FUNCTIONS.map(([code, label]) => <option key={code} value={code}>{label}（{code}）</option>)}
+      </select></label>
+      {record(child.value) ? <label>数字常量<input aria-label={`条件${index + 1}数字常量`} disabled={disabled}
+        value={String(child.value.text)} onChange={e => change(index, { ...child, value: { ...(child.value as Record<string, unknown>), text: e.target.value } })}/></label>
+        : <label>右侧字段<input aria-label={`条件${index + 1}右侧字段`} disabled={disabled}
+          value={String(child.rightvalue ?? "")} onChange={e => change(index, { ...child, rightvalue: e.target.value })}/></label>}
+      <label><input aria-label={`条件${index + 1}取反`} type="checkbox" disabled={disabled} checked={child.negated === true}
+        onChange={e => change(index, { ...child, negated: e.target.checked })}/>取反</label>
+    </fieldset>)}
+  </div>;
+}
