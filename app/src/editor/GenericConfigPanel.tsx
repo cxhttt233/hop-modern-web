@@ -272,7 +272,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
         </div>
       </details>
     </header>
-    <div className="config-field-search">
+    {totalFieldCount > 0 && <div className="config-field-search">
       <input type="search" aria-label="查找配置字段" placeholder="查找字段名称或分组" value={fieldQuery}
         onChange={(event) => { nextFieldMatch.current = 0; setFieldQuery(event.target.value); }}
         onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); focusNextMatchingField(); } }} />
@@ -280,9 +280,9 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
         onClick={focusNextMatchingField}>定位下一项</button>}
       {fieldQuery && <button type="button" onClick={() => { nextFieldMatch.current = 0; setFieldQuery(""); }} aria-label="清除字段查找">清除</button>}
       <small aria-live="polite">显示 {visibleFieldCount} / {totalFieldCount} 项</small>
-    </div>
+    </div>}
     {fileSqlSelected && <p className="config-sql-source-notice" role="status">SQL 来源提示：当前草稿指定了 SQL 文件；运行时文件内容优先，内联 SQL 会保留但不会执行。</p>}
-    {visibleGroups.length === 0 && <p className="config-search-empty" role="status">没有匹配的配置字段，请更换关键词。</p>}
+    {totalFieldCount === 0 ? <p className="config-search-empty" role="status">当前转换没有可编辑的配置字段。可以关闭面板，或选择其他转换继续编辑。</p> : visibleGroups.length === 0 && <p className="config-search-empty" role="status">没有匹配的配置字段，请更换关键词。</p>}
     {visibleGroups.map(([group, properties], index) => {
       // Search always reveals matching controls; clearing it restores each user's
       // collapse choice. Hidden inputs stay mounted so unsaved edits are preserved.
