@@ -50,6 +50,32 @@ class WorkflowResourceTest {
   }
 
   @Test
+  void workspaceRejectsAbsoluteTraversalAndSymlinkEscapes() throws Exception {
+    var store = new WorkflowDocumentStore(
+        mock(IHopMetadataProvider.class), Variables.getADefaultVariableSpace());
+    Path workspace = Files.createDirectory(tempDir.resolve("workspace"));
+    Path outside = tempDir.resolve("outside.hwf");
+    WorkflowMeta workflow = new WorkflowMeta();
+    workflow.setName("safe");
+    store.save(outside, workflow);
+    store.save(workspace.resolve("inside.hwf"), workflow);
+    Files.createSymbolicLink(workspace.resolve("escape.hwf"), outside);
+    String old = System.getProperty("hop.modern.workspace");
+    try {
+      System.setProperty("hop.modern.workspace", workspace.toString());
+      var resource = new WorkflowResource(store);
+      assertEquals(200, resource.open(new WorkflowResource.OpenRequest("inside.hwf")).getStatus());
+      assertEquals(400, resource.open(new WorkflowResource.OpenRequest(outside.toString())).getStatus());
+      assertEquals(400, resource.open(new WorkflowResource.OpenRequest("../outside.hwf")).getStatus());
+      assertEquals(400, resource.open(new WorkflowResource.OpenRequest("escape.hwf")).getStatus());
+      assertEquals("safe", store.open(outside).getName());
+    } finally {
+      if (old == null) System.clearProperty("hop.modern.workspace");
+      else System.setProperty("hop.modern.workspace", old);
+    }
+  }
+
+  @Test
   void rejectsWrongFileExtensionWithoutOverwritingIt() throws Exception {
     var store = new WorkflowDocumentStore(
         mock(IHopMetadataProvider.class), Variables.getADefaultVariableSpace());
