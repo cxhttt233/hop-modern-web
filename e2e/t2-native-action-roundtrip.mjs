@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { chromium } from '/home/ubuntu/hmw-agent-lab/source/node_modules/playwright/index.mjs';
 import { randomUUID } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { unlink } from 'node:fs/promises';
