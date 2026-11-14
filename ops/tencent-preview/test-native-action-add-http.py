@@ -38,7 +38,7 @@ native_xml = path.read_text()
 assert "<type>DUMMY</type>" in native_xml, "not serialized as native Hop DUMMY"
 assert "<type>ABORT</type>" in native_xml, "not serialized as native Hop ABORT"
 assert "Water level threshold exceeded" in native_xml
-assert "<loglevel>ERROR</loglevel>" in native_xml
+assert "<loglevel>Error</loglevel>" in native_xml
 reopened = post("open", {"path":path.name})
 assert len(reopened["actions"]) == 4
 assert any(a["name"]=="Native completion" and "action does anything" in a["type"] for a in reopened["actions"]), reopened["actions"]
