@@ -70,6 +70,14 @@ try {
   await dialog.getByText("工作流节点 · 4").waitFor();
   assert.ok(await dialog.getByText("Native UI proof", {exact:false}).count()>0);
   assert.ok(await dialog.getByText("Success terminal", {exact:false}).count()>0);
+  // Duplicate names must be rejected without changing the reopened native graph.
+  const duplicate = dialog.locator('form[aria-label="新增工作流节点"]');
+  await duplicate.locator('[name="actionType"]').selectOption("SUCCESS");
+  await duplicate.locator('[name="actionName"]').fill("Success terminal");
+  await duplicate.getByRole("button", {name:"新增原生节点"}).click();
+  await dialog.getByText("工作流节点 · 4").waitFor();
+  await page.waitForFunction(() => true); // yield after the rejected request
+  assert.ok(calls.some(c=>c.endpoint.endsWith("/action-add")&&c.status===409),"duplicate action must return HTTP 409");
   assert.equal(errors.length,0,"browser errors");
   for (const name of ["open","action-add","hop-create","save"])
     assert.ok(calls.some(c=>c.endpoint.endsWith("/"+name)&&c.status===200), "API missing "+name);
