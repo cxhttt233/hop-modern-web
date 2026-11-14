@@ -9,6 +9,7 @@ package org.apache.hop.modern.server.files;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.io.IOException;
@@ -47,17 +48,21 @@ public final class WorkspaceFileCatalogResource {
 
   @GET
   @Path("/pipelines")
-  public Response pipelines() {
-    return list(".hpl");
+  public Response pipelines(@QueryParam("search") String search) {
+    return list(".hpl", search);
   }
 
   @GET
   @Path("/workflows")
-  public Response workflows() {
-    return list(".hwf");
+  public Response workflows(@QueryParam("search") String search) {
+    return list(".hwf", search);
   }
 
-  private Response list(String extension) {
+  private Response list(String extension, String search) {
+    if (search != null && search.length() > 128) {
+      return Response.status(400).entity(new ErrorResponse("invalid_search", "search is too long")).build();
+    }
+    String needle = search == null ? "" : search.toLowerCase(Locale.ROOT);
     if (workspace == null) {
       return Response.status(503).entity(new ErrorResponse("workspace_unavailable", "workspace is not configured")).build();
     }
@@ -71,7 +76,9 @@ public final class WorkspaceFileCatalogResource {
         files.filter(p -> !Files.isSymbolicLink(p))
             .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
             .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(extension))
-            .forEach(p -> paths.add(root.relativize(p).toString().replace('\\', '/')));
+            .map(p -> root.relativize(p).toString().replace('\\', '/'))
+            .filter(path -> path.toLowerCase(Locale.ROOT).contains(needle))
+            .forEach(paths::add);
       }
       paths.sort(Comparator.naturalOrder());
       return Response.ok(new FileListResponse(List.copyOf(paths.subList(0, Math.min(paths.size(), MAX_FILES))))).build();
