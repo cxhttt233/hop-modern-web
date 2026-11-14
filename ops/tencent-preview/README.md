@@ -15,3 +15,22 @@ This file is documentation/source control for the server script, not a substitut
 ## Compile a Java branch without Maven SNAPSHOT resolution
 
 `/home/ubuntu/hmw-agent-lab/bin/check-java-branch <branch>` uses the currently installed Java 21 runtime and Hop jars to compile all `server/src/main/java` sources from an existing cached origin branch. It acquires the common build lock, uses a temporary directory, does **not** deploy or restart Java, and deletes compiled objects after checking. It is a compile check, not a replacement for JUnit, integration/security review, or actual HTTP browser tests. Run `preview-branch` and focused API tests after it passes. On 2026-11-14 both `main` and `t1/catalog-bounded-scan-20261114` compiled successfully (47 and 46 `.class` files).
+
+## Validate a PR's real Java HTTP endpoints without touching the shared backend
+
+On the Tencent preview VM, `/home/ubuntu/hmw-agent-lab/bin/with-isolated-java-branch <GitHub-branch> <command> [args...]` fetches only that branch (with a warned cached-ref fallback), compiles its Java sources using installed Hop JARs, then launches a temporary loopback-only JVM at `127.0.0.1:8084` (or `HMW_TEST_PORT=8084..8089`). It sets:
+
+- `HMW_ISOLATED_URL` to the ephemeral HTTP base URL.
+- `HMW_ISOLATED_WORKSPACE` to a disposable, empty storage directory.
+- `HMW_ISOLATED_TOKEN` to a **test-only token**, never a real credential.
+
+Run a real test command inside the runner; it returns the command's exit code and removes the Java process, compiled classes, and temporary workspace on exit. It uses one shared build lock and a per-port lock. Do not expose the loopback port publicly. This is *isolated integration testing*, not a replacement for authenticated production API checks.
+
+Examples:
+
+```sh
+/home/ubuntu/hmw-agent-lab/bin/with-isolated-java-branch t2/action-rename-20261114 python3 path/to/test-workflow-rename.py
+/home/ubuntu/hmw-agent-lab/bin/with-isolated-java-branch t1/database-connections-20261114 python3 path/to/test-connections.py
+```
+
+The T2 #133 native action rename was verified by a disposable server test: rename, duplicate-name HTTP 409, preserving hop references, save/reopen original Hop XML. The T1 #132 backend was found to **fail JVM startup** due to request-scoped `@HeaderParam` field injection on a Jersey singleton; corrected to method-parameter injection. T1 now boots, and isolated tests verified no/wrong-token 403, create/read/list 200, bad name 400 and password-free file storage. T1 is **still Draft** until it uses Hop DatabaseMeta and an authenticated React user path.
