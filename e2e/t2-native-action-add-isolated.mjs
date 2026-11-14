@@ -38,16 +38,33 @@ try {
   await linkForm.locator('[name="to"]').selectOption("Native UI proof");
   await linkForm.getByRole("button", {name:"创建连接"}).click();
   await dialog.getByText("执行链路 · 1 条").waitFor();
+
+  const abortForm = dialog.locator('form[aria-label="新增工作流节点"]');
+  await abortForm.locator('[name="actionType"]').selectOption("ABORT");
+  await abortForm.locator('[name="actionName"]').fill("Abort on failure");
+  await abortForm.locator('[name="actionMessage"]').fill("Water level threshold exceeded");
+  await abortForm.locator('[name="actionLogLevel"]').selectOption("ERROR");
+  await abortForm.getByRole("button", {name:"新增原生节点"}).click();
+  await dialog.getByText("工作流节点 · 4").waitFor();
+  await linkForm.locator('[name="from"]').selectOption("Native UI proof");
+  await linkForm.locator('[name="to"]').selectOption("Abort on failure");
+  await linkForm.getByRole("button", {name:"创建连接"}).click();
+  await dialog.getByText("执行链路 · 2 条").waitFor();
+
   await dialog.getByRole("button", {name:"保存 .hwf"}).click();
   await dialog.getByText("已保存",{exact:true}).waitFor();
   const xml=await readFile(fixture,"utf8");
   assert.ok(xml.includes("<type>DUMMY</type>"),"not native Hop DUMMY XML");
+  assert.ok(xml.includes("<type>ABORT</type>"),"not native Hop ABORT XML");
+  assert.ok(xml.includes("Water level threshold exceeded"),"ABORT message not serialized");
   await dialog.getByRole("button",{name:"打开",exact:true}).click();
-  await dialog.getByText("工作流节点 · 3").waitFor();
+  await dialog.getByText("工作流节点 · 4").waitFor();
   assert.ok(await dialog.getByText("Native UI proof", {exact:false}).count()>0);
+  assert.ok(await dialog.getByText("Abort on failure", {exact:false}).count()>0);
   assert.equal(errors.length,0,"browser errors");
   for (const name of ["open","action-add","hop-create","save"])
     assert.ok(calls.some(c=>c.endpoint.endsWith("/"+name)&&c.status===200), "API missing "+name);
-  console.log(JSON.stringify({pass:true, nativeAction:"DUMMY", uiAdd:true, connected:true, diskReopen:true,
+  assert.equal(calls.filter(c=>c.endpoint.endsWith("/action-add")&&c.status===200).length,2,"both native action types must be created");
+  console.log(JSON.stringify({pass:true, nativeActions:["DUMMY","ABORT"], uiAdd:true, connected:true, diskReopen:true,
       http:calls, browserErrors:errors}));
 } finally { await browser.close(); }
