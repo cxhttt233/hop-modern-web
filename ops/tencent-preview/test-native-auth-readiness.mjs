@@ -1,5 +1,3 @@
-[Reading 26 lines from start (total: 26 lines, 0 remaining)]
-
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
