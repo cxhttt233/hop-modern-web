@@ -225,6 +225,8 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
               const latest = hasUnappliedChanges
                 ? await command<WorkflowSnapshot>("edit", { id: workflow.id, description })
                 : workflow;
+              // Preserve the applied server draft if the disk write fails.
+              setWorkflow(latest);
               return command<WorkflowSnapshot>("save", { id: latest.id });
             })}>
             保存 .hwf
