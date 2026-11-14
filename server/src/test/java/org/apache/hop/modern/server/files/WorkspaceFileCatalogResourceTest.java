@@ -40,6 +40,19 @@ class WorkspaceFileCatalogResourceTest {
   }
 
   @Test
+  void largeWorkspaceReturnsFirstFiveHundredSortedPaths() throws Exception {
+    for (int i = 600; i >= 0; i--) {
+      Files.writeString(root.resolve(String.format("flow-%03d.hpl", i)), "pipeline");
+    }
+    Response response = new WorkspaceFileCatalogResource(root.toString()).pipelines();
+    assertEquals(200, response.getStatus());
+    List<String> paths = ((WorkspaceFileCatalogResource.FileListResponse) response.getEntity()).paths();
+    assertEquals(500, paths.size());
+    assertEquals("flow-000.hpl", paths.get(0));
+    assertEquals("flow-499.hpl", paths.get(499));
+  }
+
+  @Test
   void doesNotFollowSymlinkFiles() throws Exception {
     Path target = Files.writeString(root.resolve("actual.hpl"), "pipeline");
     Files.createSymbolicLink(root.resolve("alias.hpl"), target);
