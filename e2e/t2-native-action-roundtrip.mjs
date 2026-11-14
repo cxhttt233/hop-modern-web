@@ -12,7 +12,7 @@ try {
  execFileSync('java',['-cp',`${runtime}/classes:${runtime}/lib/*`,'/home/ubuntu/hmw-agent-lab/CreateWorkflowFixture.java',file]);
  const page=await browser.newPage(); const errors=[];
  page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/api/workflows/**',async route=>{const path=new URL(route.request().url()).pathname;await route.fulfill({response:await route.fetch({url:backend+path})});});
+ await page.route('**/api/workflows/**',async route=>{const path=new URL(route.request().url()).pathname.replace('/t2/api/', '/api/');await route.fulfill({response:await route.fetch({url:backend+path})});});
  await page.goto('http://127.0.0.1:4196/t2/',{waitUntil:'networkidle'});
  await page.getByRole('button',{name:/打开 Workflow/}).click();
  await page.getByLabel('服务器上的 .hwf 路径').fill(basename(file));
