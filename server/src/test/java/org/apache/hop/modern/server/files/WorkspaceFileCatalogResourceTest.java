@@ -58,4 +58,23 @@ class WorkspaceFileCatalogResourceTest {
     assertEquals(400, resource.pipelines("x".repeat(129)).getStatus());
   }
 
+  @Test
+  void searchOverLargeWorkspaceKeepsFirstFiveHundredMatchingPaths() throws Exception {
+    for (int i = 600; i >= 0; i--) {
+      Files.writeString(root.resolve(String.format("flow-%03d.hpl", i)), "pipeline");
+    }
+    WorkspaceFileCatalogResource resource = new WorkspaceFileCatalogResource(root.toString());
+    Response all = resource.pipelines(null);
+    List<String> paths = ((WorkspaceFileCatalogResource.FileListResponse) all.getEntity()).paths();
+    assertEquals(500, paths.size());
+    assertEquals("flow-000.hpl", paths.get(0));
+    assertEquals("flow-499.hpl", paths.get(499));
+    Response filtered = resource.pipelines("flow-5");
+    List<String> matching = ((WorkspaceFileCatalogResource.FileListResponse) filtered.getEntity()).paths();
+    assertEquals(100, matching.size());
+    assertEquals("flow-500.hpl", matching.get(0));
+    assertEquals("flow-599.hpl", matching.get(99));
+  }
+
+
 }

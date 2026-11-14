@@ -13,10 +13,11 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.InvalidPathException;
-import java.util.ArrayList;
+import java.util.PriorityQueue;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -71,18 +72,26 @@ public final class WorkspaceFileCatalogResource {
       if (!Files.isDirectory(root)) {
         return Response.status(503).entity(new ErrorResponse("workspace_unavailable", "workspace is not a directory")).build();
       }
-      List<String> paths = new ArrayList<>();
+      // Keep only the first MAX_FILES alphabetically, without holding the full scan in memory.
+      PriorityQueue<String> firstPaths =
+          new PriorityQueue<>(MAX_FILES + 1, Comparator.reverseOrder());
       try (Stream<java.nio.file.Path> files = Files.walk(root, MAX_DEPTH)) {
         files.filter(p -> !Files.isSymbolicLink(p))
             .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
             .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(extension))
             .map(p -> root.relativize(p).toString().replace('\\', '/'))
             .filter(path -> path.toLowerCase(Locale.ROOT).contains(needle))
-            .forEach(paths::add);
+            .forEach(relative -> {
+              if (firstPaths.size() < MAX_FILES) {
+                firstPaths.add(relative);
+              } else if (relative.compareTo(firstPaths.peek()) < 0) {
+                firstPaths.poll();
+                firstPaths.add(relative);
+              }
+            });
       }
-      paths.sort(Comparator.naturalOrder());
-      return Response.ok(new FileListResponse(List.copyOf(paths.subList(0, Math.min(paths.size(), MAX_FILES))))).build();
-    } catch (IOException | SecurityException e) {
+      return Response.ok(new FileListResponse(firstPaths.stream().sorted().toList())).build();
+    } catch (IOException | UncheckedIOException | SecurityException e) {
       return Response.status(503).entity(new ErrorResponse("workspace_unavailable", "workspace cannot be scanned")).build();
     }
   }
