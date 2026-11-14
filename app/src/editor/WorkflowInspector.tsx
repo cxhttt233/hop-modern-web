@@ -167,6 +167,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
             <label>节点类型 <select name="actionType" value={newActionType}
               onChange={event => setNewActionType(event.target.value)} disabled={busy}>
               <option value="DUMMY">空操作（DUMMY）</option>
+              <option value="SUCCESS">成功结束（SUCCESS）</option>
               <option value="ABORT">终止工作流（ABORT）</option>
             </select></label>
             {newActionType === "ABORT" && <>
@@ -186,6 +187,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
             <label>Y <input name="actionY" type="number" min={0} max={100000} defaultValue={200} required disabled={busy}
               style={{ width: 85 }} /></label>
             <button type="submit" disabled={busy}>新增原生节点</button>
+            <button type="reset" disabled={busy} onClick={() => setNewActionType("DUMMY")}>取消新增</button>
           </form>
         </section>
         {(workflow.actions?.length ?? 0) > 0 && <section aria-label="重命名工作流节点">

@@ -28,6 +28,7 @@ import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.action.ActionMeta;
 import org.apache.hop.workflow.actions.abort.ActionAbort;
 import org.apache.hop.workflow.actions.dummy.ActionDummy;
+import org.apache.hop.workflow.actions.success.ActionSuccess;
 
 /** Small authoritative .hwf open/edit/save boundary; no XML rewriting in the browser. */
 @Path("/api/workflows")
@@ -144,12 +145,14 @@ public final class WorkflowResource {
         || request.x() < 0 || request.y() < 0 || request.x() > 100000 || request.y() > 100000) {
       return error(400, "valid id, native action type, name and coordinates are required");
     }
-    if (!"DUMMY".equals(request.type()) && !"ABORT".equals(request.type())) {
+    if (!"DUMMY".equals(request.type()) && !"ABORT".equals(request.type()) && !"SUCCESS".equals(request.type())) {
       return error(400, "unsupported native action type");
     }
     ActionMeta action;
     if ("DUMMY".equals(request.type())) {
       action = new ActionMeta(new ActionDummy(request.name()));
+    } else if ("SUCCESS".equals(request.type())) {
+      action = new ActionMeta(new ActionSuccess(request.name(), ""));
     } else {
       if (request.message() == null || request.message().isBlank() || request.message().length() > 1000) {
         return error(400, "ABORT requires a message of 1-1000 characters");
