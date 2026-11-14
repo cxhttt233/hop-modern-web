@@ -34,3 +34,14 @@ Examples:
 ```
 
 The T2 #133 native action rename was verified by a disposable server test: rename, duplicate-name HTTP 409, preserving hop references, save/reopen original Hop XML. The T1 #132 backend was found to **fail JVM startup** due to request-scoped `@HeaderParam` field injection on a Jersey singleton; corrected to method-parameter injection. T1 now boots, and isolated tests verified no/wrong-token 403, create/read/list 200, bad name 400 and password-free file storage. T1 is **still Draft** until it uses Hop DatabaseMeta and an authenticated React user path.
+
+
+## Native PostgreSQL database metadata prerequisite (T1)
+
+The Tencent test runtime bundled only generic `DatabasePluginType` registration with `NONE` and lacked `hop-databases-postgresql`. A `DatabaseMeta.setDatabaseType("POSTGRESQL")` call therefore failed with `Database type [POSTGRESQL] not found!`. Adding `DatabasePluginType` registration **alone** did not fix it; the actual dialect JAR is required.
+
+A **test-only** compatible plugin has been staged **outside** the shared Java server under `/home/ubuntu/hmw-agent-lab/vendor/postgres-plugin-proof/hop-databases-postgresql-2.20.0.jar` (101,688 bytes; SHA-1 `c60e8136cbee71b7623bc7262ba0583997d06bf3`; SHA-256 `c61b710cda456b28c38c10e36a40af5f7232d3549415b7f6861ef5842bfd4763`, SHA-1 matches Maven published checksum). It comes from the Apache Hop 2.20.0 Maven artifact `org.apache.hop:hop-databases-postgresql:2.20.0`, retrieved from a reachable Maven mirror, not committed to this repository.
+
+Run `/home/ubuntu/hmw-agent-lab/bin/check-native-database-meta` (repository source: `ops/tencent-preview/check-native-database-meta`). It compiles a disposable Java program using the installed Hop Java 21 runtime and dialect plugin, then registers `DatabasePluginType` and saves/loads a genuine `DatabaseMeta` through `MemoryMetadataProvider`. It verifies name, dialect, host, DB name, port and user. It does **not** store a credential, connect externally, change the Java 8080 service, or prove project disk persistence. Output: `HOP_NATIVE_DATABASEMETA_PASS`.
+
+**Required product work remains:** T1 must integrate a version-compatible set of dialect plugins into the actual secured runtime, use a real project `IHopMetadataProvider` with durable `metadata/rdbms` storage and workspace/session authorization, connect the React management view and demonstrate save/reopen/reuse in a Transform. Do not treat the old `.properties` draft store from PR #132 as Hop-native database metadata. JDBC drivers and secure external connection tests are separate; do not assume the dialect plugin ships a working JDBC driver for every database.
