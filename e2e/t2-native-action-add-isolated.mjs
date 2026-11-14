@@ -1,32 +1,44 @@
 import { chromium } from "playwright";
-import { copyFile, readFile } from "node:fs/promises";
+import { copyFile, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 
 const isolated = process.env.HMW_ISOLATED_URL;
 const workspace = process.env.HMW_ISOLATED_WORKSPACE;
-assert.ok(isolated && workspace, "requires isolated JVM");
-const fixture = path.join(workspace, "native-ui-action.hwf");
+const live = process.env.T2_LIVE_SHARED_BACKEND === "1";
+assert.ok(workspace && (live || isolated), "requires isolated JVM or explicit shared-backend mode");
+const basename = process.env.T2_FIXTURE_BASENAME ?? "native-ui-action.hwf";
+if (!/^[A-Za-z0-9._-]{1,120}\.hwf$/.test(basename)) throw new Error("invalid test fixture basename");
+const fixture = path.join(workspace, basename);
 await copyFile("/home/ubuntu/hmw-agent-lab/workspaces/t2/two-actions.hwf", fixture);
 const browser = await chromium.launch({headless:true, args:["--no-sandbox"]});
 const page = await browser.newPage({ viewport:{width:1440,height:900} });
 const errors = [];
 page.on("pageerror",e => errors.push(e.message));
 const calls = [];
-await page.route("**/t2/api/workflows/**", async route => {
-  const uri = new URL(route.request().url());
-  const nextUrl = isolated + uri.pathname.replace(/^\/t2/, "") + uri.search;
-  try {
-    const response = await route.fetch({url:nextUrl});
-    calls.push({endpoint:uri.pathname, method:route.request().method(), status:response.status()});
-    await route.fulfill({response});
-  } catch(e) { await route.abort(); throw e; }
-});
+if (live) {
+  page.on("response", response => {
+    const uri = new URL(response.url());
+    if (uri.pathname.includes("/t2/api/workflows/")) {
+      calls.push({endpoint:uri.pathname, method:response.request().method(), status:response.status()});
+    }
+  });
+} else {
+  await page.route("**/t2/api/workflows/**", async route => {
+    const uri = new URL(route.request().url());
+    const nextUrl = isolated + uri.pathname.replace(/^\/t2/, "") + uri.search;
+    try {
+      const response = await route.fetch({url:nextUrl});
+      calls.push({endpoint:uri.pathname, method:route.request().method(), status:response.status()});
+      await route.fulfill({response});
+    } catch(e) { await route.abort(); throw e; }
+  });
+}
 try {
   await page.goto("http://127.0.0.1:4196/t2/", {waitUntil:"networkidle",timeout:20000});
   await page.getByRole("button", {name:/打开 Workflow/}).click();
   const dialog = page.getByRole("dialog", {name:"Workflow 文件编辑"});
-  await dialog.locator("#workflow-path").fill("native-ui-action.hwf");
+  await dialog.locator("#workflow-path").fill(basename);
   await dialog.getByRole("button",{name:"打开",exact:true}).click();
   await dialog.getByText("工作流节点 · 2").waitFor();
   const add = dialog.locator('form[aria-label="新增工作流节点"]');
@@ -67,4 +79,7 @@ try {
   assert.equal(calls.filter(c=>c.endpoint.endsWith("/action-add")&&c.status===200).length,2,"both native action types must be created");
   console.log(JSON.stringify({pass:true, nativeActions:["DUMMY","ABORT"], uiAdd:true, connected:true, diskReopen:true,
       http:calls, browserErrors:errors}));
-} finally { await browser.close(); }
+} finally {
+  await browser.close();
+  if (process.env.T2_KEEP_FIXTURE !== "1") await unlink(fixture).catch(() => {});
+}
