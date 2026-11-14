@@ -164,7 +164,7 @@ export function App() {
   }), [document]);
   const onNodesChange = useCallback((changes: NodeChange<Node>[]) => setNodes((current) => applyNodeChanges(changes, current)), []);
   const onNodeDragStop = useCallback((_: unknown, node: Node) => {
-    if (source.kind !== "server" || savingRef.current) {
+    if (source.kind !== "server" || savingRef.current || pendingMutationsRef.current > 0) {
       setNodes(graphNodes(document));
       return;
     }
@@ -196,7 +196,7 @@ export function App() {
   }, []);
 
   const runGraphCommand = useCallback((command: () => Promise<HopGraphDocument>, onSuccess?: () => void) => {
-    if (source.kind !== "server" || savingRef.current) return;
+    if (source.kind !== "server" || savingRef.current || pendingMutationsRef.current > 0) return;
     // A new authoritative edit supersedes an earlier failure notice.
     // If this request also fails, its own error will be displayed below.
     setConfigError(undefined);
@@ -212,7 +212,7 @@ export function App() {
   }, [beginMutation, document, finishMutation, reconcileGraph, source]);
 
   const addTransformAt = useCallback((pluginId: string, x: number, y: number) => {
-    if (source.kind !== "server" || savingRef.current) return;
+    if (source.kind !== "server" || savingRef.current || pendingMutationsRef.current > 0) return;
     const nodeId = uniqueTransformId(pluginId, document);
     runGraphCommand(() => addPipelineTransform(document.id, { nodeId, pluginId, x: Math.round(x), y: Math.round(y) }), () => {
       setRecentTransformIds((current) => [pluginId, ...current.filter((id) => id !== pluginId)].slice(0, 3));
@@ -298,7 +298,7 @@ export function App() {
   }, [document.id, source]);
 
   const applyTransformConfig = useCallback((nodeId: string, value: Record<string, unknown>) => {
-    if (source.kind !== "server" || savingRef.current) return;
+    if (source.kind !== "server" || savingRef.current || pendingMutationsRef.current > 0) return;
     if (!serverConfig || serverConfig.nodeId !== nodeId) return;
     const generation = ++configRequestGeneration.current;
     setConfigLoading(true);
@@ -327,7 +327,7 @@ export function App() {
   }, [beginMutation, document.id, finishMutation, serverConfig, source]);
 
   const removeTransform = useCallback((nodeId: string) => {
-    if (source.kind !== "server" || savingRef.current) return;
+    if (source.kind !== "server" || savingRef.current || pendingMutationsRef.current > 0) return;
     // A deleted node must not leave a config dialog that reappears after Undo.
     // Also discard any late config/read response for that node.
     configRequestGeneration.current += 1;
