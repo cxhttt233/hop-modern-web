@@ -8,6 +8,7 @@ package org.apache.hop.modern.web;
 
 import java.net.URI;
 import org.apache.hop.core.HopClientEnvironment;
+import org.apache.hop.core.plugins.ActionPluginType;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
 import org.apache.hop.core.database.DatabasePluginType;
@@ -44,10 +45,12 @@ public final class ModernWebServer {
     Thread.currentThread().join();
   }
 
-  /** Registers the pipeline transform plugin type required to parse real .hpl transforms. */
+  /** Registers Hop-native plugin types required to parse and persist real .hpl/.hwf documents. */
   public static void initializePipelinePlugins() throws Exception {
     PluginRegistry.addPluginType(TransformPluginType.getInstance());
     PluginRegistry.addPluginType(DatabasePluginType.getInstance());
+    // Without this registration, real Start/Dummy actions load as MissingAction.
+    PluginRegistry.addPluginType(ActionPluginType.getInstance());
     PluginRegistry.init();
   }
 
