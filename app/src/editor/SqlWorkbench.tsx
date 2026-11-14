@@ -31,6 +31,18 @@ export default function SqlWorkbench({ value, disabled, onChange }: SqlWorkbench
           wordWrap: "on",
           scrollBeyondLastLine: false,
           tabSize: 2,
+          // This editor has no connected schema provider. Avoid background word/trigger
+          // suggestion requests that can be canceled as the editor is closed.
+          quickSuggestions: false,
+          suggestOnTriggerCharacters: false,
+          // The built-in word highlighter debounces cursor changes and can reject
+          // its pending Delayer promise when this optional editor is unmounted.
+          occurrencesHighlight: "off",
+          wordBasedSuggestions: "off",
+          folding: false,
+          stickyScroll: { enabled: false },
+          linkedEditing: false,
+          parameterHints: { enabled: false },
         }}
       />
     </div>
