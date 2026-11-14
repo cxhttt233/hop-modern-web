@@ -44,7 +44,14 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
       p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
       p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]))]);
-  return <div className="config-native-list">
+  return <div className="config-native-list" onKeyDown={event => {
+    // Native field rows live inside the parent save form. Enter must not
+    // accidentally submit the entire Transform while editing one cell.
+    if (event.key === "Enter" && event.target instanceof HTMLElement &&
+        event.target.matches("input, select") && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+    }
+  }}>
     <div className="config-native-list-scroll">
       <table aria-label={title + "原生字段列表"}>
         <thead><tr><th scope="col">序号</th>{properties.map(column =>
