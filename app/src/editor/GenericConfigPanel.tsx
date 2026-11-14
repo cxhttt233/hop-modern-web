@@ -307,12 +307,14 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>{groupLabel}<small>{properties.length} 项</small>
         </button></legend>
         <div id={groupId} className="config-group-fields" hidden={!expanded}>{properties.map((p) =>
-          p.shape === "OBJECT" && canEditAtomicFilterRows(descriptor.className, p, draft[p.key])
+          p.shape === "OBJECT" && (canEditAtomicFilterRows(descriptor.className, p, draft[p.key]) ||
+                (rawListEditors[p.key] && canEditAtomicFilterRows(descriptor.className, p, nativeValue(p))))
             ? <div key={p.key} className="config-native-filter-field" role="group" aria-label="原生过滤条件配置">
                 <strong>过滤记录 · 条件</strong>
                 <button type="button" className="config-native-list-mode"
                   aria-label={rawListEditors[p.key] ? "返回过滤条件表单" : "编辑过滤条件原始 JSON"}
                   disabled={Boolean(invalid[p.key])}
+                  title={rawListEditors[p.key] && invalid[p.key] ? "请先修正 JSON 格式，或取消本次配置" : undefined}
                   onClick={() => setRawListEditors(current => ({ ...current, [p.key]: !current[p.key] }))}>
                   {rawListEditors[p.key] ? "返回条件表单" : "高级：原始 JSON 编辑"}
                 </button>
@@ -323,12 +325,14 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
                     </label>
                   : field(p)}
               </div>
-            : p.shape === "OBJECT" && canEditSelectValuesObject(descriptor, p, draft[p.key])
+            : p.shape === "OBJECT" && (canEditSelectValuesObject(descriptor, p, draft[p.key]) ||
+                (rawListEditors[p.key] && canEditSelectValuesObject(descriptor, p, nativeValue(p))))
             ? <div key={p.key} className="config-native-list-field" role="group" aria-label="选取字段配置">
                 <strong>字段操作</strong>
                 <button type="button" className="config-native-list-mode"
                   aria-label={rawListEditors[p.key] ? "返回原生字段表格" : "编辑字段原始 JSON"}
                   disabled={Boolean(invalid[p.key])}
+                  title={rawListEditors[p.key] && invalid[p.key] ? "请先修正 JSON 格式，或取消本次配置" : undefined}
                   onClick={() => setRawListEditors(current => ({ ...current, [p.key]: !current[p.key] }))}>
                   {rawListEditors[p.key] ? "返回原生字段表格" : "高级：原始 JSON 编辑"}
                 </button>
@@ -345,6 +349,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
                 {canEditNativeList(draft[p.key], p.elementProperties ?? []) &&
                   <button type="button" className="config-native-list-mode"
                     aria-label={rawListEditors[p.key] ? "返回字段表格" : "切换字段原始 JSON 编辑"}
+                  disabled={Boolean(rawListEditors[p.key] && invalid[p.key])}
+                  title={rawListEditors[p.key] && invalid[p.key] ? "请先修正 JSON 格式，或取消本次配置" : undefined}
                     onClick={() => setRawListEditors(current => ({ ...current, [p.key]: !current[p.key] }))}>
                     {rawListEditors[p.key] ? "返回字段表格" : "原始 JSON 编辑"}
                   </button>}

@@ -52,6 +52,7 @@ try {
   await raw.fill(bad);
   assert(await raw.inputValue() === bad, "incomplete JSON disappeared");
   assert(await panel.getByRole("button", { name: /保存配置/ }).isDisabled(), "invalid JSON allowed save");
+  assert(await panel.getByRole("button", { name: "返回原生字段表格" }).isDisabled(), "invalid JSON can be hidden behind table mode");
   await raw.fill(typed);
   assert(await raw.inputValue() === typed, "corrected JSON lost literal whitespace");
   const beforeCancel = writes;
