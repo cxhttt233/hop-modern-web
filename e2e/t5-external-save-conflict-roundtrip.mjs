@@ -36,6 +36,7 @@ try {
   await save.click();
   check((await conflict).status() === 409, "External write must produce 409");
   await page.getByRole("button", { name: "重试保存当前流程" }).waitFor();
+  await page.getByRole("alert").getByText(/外部文件已变更，未覆盖/).waitFor();
   check((await readFile(file)).equals(externallyUpdated), "External file was overwritten");
   await writeFile(file, original);
   const retryResponse = page.waitForResponse((r) => /\/api\/pipelines\/[a-f0-9]{64}\/save$/.test(new URL(r.url()).pathname));
