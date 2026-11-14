@@ -125,6 +125,32 @@ public final class WorkflowResource {
   }
 
   @POST
+  @Path("/hop-create")
+  public Response createHop(HopCreateRequest request) {
+    if (request == null || request.id() == null || request.from() == null
+        || request.to() == null || request.from().isBlank() || request.to().isBlank()) {
+      return error(400, "valid id and endpoints are required");
+    }
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      var from = document.workflow.findAction(request.from());
+      var to = document.workflow.findAction(request.to());
+      if (from == null || to == null) return error(404, "workflow action not found");
+      if (from == to) return error(400, "self connections are not supported");
+      boolean exists = document.workflow.getWorkflowHops().stream()
+          .anyMatch(hop -> hop.getFromAction() == from && hop.getToAction() == to);
+      if (exists) return error(409, "workflow connection already exists");
+      var hop = new WorkflowHopMeta(from, to);
+      hop.setEnabled(true);
+      document.workflow.addWorkflowHop(hop);
+      document.workflow.setChanged();
+      document.dirty = true;
+      return Response.ok(snapshot(request.id(), document)).build();
+    }
+  }
+
+  @POST
   @Path("/hop-delete")
   public Response deleteHop(HopDeleteRequest request) {
     if (request == null || request.id() == null || request.index() < 0
@@ -194,6 +220,7 @@ public final class WorkflowResource {
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}
   public record MoveRequest(String id, String name, int x, int y) {}
+  public record HopCreateRequest(String id, String from, String to) {}
   public record HopDeleteRequest(String id, int index, String from, String to) {}
   public record HopEnabledRequest(String id, int index, String from, String to, boolean enabled) {}
   public record ActionSummary(String name, String type, int x, int y) {}
