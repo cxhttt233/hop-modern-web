@@ -23,8 +23,10 @@ import org.apache.hop.workflow.WorkflowHopMeta;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.logging.LogLevel;
 import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.action.ActionMeta;
+import org.apache.hop.workflow.actions.abort.ActionAbort;
 import org.apache.hop.workflow.actions.dummy.ActionDummy;
 
 /** Small authoritative .hwf open/edit/save boundary; no XML rewriting in the browser. */
@@ -142,16 +144,34 @@ public final class WorkflowResource {
         || request.x() < 0 || request.y() < 0 || request.x() > 100000 || request.y() > 100000) {
       return error(400, "valid id, native action type, name and coordinates are required");
     }
-    // First supported type: built-in Hop DUMMY action (no unrecognized extension parameters).
-    if (!"DUMMY".equals(request.type())) return error(400, "unsupported native action type");
+    if (!"DUMMY".equals(request.type()) && !"ABORT".equals(request.type())) {
+      return error(400, "unsupported native action type");
+    }
+    ActionMeta action;
+    if ("DUMMY".equals(request.type())) {
+      action = new ActionMeta(new ActionDummy(request.name()));
+    } else {
+      if (request.message() == null || request.message().isBlank() || request.message().length() > 1000) {
+        return error(400, "ABORT requires a message of 1-1000 characters");
+      }
+      final LogLevel level;
+      try {
+        level = LogLevel.valueOf(request.logLevel() == null ? "ERROR" : request.logLevel());
+      } catch (IllegalArgumentException invalidLevel) {
+        return error(400, "unsupported ABORT log level");
+      }
+      ActionAbort abort = new ActionAbort(request.name(), "");
+      abort.setMessageAbort(request.message());
+      abort.setMessageLogLevel(level);
+      action = new ActionMeta(abort);
+    }
     Opened document = opened.get(request.id());
     if (document == null) return error(404, "workflow document not found");
     synchronized (document) {
       if (document.workflow.getActions().stream()
-          .anyMatch(action -> action.getName().equalsIgnoreCase(request.name()))) {
+          .anyMatch(existing -> existing.getName().equalsIgnoreCase(request.name()))) {
         return error(409, "workflow action name already exists");
       }
-      ActionMeta action = new ActionMeta(new ActionDummy(request.name()));
       action.setLocation(request.x(), request.y());
       document.workflow.addAction(action);
       document.workflow.setChanged();
@@ -311,7 +331,8 @@ public final class WorkflowResource {
   public record MoveRequest(String id, String name, int x, int y) {}
   public record ActionDeleteRequest(String id, String name, int connectedHops) {}
   public record ActionRenameRequest(String id, String name, String newName) {}
-  public record ActionAddRequest(String id, String type, String name, int x, int y) {}
+  public record ActionAddRequest(String id, String type, String name, int x, int y,
+      String message, String logLevel) {}
   public record HopCreateRequest(String id, String from, String to) {}
   public record HopDeleteRequest(String id, int index, String from, String to) {}
   public record HopEnabledRequest(String id, int index, String from, String to, boolean enabled) {}

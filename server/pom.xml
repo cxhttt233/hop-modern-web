@@ -11,6 +11,8 @@
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <hop.version>2.20.0-SNAPSHOT</hop.version>
+    <!-- The production 2.20.0 ActionAbort plugin is binary-compatible with the 2.20.0-SNAPSHOT engine. -->
+    <hop.plugins.version>2.20.0</hop.plugins.version>
   </properties>
 
   <dependencies>
@@ -23,6 +25,11 @@
       <groupId>org.apache.hop</groupId>
       <artifactId>hop-engine</artifactId>
       <version>${hop.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.hop</groupId>
+      <artifactId>hop-action-abort</artifactId>
+      <version>${hop.plugins.version}</version>
     </dependency>
     <dependency>
       <groupId>org.apache.hop</groupId>

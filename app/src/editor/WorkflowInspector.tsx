@@ -90,6 +90,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [newActionType, setNewActionType] = useState("DUMMY");
   const hasUnappliedChanges = Boolean(workflow && description !== (workflow.description ?? ""));
   const hasUnsavedChanges = hasUnappliedChanges || Boolean(workflow?.dirty);
   function closeSafely() {
@@ -149,7 +150,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
         </section>
         <section aria-label="新增原生工作流节点">
           <strong>新增节点 · Hop 原生 Action</strong>
-          <p style={{ fontSize: 13 }}>当前支持 Hop 内置空操作（DUMMY），不伪造任意 JSON/XML 节点；新增后请创建连接并保存 .hwf。</p>
+          <p style={{ fontSize: 13 }}>仅创建已安装的 Apache Hop 原生 Action。ABORT 会在工作流执行到该节点时标记失败并停止执行，只应连接到错误处理分支。</p>
           <form aria-label="新增工作流节点" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
             onSubmit={event => {
               event.preventDefault();
@@ -158,10 +159,26 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
               if (!name) return;
               const type = String(data.get("actionType") ?? "");
               void execute(() => command("action-add", {
-                id: workflow.id, type, name, x: Number(data.get("actionX")), y: Number(data.get("actionY"))
+                id: workflow.id, type, name, x: Number(data.get("actionX")), y: Number(data.get("actionY")),
+                message: type === "ABORT" ? String(data.get("actionMessage") ?? "") : undefined,
+                logLevel: type === "ABORT" ? String(data.get("actionLogLevel") ?? "ERROR") : undefined
               }), true);
             }}>
-            <label>节点类型 <select name="actionType" disabled={busy}><option value="DUMMY">空操作（DUMMY）</option></select></label>
+            <label>节点类型 <select name="actionType" value={newActionType}
+              onChange={event => setNewActionType(event.target.value)} disabled={busy}>
+              <option value="DUMMY">空操作（DUMMY）</option>
+              <option value="ABORT">终止工作流（ABORT）</option>
+            </select></label>
+            {newActionType === "ABORT" && <>
+              <label>终止原因 <input name="actionMessage" aria-label="ABORT 终止原因" required maxLength={1000}
+                defaultValue="Workflow aborted due to an error" disabled={busy} /></label>
+              <label>日志级别 <select name="actionLogLevel" defaultValue="ERROR" disabled={busy}>
+                <option value="ERROR">ERROR</option><option value="MINIMAL">MINIMAL</option>
+                <option value="BASIC">BASIC</option><option value="DETAILED">DETAILED</option>
+                <option value="DEBUG">DEBUG</option><option value="ROWLEVEL">ROWLEVEL</option>
+                <option value="NOTHING">NOTHING</option>
+              </select></label>
+            </>}
             <label>节点名称 <input name="actionName" aria-label="新增节点名称" required maxLength={200} disabled={busy}
               placeholder="例如：完成数据准备" /></label>
             <label>X <input name="actionX" type="number" min={0} max={100000} defaultValue={360} required disabled={busy}

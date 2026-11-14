@@ -13,7 +13,16 @@ if [[ "${HMW_ISOLATED_PG_PLUGIN:-0}" == "1" ]]; then
   printf '%s  %s\\n' 'c60e8136cbee71b7623bc7262ba0583997d06bf3' "$PG_JAR" | sha1sum --check --status || {
     echo "PostgreSQL dialect checksum mismatch" >&2; exit 65;
   }
-  EXTRA_CP=":$PG_JAR"
+  EXTRA_CP="${EXTRA_CP}:$PG_JAR"
+fi
+# Opt in to the official Hop 2.20 ABORT action plugin for isolated T2 tests.
+if [[ "${HMW_ISOLATED_ACTION_ABORT:-0}" == "1" ]]; then
+  ABORT_JAR="$LAB/vendor/action-plugin-proof/hop-action-abort-2.20.0.jar"
+  [[ -f "$ABORT_JAR" ]] || { echo "Missing isolated Hop ABORT plugin" >&2; exit 69; }
+  printf '%s  %s\n' '827269a44e13ae018fe5cc89738ca5f4b4ebc5ca8f31a83ede61ce287ed99ad1' "$ABORT_JAR" | sha256sum --check --status || {
+    echo "Hop ABORT plugin checksum mismatch" >&2; exit 65;
+  }
+  EXTRA_CP="${EXTRA_CP}:$ABORT_JAR"
 fi
 if [ "$#" -lt 2 ]; then echo "Usage: with-isolated-java-branch <branch> <test-command> [args...]" >&2; exit 2; fi
 BRANCH=$1; shift
