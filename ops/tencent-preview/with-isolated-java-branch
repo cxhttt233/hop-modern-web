@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Compile a GitHub branch and run a test command against a disposable loopback JVM.
+# Never touches the shared 8080 backend, service registry or preview bridge.
+set -euo pipefail
+LAB=/home/ubuntu/hmw-agent-lab
+REPO="$LAB/source"
+RUNTIME=/home/ubuntu/hop-modern-preview/runtime/server
+if [ "$#" -lt 2 ]; then echo "Usage: with-isolated-java-branch <branch> <test-command> [args...]" >&2; exit 2; fi
+BRANCH=$1; shift
+git check-ref-format --branch "$BRANCH" >/dev/null
+[[ "$BRANCH" != -* ]] || { echo "invalid branch" >&2; exit 2; }
+PORT="${HMW_TEST_PORT:-8084}"
+[[ "$PORT" =~ ^808[4-9]$ ]] || { echo "test port must be 8084..8089" >&2; exit 2; }
+exec 8>"$LAB/.isolated-java-$PORT.lock"
+flock -w 25 8 || { echo "isolated port reserved by another test" >&2; exit 75; }
+if curl -fsS -m 2 "http://127.0.0.1:$PORT/" >/dev/null 2>&1 || ss -lntH "sport = :$PORT" | grep -q .;then
+  echo "test port $PORT already in use" >&2; exit 75
+fi
+TMP=$(mktemp -d "$LAB/.isolated-hmw-XXXXXXXX")
+PID=""
+finish() {
+  if [ -n "$PID" ]; then kill "$PID" >/dev/null 2>&1 || true; wait "$PID" >/dev/null 2>&1 || true; fi
+  rm -rf "$TMP"
+}
+trap finish EXIT
+mkdir -p "$TMP/src" "$TMP/classes" "$TMP/workspace"
+exec 9>"$LAB/build.lock"
+flock -w 130 9 || { echo "shared build lock unavailable" >&2; exit 75; }
+# Fetch just this branch to avoid stale mirror refs and "Needed a single revision".
+if ! timeout 25s git -C "$REPO" fetch -q --no-tags --depth=1 origin     "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"; then
+  echo "WARNING: GitHub unavailable, checking cached branch; verify SHA before reporting success" >&2
+fi
+SHA=$(git -C "$REPO" rev-parse --verify "refs/remotes/origin/$BRANCH^{commit}" 2>/dev/null) || {
+  echo "Missing branch $BRANCH: publish to GitHub, then retry" >&2; exit 69;
+}
+git -C "$REPO" archive "$SHA" server/src/main/java | tar -x -C "$TMP/src"
+python3 - "$TMP/src/server/src/main/java/org/apache/hop/modern/web/ModernWebServer.java" "$PORT" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]);port=sys.argv[2]
+src=p.read_text()
+old='http://127.0.0.1:8080/'
+if src.count(old)!=1: raise RuntimeError('backend launcher URI changed: review required')
+p.write_text(src.replace(old,'http://127.0.0.1:'+port+'/'))
+PY
+mapfile -d '' FILES < <(find "$TMP/src/server/src/main/java" -name '*.java' -print0)
+timeout 90s /usr/bin/javac -proc:none -encoding UTF-8 --release 21 -cp "$RUNTIME/classes:$RUNTIME/lib/*" -d "$TMP/classes" "${FILES[@]}"
+echo "COMPILED branch=$BRANCH commit=${SHA:0:12} classes=$(find "$TMP/classes" -name '*.class'|wc -l)"
+flock -u 9
+(
+ cd /home/ubuntu/hop-modern-preview/runtime
+ exec /usr/bin/java -Xms32m -Xmx224m -XX:ActiveProcessorCount=2 \
+   -Dhop.modern.workspace="$TMP/workspace" \
+   -Dhop.modern.connections.token=local-isolated-token \
+   -cp "$TMP/classes:$RUNTIME/classes:$RUNTIME/lib/*" org.apache.hop.modern.web.ModernWebServer
+) >"$TMP/jvm.log" 2>&1 &
+PID=$!
+READY=0
+for i in $(seq 1 35);do
+  if curl -s --max-time 1 -o /dev/null "http://127.0.0.1:$PORT/";then READY=1;break;fi
+  if ! kill -0 "$PID" >/dev/null 2>&1;then break;fi
+  sleep 1
+done
+if [ "$READY" != 1 ];then echo "ISOLATED_JAVA_BOOT_FAILED";tail -45 "$TMP/jvm.log";exit 1;fi
+export HMW_ISOLATED_URL="http://127.0.0.1:$PORT"
+export HMW_ISOLATED_WORKSPACE="$TMP/workspace"
+export HMW_ISOLATED_TOKEN=local-isolated-token
+echo "ISOLATED_JAVA_READY $HMW_ISOLATED_URL"
+"$@"
