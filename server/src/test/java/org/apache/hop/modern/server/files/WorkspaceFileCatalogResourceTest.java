@@ -32,6 +32,14 @@ class WorkspaceFileCatalogResourceTest {
   }
 
   @Test
+  void malformedWorkspaceDoesNotPreventResourceConstruction() {
+    WorkspaceFileCatalogResource resource = new WorkspaceFileCatalogResource("invalid\u0000workspace");
+    Response response = resource.pipelines();
+    assertEquals(503, response.getStatus());
+    assertEquals("workspace_unavailable", ((WorkspaceFileCatalogResource.ErrorResponse) response.getEntity()).code());
+  }
+
+  @Test
   void doesNotFollowSymlinkFiles() throws Exception {
     Path target = Files.writeString(root.resolve("actual.hpl"), "pipeline");
     Files.createSymbolicLink(root.resolve("alias.hpl"), target);

@@ -14,6 +14,7 @@ import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.InvalidPathException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -33,7 +34,15 @@ public final class WorkspaceFileCatalogResource {
   }
 
   public WorkspaceFileCatalogResource(String workspace) {
-    this.workspace = workspace == null || workspace.isBlank() ? null : java.nio.file.Path.of(workspace);
+    java.nio.file.Path configured = null;
+    if (workspace != null && !workspace.isBlank()) {
+      try {
+        configured = java.nio.file.Path.of(workspace);
+      } catch (InvalidPathException ignored) {
+        // Invalid configuration must not prevent the API resource from starting.
+      }
+    }
+    this.workspace = configured;
   }
 
   @GET
