@@ -18,6 +18,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.NoSuchFileException;
+import java.util.Locale;
+import org.apache.hop.modern.server.files.WorkspacePaths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -57,7 +59,20 @@ public final class PipelineOpenResource {
     }
 
     try {
-      java.nio.file.Path path = java.nio.file.Path.of(request.path()).toAbsolutePath().normalize();
+      String workspace = System.getProperty("hop.modern.workspace");
+      java.nio.file.Path path;
+      if (workspace != null && !workspace.isBlank()) {
+        try {
+          path = new WorkspacePaths(java.nio.file.Path.of(workspace)).existingFile(request.path());
+        } catch (IllegalArgumentException e) {
+          return error(400, "invalid_path", "path must be inside the workspace");
+        }
+      } else {
+        path = java.nio.file.Path.of(request.path()).toAbsolutePath().normalize();
+      }
+      if (!path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".hpl")) {
+        return error(400, "invalid_type", "only .hpl pipeline files can be opened");
+      }
       if (!Files.exists(path)) {
         return error(404, "not_found", "pipeline file was not found");
       }
@@ -65,6 +80,9 @@ public final class PipelineOpenResource {
         return error(400, "invalid_path", "path must reference a file");
       }
 
+      if (Files.size(path) > 16L * 1024 * 1024) {
+        return error(413, "file_too_large", "pipeline exceeds 16 MiB limit");
+      }
       byte[] bytes = Files.readAllBytes(path);
       String id = opaqueToken("document", path.toString().getBytes(StandardCharsets.UTF_8));
       String revision = opaqueToken("revision", bytes);
