@@ -62,19 +62,18 @@ def discover_branches():
             continue
     return refs
 def choose(slot, refs):
-    # T5 is the integration owner; its default preview follows the actual main branch.
+    # A task branch created before the latest main should never replace newer
+    # already-integrated product features in the automatic preview. Agents
+    # can still explicitly preview any review branch with preview-branch.
     if slot == "t5":
         return "main"
-    main_timestamp = next((timestamp for branch, timestamp in refs if branch == "main"), 0)
-    # Once Workflow is integrated, don't regress T2 to a stale pre-main branch.
-    if slot == "t2":
-        current = [(branch, timestamp) for branch, timestamp in refs
-                   if PATTERNS[slot].match(branch) and timestamp > main_timestamp]
-        return max(current, key=lambda item: (item[1], item[0]))[0] if current else "main"
-    matches = [(branch, timestamp) for branch, timestamp in refs
-               if PATTERNS[slot].match(branch)]
-    if matches:
-        return max(matches, key=lambda item: (item[1], item[0]))[0]
+    main_timestamp = next((ts for branch, ts in refs if branch == "main"), 0)
+    candidates = [(branch, ts) for branch, ts in refs
+                  if PATTERNS[slot].match(branch) and ts > main_timestamp]
+    if candidates:
+        return max(candidates, key=lambda item: (item[1], item[0]))[0]
+    if main_timestamp:
+        return "main"
     pinned = PREVIEWS / slot / ".preview-branch"
     return pinned.read_text().strip() if pinned.exists() else "main"
 
