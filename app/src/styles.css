@@ -858,3 +858,33 @@ button { cursor: pointer; }
 .generic-config .config-native-list-section > h4 { font-size: 12px; margin: 0; color: #394b6b; }
 .generic-config .config-native-select-unspecified { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
 .generic-config .config-native-list-mode { justify-self: start; }
+
+
+/* Native Hop FilterRows: intentionally scoped to atomic field comparisons. */
+.generic-config .config-native-filter-field { display: grid; gap: 10px; }
+.generic-config .config-native-filter-field > strong { font-size: 13px; color: #273e65; }
+.generic-config .config-native-filter-field > button { justify-self: start; }
+.generic-config .config-native-filter-condition {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #d6dfec;
+  background: #f8faff;
+}
+.generic-config .config-native-filter-condition > p,
+.generic-config .config-native-filter-condition > small { grid-column: 1 / -1; margin: 0; color: #526178; font-size: 12px; }
+.generic-config .config-native-filter-condition > label:not(.config-native-filter-negated) {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: #344666;
+  font-size: 12px;
+}
+.generic-config .config-native-filter-condition input[type="text"],
+.generic-config .config-native-filter-condition select {
+  width: 100%; min-width: 0;
+  padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 6px;
+}
+.generic-config .config-native-filter-negated { display: flex; align-items: center; gap: 8px; font-size: 12px; }
