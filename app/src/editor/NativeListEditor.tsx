@@ -27,9 +27,17 @@ function NativeNumberCell({ value, label, disabled, fallback, onCommit }: {
 }) {
   const [raw, setRaw] = useState(value == null ? "" : String(value));
   const [editing, setEditing] = useState(false);
+  // Blur fires after Escape. A synchronous flag prevents blur committing the
+  // previous render's draft even when React state has not flushed yet.
+  const cancelNextBlur = useRef(false);
   useEffect(() => { if (!editing) setRaw(value == null ? "" : String(value)); }, [value, editing]);
   const commit = () => {
     setEditing(false);
+    if (cancelNextBlur.current) {
+      cancelNextBlur.current = false;
+      setRaw(value == null ? "" : String(value));
+      return;
+    }
     const next = raw.trim() === "" ? fallback : Number(raw);
     if (Number.isFinite(next)) {
       onCommit(next);
@@ -39,8 +47,11 @@ function NativeNumberCell({ value, label, disabled, fallback, onCommit }: {
     }
   };
   return <input type="text" inputMode="decimal" aria-label={label} disabled={disabled}
-    value={raw} onFocus={() => setEditing(true)} onChange={event => setRaw(event.target.value)}
+    value={raw} onFocus={() => { cancelNextBlur.current = false; setEditing(true); }}
+    onChange={event => setRaw(event.target.value)}
     onBlur={commit} onKeyDown={event => { if (event.key === "Escape") {
+      event.preventDefault();
+      cancelNextBlur.current = true;
       setRaw(value == null ? "" : String(value)); setEditing(false); event.currentTarget.blur();
     } }} />;
 }
