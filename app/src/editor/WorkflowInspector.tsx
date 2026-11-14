@@ -4,7 +4,7 @@ type WorkflowAction = { name: string; type: string; x: number; y: number };
 type WorkflowHop = { from: string; to: string; enabled: boolean };
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[]; hops?: WorkflowHop[] };
 
-async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "save", body: object): Promise<T> {
+async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "action-create" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -146,6 +146,25 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
                     <small style={{ marginLeft: 8, opacity: .65 }}>({action.x}, {action.y})</small>
                   </li>)}
               </ol>}
+        </section>
+        <section aria-label="新增原生工作流节点">
+          <strong>新增原生 Action</strong>
+          <p style={{ fontSize: 13 }}>当前仅开放 Apache Hop 原生 Dummy（空操作）节点；不生成自定义 XML。新增后可在下方连接已有节点并保存。</p>
+          <form style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
+            onSubmit={event => {
+              event.preventDefault();
+              const data = new FormData(event.currentTarget);
+              void execute(() => command("action-create", {
+                id: workflow.id, type: String(data.get("type")), name: String(data.get("name")),
+                x: Number(data.get("x")), y: Number(data.get("y")),
+              }), true);
+            }}>
+            <label>类型 <select name="type" disabled={busy}><option value="DUMMY">Dummy · 空操作</option></select></label>
+            <label>名称 <input name="name" required maxLength={200} disabled={busy} placeholder="New dummy" /></label>
+            <label>X <input name="x" type="number" min={0} max={100000} defaultValue={360} required style={{ width: 80 }} /></label>
+            <label>Y <input name="y" type="number" min={0} max={100000} defaultValue={160} required style={{ width: 80 }} /></label>
+            <button type="submit" disabled={busy}>新增节点</button>
+          </form>
         </section>
         {(workflow.actions?.length ?? 0) > 0 && <section aria-label="重命名工作流节点">
           <strong>重命名节点</strong>
