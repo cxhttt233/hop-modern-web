@@ -4,7 +4,7 @@ type WorkflowAction = { name: string; type: string; x: number; y: number };
 type WorkflowHop = { from: string; to: string; enabled: boolean };
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[]; hops?: WorkflowHop[] };
 
-async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "save", body: object): Promise<T> {
+async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -119,7 +119,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
         <h2 style={{ margin: 0 }}>Workflow · .hwf</h2>
         <button type="button" onClick={closeSafely} disabled={busy}>关闭</button>
       </div>
-      <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持修改节点坐标；可切换连接状态或删除连接。</p>
+      <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持修改节点坐标；可创建、启停或删除连接。</p>
       <form onSubmit={event => {
         event.preventDefault();
         if (!path.trim()) return;
@@ -169,6 +169,26 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
         <section aria-label="工作流执行链路" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: 12 }}>
           <strong>执行链路 · {workflow.hops?.length ?? 0} 条</strong>
           <p style={{ margin: "6px 0", fontSize: 13 }}>来自原生 .hwf 的连接关系。可切换连接启用状态，保存后写入文件。</p>
+          {(workflow.actions?.length ?? 0) >= 2 && <form aria-label="创建工作流连接"
+            style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}
+            onSubmit={event => {
+              event.preventDefault();
+              const data = new FormData(event.currentTarget);
+              const from = String(data.get("from") ?? "");
+              const to = String(data.get("to") ?? "");
+              if (!from || !to || from === to) return;
+              void execute(() => command("hop-create", { id: workflow.id, from, to }), true);
+            }}>
+            <label>起点 <select name="from" required disabled={busy} defaultValue="">
+              <option value="" disabled>选择节点</option>
+              {workflow.actions?.map(action => <option key={action.name} value={action.name}>{action.name}</option>)}
+            </select></label>
+            <label>终点 <select name="to" required disabled={busy} defaultValue="">
+              <option value="" disabled>选择节点</option>
+              {workflow.actions?.map(action => <option key={action.name} value={action.name}>{action.name}</option>)}
+            </select></label>
+            <button type="submit" disabled={busy}>创建连接</button>
+          </form>}
           {(workflow.hops?.length ?? 0) === 0 ? <p style={{ margin: 0 }}>当前没有节点连接。</p> :
             <ol style={{ maxHeight: 160, overflowY: "auto", margin: "8px 0 0", paddingLeft: 22 }}>
               {workflow.hops?.map((hop, index) => <li key={`${hop.from}-${hop.to}-${index}`}
