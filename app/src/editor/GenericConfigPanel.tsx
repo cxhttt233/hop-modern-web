@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSPropertie
 import { SqlWorkbenchBoundary } from "./SqlWorkbenchBoundary";
 import { NativeListEditor, canEditNativeList } from "./NativeListEditor";
 import { NativeObjectListEditor, canEditSelectValuesObject } from "./NativeObjectListEditor";
+import { FilterRowsAtomicEditor, canEditAtomicFilterRows } from "./FilterRowsAtomicEditor";
 import { readNativeWireList, writeNativeWireList, resolveNativeWireListItem, type HopNativeWireDescriptor } from "@hop-modern/contracts";
 import type { ConfigPropertyDescriptor as NativeConfigPropertyDescriptor } from "./configDescriptor";
 
@@ -51,6 +52,8 @@ const FIELD_LABELS: Record<string, string> = {
   limit: "数量限制",
   encoding: "编码",
   separator: "分隔符",
+  sendtrueto: "条件成立流向",
+  sendfalseto: "条件不成立流向",
 };
 
 const localLabel = (key: string) => {
@@ -202,6 +205,10 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
       return <NativeObjectListEditor descriptor={descriptor} property={p} value={value}
         disabled={disabled} onChange={next => set(p.key, next)} />;
     }
+    if (p.shape === "OBJECT" && !rawListEditors[p.key] &&
+        canEditAtomicFilterRows(descriptor.className, p, value)) {
+      return <FilterRowsAtomicEditor value={value} disabled={disabled} onChange={next => set(p.key, next)} />;
+    }
     if (p.shape === "LIST" && !rawListEditors[p.key] &&
         resolveNativeWireListItem(descriptor, p.key, 0) &&
         canEditNativeList(value, p.elementProperties ?? [])) {
@@ -289,7 +296,23 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>{groupLabel}<small>{properties.length} 项</small>
         </button></legend>
         <div id={groupId} className="config-group-fields" hidden={!expanded}>{properties.map((p) =>
-          p.shape === "OBJECT" && canEditSelectValuesObject(descriptor, p, draft[p.key])
+          p.shape === "OBJECT" && canEditAtomicFilterRows(descriptor.className, p, draft[p.key])
+            ? <div key={p.key} className="config-native-filter-field" role="group" aria-label="原生过滤条件配置">
+                <strong>过滤记录 · 条件</strong>
+                <button type="button" className="config-native-list-mode"
+                  aria-label={rawListEditors[p.key] ? "返回过滤条件表单" : "编辑过滤条件原始 JSON"}
+                  disabled={Boolean(invalid[p.key])}
+                  onClick={() => setRawListEditors(current => ({ ...current, [p.key]: !current[p.key] }))}>
+                  {rawListEditors[p.key] ? "返回条件表单" : "高级：原始 JSON 编辑"}
+                </button>
+                {rawListEditors[p.key]
+                  ? <label data-config-key={p.key} htmlFor={"config-" + p.javaField}>
+                      <span>完整原生过滤条件 JSON</span>{field(p)}
+                      {invalid[p.key] && <small role="alert">请输入有效的对象 JSON</small>}
+                    </label>
+                  : field(p)}
+              </div>
+            : p.shape === "OBJECT" && canEditSelectValuesObject(descriptor, p, draft[p.key])
             ? <div key={p.key} className="config-native-list-field" role="group" aria-label="选取字段配置">
                 <strong>字段操作</strong>
                 <button type="button" className="config-native-list-mode"
