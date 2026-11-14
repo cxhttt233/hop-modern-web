@@ -4,7 +4,7 @@ type WorkflowAction = { name: string; type: string; x: number; y: number };
 type WorkflowHop = { from: string; to: string; enabled: boolean };
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[]; hops?: WorkflowHop[] };
 
-async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "save", body: object): Promise<T> {
+async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -119,7 +119,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
         <h2 style={{ margin: 0 }}>Workflow · .hwf</h2>
         <button type="button" onClick={closeSafely} disabled={busy}>关闭</button>
       </div>
-      <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持修改节点坐标；可创建、启停或删除连接。</p>
+      <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持重命名和移动节点；可创建、启停或删除连接。</p>
       <form onSubmit={event => {
         event.preventDefault();
         if (!path.trim()) return;
@@ -147,6 +147,21 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
                   </li>)}
               </ol>}
         </section>
+        {(workflow.actions?.length ?? 0) > 0 && <section aria-label="重命名工作流节点">
+          <strong>重命名节点</strong>
+          <p style={{ fontSize: 13 }}>重命名会保留节点原有配置和连接关系；保存 .hwf 后生效于磁盘。</p>
+          {(workflow.actions ?? []).map(action => <form key={action.name} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}
+            onSubmit={event => {
+              event.preventDefault();
+              const newName = String(new FormData(event.currentTarget).get("newName") ?? "").trim();
+              if (!newName || newName === action.name) return;
+              void execute(() => command("action-rename", { id: workflow.id, name: action.name, newName }), true);
+            }}>
+            <span style={{ minWidth: 110 }}>{action.name}</span>
+            <label>新名称 <input name="newName" key={action.name} defaultValue={action.name} required maxLength={200} disabled={busy} /></label>
+            <button type="submit" disabled={busy}>重命名</button>
+          </form>)}
+        </section>}
         <p style={{ fontSize: 13, margin: 0 }}>可直接拖动流程图中的节点调整位置；拖动后仍需点击“保存 .hwf”写入磁盘。</p>
         <WorkflowMap actions={workflow.actions ?? []} hops={workflow.hops ?? []} disabled={busy}
           onMove={(name, x, y) => void execute(() => command("move", { id: workflow.id, name, x, y }), true)} />
