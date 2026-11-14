@@ -466,8 +466,8 @@ export function App() {
                 setPipelineOpenRevision((current) => current + 1);
               }}>重新打开</button>
             <button type="button" aria-label="适配画布（Fit canvas）" disabled={!flow || nodes.length === 0} title="将当前流程的全部节点适配到可见画布" onClick={() => { void flow?.fitView({ padding: 0.18, maxZoom: 1, duration: 250 }); }}>适配画布</button>
-            <button type="button" aria-label="撤销（Undo）" disabled={saving} onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
-            <button type="button" aria-label="重做（Redo）" disabled={saving} onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
+            <button type="button" aria-label="撤销（Undo）" disabled={saving || pendingMutations > 0} onClick={() => runGraphCommand(() => undoPipelineEdit(document.id))}>撤销</button>
+            <button type="button" aria-label="重做（Redo）" disabled={saving || pendingMutations > 0} onClick={() => runGraphCommand(() => redoPipelineEdit(document.id))}>重做</button>
             <button type="button" aria-label="保存（Save）" aria-busy={saving} className="primary-action" disabled={!dirty || saving || pendingMutations > 0} onClick={saveDocument}>{saving ? "保存中…" : "保存"}</button>
           </>}
         </div>
