@@ -8,6 +8,23 @@ SHA=$(git -C "$SRC" rev-parse refs/remotes/origin/main)
 mkdir -p "$STORE/builds"
 exec 9>"$LAB/build.lock"
 flock -w 120 9 || { echo 'Backend build lock busy'; exit 75; }
+# Install the official Hop 2.20 ABORT Action plugin before compiling/activating code
+# that references it. The artifact is version-pinned and SHA-256 verified.
+ABORT_JAR="$RUNTIME/lib/hop-action-abort-2.20.0.jar"
+ABORT_SHA='827269a44e13ae018fe5cc89738ca5f4b4ebc5ca8f31a83ede61ce287ed99ad1'
+if [[ ! -f "$ABORT_JAR" ]] || ! printf '%s  %s\n' "$ABORT_SHA" "$ABORT_JAR" | sha256sum --check --status; then
+  (
+    TMP_JAR=$(mktemp "$RUNTIME/lib/.hop-action-abort-XXXXXXXX.jar")
+    trap 'rm -f "$TMP_JAR"' EXIT
+    curl -fsSL --retry 2 --max-time 30 \
+      https://repo.maven.apache.org/maven2/org/apache/hop/hop-action-abort/2.20.0/hop-action-abort-2.20.0.jar \
+      -o "$TMP_JAR"
+    printf '%s  %s\n' "$ABORT_SHA" "$TMP_JAR" | sha256sum --check --status || {
+      echo 'Hop ABORT plugin checksum mismatch' >&2; exit 65;
+    }
+    install -m 0644 "$TMP_JAR" "$ABORT_JAR"
+  )
+fi
 CURRENT=$(readlink "$STORE/current" 2>/dev/null || true)
 if [[ "$CURRENT" == "builds/$SHA" && -f "$STORE/current/.built-ok" ]]; then
   echo "BACKEND_UNCHANGED $SHA"
