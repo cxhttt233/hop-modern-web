@@ -51,7 +51,7 @@ public final class NativeDatabaseResource {
     var rdbms = metadata.resolve("rdbms");
     if (Files.exists(rdbms, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(rdbms)) throw new IllegalStateException("rdbms symlink");
     var result = new JsonMetadataProvider();
-    result.setBaseFolder(root.toString());
+    result.setBaseFolder(metadata.toString());
     return result;
   }
   private static boolean valid(String name) {
