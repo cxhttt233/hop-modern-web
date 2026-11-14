@@ -21,8 +21,7 @@ import java.util.regex.Pattern;
 public final class DatabaseConnectionResource {
   private static final Pattern NAME = Pattern.compile("[a-zA-Z0-9_-]{1,64}");
   private final String configuredWorkspace;
-  @HeaderParam("X-Hop-Connection-Token") private String suppliedToken;
-  private boolean authorized() { String token = System.getProperty("hop.modern.connections.token"); return token != null && !token.isBlank() && java.security.MessageDigest.isEqual(token.getBytes(java.nio.charset.StandardCharsets.UTF_8), (suppliedToken == null ? "" : suppliedToken).getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+  private boolean authorized(String suppliedToken) { String token = System.getProperty("hop.modern.connections.token"); return token != null && !token.isBlank() && java.security.MessageDigest.isEqual(token.getBytes(java.nio.charset.StandardCharsets.UTF_8), (suppliedToken == null ? "" : suppliedToken).getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
   public DatabaseConnectionResource() { this(System.getProperty("hop.modern.workspace")); }
   public DatabaseConnectionResource(String workspace) { this.configuredWorkspace = workspace; }
 
@@ -44,8 +43,8 @@ public final class DatabaseConnectionResource {
     try (var in = Files.newInputStream(path)) { p.load(in); }
     return new Connection(p.getProperty("name", ""), p.getProperty("type", ""), p.getProperty("hostname", ""), p.getProperty("databaseName", ""), p.getProperty("port", ""), p.getProperty("username", ""));
   }
-  @GET public Response list() {
-    if (!authorized()) return error(403, "forbidden");
+  @GET public Response list(@HeaderParam("X-Hop-Connection-Token") String suppliedToken) {
+    if (!authorized(suppliedToken)) return error(403, "forbidden");
     try {
       List<Connection> result = new ArrayList<>();
       try (var stream = Files.list(directory())) {
@@ -54,8 +53,8 @@ public final class DatabaseConnectionResource {
       return Response.ok(result).build();
     } catch (Exception e) { return error(503, "workspace_unavailable"); }
   }
-  @GET @Path("/{name}") public Response get(@PathParam("name") String name) {
-    if (!authorized()) return error(403, "forbidden");
+  @GET @Path("/{name}") public Response get(@PathParam("name") String name, @HeaderParam("X-Hop-Connection-Token") String suppliedToken) {
+    if (!authorized(suppliedToken)) return error(403, "forbidden");
     if (!NAME.matcher(name).matches()) return error(400, "invalid_name");
     try {
       java.nio.file.Path p = directory().resolve(name + ".properties");
@@ -64,8 +63,8 @@ public final class DatabaseConnectionResource {
       return Response.ok(decode(p)).build();
     } catch (Exception e) { return error(503, "workspace_unavailable"); }
   }
-  @PUT @Path("/{name}") public Response save(@PathParam("name") String name, Connection input) {
-    if (!authorized()) return error(403, "forbidden");
+  @PUT @Path("/{name}") public Response save(@PathParam("name") String name, @HeaderParam("X-Hop-Connection-Token") String suppliedToken, Connection input) {
+    if (!authorized(suppliedToken)) return error(403, "forbidden");
     if (!NAME.matcher(name).matches() || input == null || !name.equals(input.name())) return error(400, "invalid_name");
     if (java.util.Arrays.asList(input.type(), input.hostname(), input.databaseName(), input.port(), input.username()).stream().anyMatch(Objects::isNull)) return error(400, "invalid_fields");
     if (input.type().length() > 64 || input.hostname().length() > 255 || input.databaseName().length() > 255 || input.port().length() > 8 || input.username().length() > 128) return error(400, "invalid_fields");
