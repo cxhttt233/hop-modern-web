@@ -16,6 +16,38 @@ const LABELS: Record<string, string> = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+/**
+ * Chinese IME text remains local until composition is finished. This prevents
+ * intermediate pinyin from being persisted as Hop native configuration.
+ */
+function NativeTextCell({ value, aria, disabled, onCommit }: {
+  value: string; aria: string; disabled?: boolean; onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const cancelBlur = useRef(false);
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+  const commit = () => {
+    if (composing || cancelBlur.current) { cancelBlur.current = false; return; }
+    setEditing(false);
+    if (draft !== value) onCommit(draft);
+  };
+  return <input type="text" aria-label={aria} disabled={disabled} value={draft}
+    onFocus={() => { cancelBlur.current = false; setEditing(true); }}
+    onChange={e => setDraft(e.target.value)}
+    onCompositionStart={() => setComposing(true)}
+    onCompositionEnd={e => { setComposing(false); setDraft(e.currentTarget.value); }}
+    onBlur={() => { if (!composing) commit(); }}
+    onKeyDown={e => {
+      if (e.key === "Escape" && !composing) {
+        cancelBlur.current = true; setDraft(value); setEditing(false); e.currentTarget.blur();
+      } else if (e.key === "Enter" && !composing && !e.nativeEvent.isComposing) {
+        e.currentTarget.blur();
+      }
+    }} />;
+}
+
 export function canEditNativeList(value: unknown, properties: ConfigPropertyDescriptor[]): value is unknown[] {
   return Array.isArray(value) && value.every(isRecord) && properties.length > 0 &&
     properties.every(p => !p.sensitive && ["STRING", "NUMBER", "BOOLEAN", "ENUM"].includes(p.shape));
@@ -140,8 +172,8 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                 : column.shape === "NUMBER"
                 ? <NativeNumberCell value={val} label={aria} disabled={disabled}
                     fallback={column.nativeNumberDefault ?? 0} onCommit={next => edit(index, column, next)} />
-                : <input aria-label={aria} disabled={disabled} type="text"
-                    value={val == null ? "" : String(val)} onChange={e => edit(index, column, e.target.value)} />
+                : <NativeTextCell aria={aria} disabled={disabled}
+                    value={val == null ? "" : String(val)} onCommit={next => edit(index, column, next)} />
             }</td>;
           })}<td className="config-native-list-actions">
               <button type="button" aria-label={title + " 上移第" + (index + 1) + "行"}
