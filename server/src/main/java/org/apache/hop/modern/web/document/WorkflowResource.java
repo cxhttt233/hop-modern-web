@@ -130,6 +130,36 @@ public final class WorkflowResource {
     }
   }
 
+  /**
+   * Create only explicitly supported Hop-native actions. Never synthesize plugin XML.
+   * The Dummy action has no required external configuration or secrets.
+   */
+  @POST
+  @Path("/action-create")
+  public Response createAction(ActionCreateRequest request) {
+    if (request == null || request.id() == null || request.name() == null
+        || request.name().isBlank() || !request.name().equals(request.name().trim())
+        || request.name().length() > 200 || !"DUMMY".equals(request.type())
+        || request.x() < 0 || request.y() < 0 || request.x() > 100000 || request.y() > 100000) {
+      return error(400, "valid id, name, supported type DUMMY, x and y are required");
+    }
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      if (document.workflow.findAction(request.name()) != null) {
+        return error(409, "workflow action name already exists");
+      }
+      var nativeAction = new org.apache.hop.workflow.actions.dummy.ActionDummy(request.name());
+      var meta = new org.apache.hop.workflow.action.ActionMeta(nativeAction);
+      meta.setName(request.name());
+      meta.setLocation(request.x(), request.y());
+      document.workflow.addAction(meta);
+      document.workflow.setChanged();
+      document.dirty = true;
+      return Response.ok(snapshot(request.id(), document)).build();
+    }
+  }
+
   @POST
   @Path("/action-delete")
   public Response deleteAction(ActionDeleteRequest request) {
@@ -279,6 +309,7 @@ public final class WorkflowResource {
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}
   public record MoveRequest(String id, String name, int x, int y) {}
+  public record ActionCreateRequest(String id, String type, String name, int x, int y) {}
   public record ActionDeleteRequest(String id, String name, int connectedHops) {}
   public record ActionRenameRequest(String id, String name, String newName) {}
   public record HopCreateRequest(String id, String from, String to) {}
