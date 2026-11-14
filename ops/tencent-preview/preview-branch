@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Prevent intermittent GitHub network faults from hanging autonomous builds.
+export GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=512 GIT_HTTP_LOW_SPEED_TIME=8
+LAB=/home/ubuntu/hmw-agent-lab
+REPO="$LAB/source"
+# Leave enough headroom for the shared Java server and system logs.
+FREE_KB=$(df -Pk "$LAB" | awk 'NR==2 {print $4}')
+if (( FREE_KB < 4 * 1024 * 1024 )); then
+  echo "Preview build skipped: less than 4 GiB free; clean stale build artifacts first." >&2
+  exit 75
+fi
+SLOT="${1:-}"
+BRANCH="${2:-main}"
+case "$SLOT" in t1|t2|t3|t4|t5) ;; *) echo "usage: preview-branch {t1|t2|t3|t4|t5} <github-branch>" >&2; exit 2;; esac
+git check-ref-format --branch "$BRANCH" >/dev/null
+[[ "$BRANCH" != -* ]] || exit 2
+exec 9>"$LAB/build.lock"
+flock -w 240 9 || { echo "Another branch build is running; retry" >&2; exit 75; }
+if [[ ! -d "$REPO/.git" ]]; then
+  timeout 35s git clone -q --depth=1 --single-branch --branch main https://github.com/cxhttt233/hop-modern-web.git "$REPO"
+fi
+if [[ "${HMW_PREVIEW_CACHED_REF:-0}" == "1" ]]; then
+  # auto-refresh already fetched all remote refs. Avoid five redundant network calls.
+  SHA=$(git -C "$REPO" rev-parse --verify "refs/remotes/origin/$BRANCH^{commit}")
+else
+  timeout 25s git -C "$REPO" fetch -q --no-tags --depth=1 origin "refs/heads/$BRANCH"
+  SHA=$(git -C "$REPO" rev-parse FETCH_HEAD)
+fi
+DEST="$LAB/previews/$SLOT"
+if [[ -f "$DEST/.preview-sha" && -f "$DEST/.preview-api" && "$(cat "$DEST/.preview-sha")" == "$SHA" && "$(cat "$DEST/.preview-api")" == "connected-v1" ]]; then
+  printf 'UNCHANGED %s %s http://127.0.0.1:%s\n' "$BRANCH" "${SHA:0:12}" "$((4190+${SLOT:1}))"
+  exit 0
+fi
+# Compile each slot in its own disposable-by-design Git worktree.
+# Never checkout/overwrite the shared source tree: it may contain another task's edits.
+BUILDS="$LAB/preview-builds"
+BUILD="$BUILDS/$SLOT"
+mkdir -p "$BUILDS"
+if [[ -f "$BUILD/.git" ]]; then
+  # The slot build is machine-owned; only this tree may be forcibly reset.
+  git -C "$BUILD" -c advice.detachedHead=false checkout -fq "$SHA"
+elif [[ -e "$BUILD" ]]; then
+  echo "Refusing to overwrite non-worktree preview build path: $BUILD" >&2
+  exit 75
+else
+  git -C "$REPO" worktree add --quiet --detach "$BUILD" "$SHA"
+fi
+cd "$BUILD"
+# Preview-only path adaptation, isolated to this slot's build tree.
+python3 - "$SLOT" <<'PY'
+import pathlib, sys
+p = pathlib.Path('app/src/editor/graphProvider.ts')
+s = p.read_text()
+s = s.replace('/api/pipelines', '/' + sys.argv[1] + '/api/pipelines')
+p.write_text(s)
+PY
+LOCK=$(sha256sum package.json app/package.json contracts/package.json | sha256sum | cut -d' ' -f1)
+if [[ ! -d node_modules || ! -f "$LAB/node-lock" || "$(cat "$LAB/node-lock")" != "$LOCK" ]]; then
+  npm install --no-audit --no-fund --ignore-scripts --prefer-offline --package-lock=false
+  printf '%s\n' "$LOCK" > "$LAB/node-lock"
+fi
+NODE_OPTIONS="--max-old-space-size=640" npm run build -w @hop-modern/contracts
+VITE_HOP_PIPELINE_PATH="/workspace/example.hpl" NODE_OPTIONS="--max-old-space-size=640" npm run build -w @hop-modern/app -- --base "/$SLOT/"
+TMP="$LAB/previews/.$SLOT-$$"
+mkdir -p "$TMP"
+cp -a app/dist/. "$TMP/"
+printf '%s\n' "$SHA" > "$TMP/.preview-sha"
+printf '/%s/\n' "$SLOT" > "$TMP/.preview-base"
+printf 'connected-v1\n' > "$TMP/.preview-api"
+printf '%s\n' "$BRANCH" > "$TMP/.preview-branch"
+if [[ -d "$DEST" ]]; then
+  rm -rf "$LAB/previews/.$SLOT-old"
+  mv "$DEST" "$LAB/previews/.$SLOT-old"
+fi
+mv "$TMP" "$DEST"
+rm -rf "$LAB/previews/.$SLOT-old"
+PORT=$((4190+${SLOT:1}))
+printf 'READY slot=%s branch=%s commit=%s path=/%s/ internal_port=%s\n' "$SLOT" "$BRANCH" "${SHA:0:12}" "$SLOT" "$PORT"
