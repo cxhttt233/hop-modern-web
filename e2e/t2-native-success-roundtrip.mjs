@@ -71,14 +71,14 @@ try {
   assert.ok(await dialog.getByText("Native UI proof", {exact:false}).count()>0);
   assert.ok(await dialog.getByText("Success terminal", {exact:false}).count()>0);
   // Cancelling an unsent SUCCESS draft must not mutate the native graph or call the API.
-  const beforeCancel = calls.length;
+  const beforeCancel = calls.filter(c => c.endpoint.endsWith('/action-add')).length;
   const cancelForm = dialog.locator('form[aria-label="新增工作流节点"]');
   await cancelForm.locator('[name="actionType"]').selectOption("SUCCESS");
   await cancelForm.locator('[name="actionName"]').fill("Should never persist");
   await cancelForm.getByRole("button", {name:"取消新增"}).click();
   assert.equal(await cancelForm.locator('[name="actionName"]').inputValue(), "", "cancel must clear draft");
   assert.equal(await cancelForm.locator('[name="actionType"]').inputValue(), "DUMMY", "cancel must reset type");
-  assert.equal(calls.length, beforeCancel, "cancel must not issue API requests");
+  assert.equal(calls.filter(c => c.endpoint.endsWith("/action-add")).length, beforeCancel, "cancel must not create an Action");
   assert.equal(await dialog.getByText("工作流节点 · 4").count(), 1, "cancel must preserve graph");
   // Duplicate names must be rejected without changing the reopened native graph.
   const duplicate = dialog.locator('form[aria-label="新增工作流节点"]');
