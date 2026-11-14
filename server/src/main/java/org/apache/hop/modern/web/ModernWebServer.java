@@ -15,6 +15,7 @@ import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.modern.server.files.WorkspaceFileCatalogResource;
+import org.apache.hop.modern.server.connections.DatabaseConnectionResource;
 import org.apache.hop.modern.web.document.PipelineConfigResource;
 import org.apache.hop.modern.web.document.PipelineDocumentRegistry;
 import org.apache.hop.modern.web.document.PipelineEditResource;
@@ -62,6 +63,7 @@ public final class ModernWebServer {
     WorkflowResource workflowResource = new WorkflowResource(new WorkflowDocumentStore(metadataProvider, variables));
     return new ResourceConfig()
         .register(new WorkspaceFileCatalogResource())
+        .register(new DatabaseConnectionResource())
         .register(openResource)
         .register(configResource)
         .register(editResource)
