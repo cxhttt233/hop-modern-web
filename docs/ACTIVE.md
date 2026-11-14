@@ -1,6 +1,6 @@
 # Hop Modern Web · 当前开发入口
 
-> 状态核查：2026-11-14 夜间（已核对 GitHub main、五任务和腾讯云实际状态）。后续仍以实时 main 与可复现的真实用户操作为准。
+> 状态核查：2026-11-14 21 点（GitHub main、共享 8080 与 T5 主线浏览器回归已确认）。后续仍以实际文件往返和最新 main 为准。
 
 **产品目标**：在浏览器里完成真实 Hop 文件/数据库连接管理 → Transform 或 Workflow 编辑 → 保存重开 → 经授权运行和查看结果。
 
@@ -11,10 +11,10 @@
 | 任务 | 已证明的基础 | 下一步最高价值的未闭环 |
 |---|---|---|
 | T1 服务端 | 工作区安全基础、#140 Apache Hop 原生 DatabaseMeta/JsonMetadataProvider JSON CRUD（含 token 拒绝、symlink 拒绝），#144 PostgreSQL 2.20 隔离 runner | **连接 API 的可信用户/槽位授权域与 React 入口**：共享 8080 无后端 token 返回 503，桥 8181 目前 404；不可简单开放代理或向浏览器提供服务端 token；之后验收创建→保存重开→TableInput 引用 |
-| T2 Workflow | 已有真实 .hwf 编辑、连线、失败恢复（#125）、Action 改名（#133）及删除与关联 Hop 409 防误删（#141）且通过保存重开 | **Action 新增和原生参数初始化/连线**，浏览器创建后写入真实 Hop XML、重开与原连接保留；之后授权执行和日志 |
+| T2 Workflow | 真实 .hwf 编辑、连接、Action 删除/改名，#147 已增加配置工作区时的直接 Java API 文件越界保护，并通过独立 JVM 真文件重开测试 | **原生 Action 新增、参数合法初始化、连接/保存/重开**；后续安全授权执行和日志 |
 | T3 Transform | SelectValues 三列表、TableInput、FilterRows 单条件（#137）+ 取消回归（#142）；#60 原生空列表的 Hop .hpl 往返专项测试已合入 | **原生 FilterRows AND/OR + 常量比较**，需证明 Condition/CValue 真实序列化；复杂条件维持 JSON 回退，随后 TableOutput/JsonInput |
-| T4 React | #124/#129/#134/#136 已分别解决取消、安全筛选、数字草稿、IME 的实际保存重开 | **真实可见的复杂 JSON/SQL 编辑与错误恢复**；#143 未知 ENUM 仍为 Draft，需先有生产者认证的 native ENUM 列再实测，不能虚构数据 |
-| T5 集成 | #140/#141/#142/#144/#145/#60 已合入；#64/#70/#82/#89 重复旧 Draft 已关闭，预览和 smoke 有记录 | **跨模块用户可用闭环 + PR 专项验收**：原生连接与 Action 新增、FilterRows 复合条件、SQL/JSON 编辑、后续安全授权执行/日志 |
+| T4 React | #124/#129/#134/#136 + #151 外部变更 409 可理解提示/草稿保留/重试已通过真实浏览器保存重开；#143 ENUM 未验收 | **真实可见的复杂 JSON/SQL 编辑、保存失败恢复**；原生 ENUM 需真实 producer 后再验证 |
+| T5 集成 | #147/#149/#150/#151 已合主线，Pipeline 外部改动/删除/symlink 防覆盖、409 浏览器恢复；共享 8080 与 T5 main 37d2aa6 复测 4→5 节点保存重开、无 JS 错误；重复旧 PR 已关闭 | **T1 安全数据库连接全链路、T2 Action 新增、T3 复合条件、T4 JSON/SQL，然后授权执行/日志**；不能用单纯 Smoke 代替真实能力 |
 
 ## 共同执行规则
 
