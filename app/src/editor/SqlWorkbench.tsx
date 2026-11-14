@@ -35,6 +35,9 @@ export default function SqlWorkbench({ value, disabled, onChange }: SqlWorkbench
           // suggestion requests that can be canceled as the editor is closed.
           quickSuggestions: false,
           suggestOnTriggerCharacters: false,
+          // The built-in word highlighter debounces cursor changes and can reject
+          // its pending Delayer promise when this optional editor is unmounted.
+          occurrencesHighlight: "off",
         }}
       />
     </div>
