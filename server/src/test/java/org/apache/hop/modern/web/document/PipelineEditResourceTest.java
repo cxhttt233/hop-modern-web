@@ -8,6 +8,8 @@ package org.apache.hop.modern.web.document;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 
 import java.nio.file.Path;
 import org.apache.hop.core.variables.Variables;
@@ -24,6 +26,81 @@ class PipelineEditResourceTest {
   @BeforeAll
   static void plugins() throws Exception {
     ModernWebServer.initializePipelinePlugins();
+  }
+
+  @Test
+  void refusesToOverwriteExternallyModifiedPipeline(@TempDir Path temp) throws Exception {
+    MemoryMetadataProvider metadata = new MemoryMetadataProvider();
+    Variables variables = new Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(metadata, variables);
+    Path path = temp.resolve("external-change.hpl");
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("original");
+    store.save(path, pipeline);
+    PipelineDocument document = new PipelineDocument("external", path, store.open(path));
+    PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
+    registry.put(document);
+    PipelineEditResource resource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
+
+    String external = Files.readString(path, StandardCharsets.UTF_8).replace("original", "external");
+    Files.writeString(path, external, StandardCharsets.UTF_8);
+    assertEquals(409, resource.save("external").getStatus());
+    assertEquals(external, Files.readString(path, StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void deletedPipelineReturnsConflictWithoutRecreatingIt(@TempDir Path temp) throws Exception {
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path file = temp.resolve("deleted.hpl");
+    var pipeline = new PipelineMeta();
+    pipeline.setName("deleted");
+    store.save(file, pipeline);
+    var document = new PipelineDocument("deleted-doc", file, store.open(file));
+    var registry = new PipelineDocumentRegistry();
+    registry.put(document);
+    Files.delete(file);
+    var resource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
+    assertEquals(409, resource.save("deleted-doc").getStatus());
+    assertEquals(false, Files.exists(file), "save must not re-create externally deleted file");
+  }
+
+  @Test
+  void changedToSymlinkRefusesSaveEvenWhenTargetBytesMatch(@TempDir Path temp) throws Exception {
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    Path file = temp.resolve("active.hpl");
+    var pipeline = new PipelineMeta();
+    pipeline.setName("active");
+    store.save(file, pipeline);
+    var document = new PipelineDocument("symlink-doc", file, store.open(file));
+    var registry = new PipelineDocumentRegistry();
+    registry.put(document);
+    Path outside = temp.resolve("external-copy.hpl");
+    Files.copy(file, outside);
+    byte[] before = Files.readAllBytes(outside);
+    Files.delete(file);
+    Files.createSymbolicLink(file, outside);
+    var resource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
+    assertEquals(409, resource.save("symlink-doc").getStatus());
+    assertEquals(true, java.util.Arrays.equals(before, Files.readAllBytes(outside)));
+  }
+
+  @Test
+  void repeatedSaveRefreshesDiskSnapshot(@TempDir Path temp) throws Exception {
+    MemoryMetadataProvider metadata = new MemoryMetadataProvider();
+    Variables variables = new Variables();
+    PipelineDocumentStore store = new PipelineDocumentStore(metadata, variables);
+    Path path = temp.resolve("repeat-save.hpl");
+    PipelineMeta pipeline = new PipelineMeta();
+    pipeline.setName("repeat");
+    store.save(path, pipeline);
+    PipelineDocument document = new PipelineDocument("repeat", path, store.open(path));
+    PipelineDocumentRegistry registry = new PipelineDocumentRegistry();
+    registry.put(document);
+    PipelineEditResource resource = new PipelineEditResource(registry, store, new PipelineGraphAdapter());
+    assertEquals(200, resource.save("repeat").getStatus());
+    assertEquals(200, resource.save("repeat").getStatus());
   }
 
   @Test
