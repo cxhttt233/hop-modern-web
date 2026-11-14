@@ -179,13 +179,15 @@ export function App() {
       setNodes(graphNodes(document));
       return;
     }
+    setConfigError(undefined);
     beginMutation();
     movePipelineTransforms(document.id, [node.id], dx, dy).then((graph) => {
       setDocument(graph);
       setNodes(graphNodes(graph));
       setDirty(true);
-    }).catch(() => {
+    }).catch((error: unknown) => {
       setNodes(graphNodes(document));
+      setConfigError(error instanceof Error ? error.message : "Transform 位置保存失败");
     }).finally(finishMutation);
   }, [beginMutation, document, finishMutation, source]);
   const reconcileGraph = useCallback((graph: HopGraphDocument) => {
