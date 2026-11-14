@@ -4,7 +4,7 @@ type WorkflowAction = { name: string; type: string; x: number; y: number };
 type WorkflowHop = { from: string; to: string; enabled: boolean };
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[]; hops?: WorkflowHop[] };
 
-async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "save", body: object): Promise<T> {
+async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "action-add" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -119,7 +119,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
         <h2 style={{ margin: 0 }}>Workflow · .hwf</h2>
         <button type="button" onClick={closeSafely} disabled={busy}>关闭</button>
       </div>
-      <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持重命名和移动节点；可创建、启停或删除连接。</p>
+      <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持新增空操作、重命名和移动节点；可创建、启停或删除连接。</p>
       <form onSubmit={event => {
         event.preventDefault();
         if (!path.trim()) return;
@@ -146,6 +146,30 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
                     <small style={{ marginLeft: 8, opacity: .65 }}>({action.x}, {action.y})</small>
                   </li>)}
               </ol>}
+        </section>
+        <section aria-label="新增原生工作流节点">
+          <strong>新增节点 · Hop 原生 Action</strong>
+          <p style={{ fontSize: 13 }}>当前支持 Hop 内置空操作（DUMMY），不伪造任意 JSON/XML 节点；新增后请创建连接并保存 .hwf。</p>
+          <form aria-label="新增工作流节点" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
+            onSubmit={event => {
+              event.preventDefault();
+              const data = new FormData(event.currentTarget);
+              const name = String(data.get("actionName") ?? "").trim();
+              if (!name) return;
+              const type = String(data.get("actionType") ?? "");
+              void execute(() => command("action-add", {
+                id: workflow.id, type, name, x: Number(data.get("actionX")), y: Number(data.get("actionY"))
+              }), true);
+            }}>
+            <label>节点类型 <select name="actionType" disabled={busy}><option value="DUMMY">空操作（DUMMY）</option></select></label>
+            <label>节点名称 <input name="actionName" aria-label="新增节点名称" required maxLength={200} disabled={busy}
+              placeholder="例如：完成数据准备" /></label>
+            <label>X <input name="actionX" type="number" min={0} max={100000} defaultValue={360} required disabled={busy}
+              style={{ width: 85 }} /></label>
+            <label>Y <input name="actionY" type="number" min={0} max={100000} defaultValue={200} required disabled={busy}
+              style={{ width: 85 }} /></label>
+            <button type="submit" disabled={busy}>新增原生节点</button>
+          </form>
         </section>
         {(workflow.actions?.length ?? 0) > 0 && <section aria-label="重命名工作流节点">
           <strong>重命名节点</strong>
