@@ -71,6 +71,7 @@ export function App() {
   const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
   const [paletteQuery, setPaletteQuery] = useState("");
+  const paletteSearchRef = useRef<HTMLInputElement>(null);
   // Keep only successfully opened server paths, in memory for this editor session.
   const [recentPipelinePaths, setRecentPipelinePaths] = useState<string[]>([]);
   // Show only successfully added plugin types; never record failed Hop requests.
@@ -403,6 +404,21 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [pipelinePath, showOpenPanel]);
 
+  // Slash focuses Transform search from the canvas, without intercepting typing
+  // in editable controls or modal dialogs.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.repeat) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable], [role='dialog']")) return;
+      if (source.kind !== "server" || showOpenPanel) return;
+      event.preventDefault();
+      paletteSearchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [source.kind, showOpenPanel]);
+
   const configured = nodes.find((node) => node.id === configId);
   const isRealGraph = source.kind === "server";
   const displayPipelineName = isRealGraph ? (document.name || "未命名流程") : "未打开流程";
@@ -534,7 +550,7 @@ export function App() {
             </div>
             <div className="palette-search">
               <span aria-hidden="true">⌕</span>
-              <input aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setPaletteQuery(""); }} />
+              <input ref={paletteSearchRef} aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setPaletteQuery(""); }} />
               {paletteQuery && <button type="button" aria-label="清除组件搜索" title="清除搜索（Esc）" onClick={() => setPaletteQuery("")}>×</button>}
             </div>
             <div className="transform-list">
