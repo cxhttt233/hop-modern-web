@@ -39,11 +39,11 @@ async function saveConfig(panel) {
   if (!response.ok()) throw new Error("Config write failed: " + response.status());
 }
 async function saveDocument() {
-  const response = await page.request.post(new URL("api/pipelines/" + documentId + "/save", base));
+  const response = await page.request.post(new URL("api/pipelines/" + documentId + "/save", base).href);
   if (!response.ok()) throw new Error("Document save failed: " + response.status());
 }
 async function names() {
-  const response = await page.request.post(new URL("api/pipelines/" + documentId + "/config/read", base),
+  const response = await page.request.post(new URL("api/pipelines/" + documentId + "/config/read", base).href,
     { data: { nodeId: "table-input" } });
   if (!response.ok()) throw new Error("Config read failed: " + response.status());
   return ((await response.json()).config?.fields?.field ?? []).map(row => row.name);
