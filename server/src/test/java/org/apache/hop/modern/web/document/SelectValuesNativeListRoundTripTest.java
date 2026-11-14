@@ -33,6 +33,49 @@ class SelectValuesNativeListRoundTripTest {
   }
 
   @Test
+  void initiallyEmptySelectValuesCanAddRowsAndReopenFromDisk(@TempDir Path dir)
+      throws Exception {
+    var provider = new MemoryMetadataProvider();
+    var store = new PipelineDocumentStore(provider, new Variables());
+    var pipeline = new PipelineMeta();
+    pipeline.setName("empty-select-values");
+    pipeline.addTransform(new TransformMeta("SelectValues", "selector", new SelectValuesMeta()));
+    Path file = dir.resolve("empty-select-values.hpl");
+    store.save(file, pipeline);
+
+    var reopened = store.open(file);
+    var registry = new PipelineDocumentRegistry();
+    registry.put(new PipelineDocument("empty-doc", file, reopened));
+    var resource = new PipelineConfigResource(registry, provider);
+    var initial = (PipelineConfigResource.ConfigResponse) resource.read(
+        "empty-doc", new PipelineConfigResource.ReadRequest("selector")).getEntity();
+    assertEquals(0, initial.config().at("/fields/field").size());
+    assertEquals(0, initial.config().at("/fields/remove").size());
+    assertEquals(0, initial.config().at("/fields/meta").size());
+
+    ObjectNode draft = ((ObjectNode) initial.config()).deepCopy();
+    var field = draft.withObject("/fields").withArray("field").addObject();
+    field.put("name", "流量");
+    field.put("rename", "flow");
+    field.put("length", -2);
+    var removed = draft.withObject("/fields").withArray("remove").addObject();
+    removed.put("name", "废弃字段");
+    var changed = resource.write("empty-doc",
+        new PipelineConfigResource.WriteRequest("selector", draft));
+    assertEquals(200, changed.getStatus(), "empty native lists must accept new rows");
+
+    store.save(file, reopened);
+    var disk = store.open(file);
+    var actual = ConfigJsonSerializer.toJson(
+        (SelectValuesMeta) disk.findTransform("selector").getTransform(), provider);
+    assertEquals("流量", actual.at("/fields/field/0/name").asText());
+    assertEquals("flow", actual.at("/fields/field/0/rename").asText());
+    assertEquals(-2, actual.at("/fields/field/0/length").asInt());
+    assertEquals("废弃字段", actual.at("/fields/remove/0/name").asText());
+    assertEquals(0, actual.at("/fields/meta").size());
+  }
+
+  @Test
   void threeIndependentListsKeepSemanticsAcrossConfigWriteAndHplDiskReopen(@TempDir Path dir)
       throws Exception {
     var descriptor = AutomaticConfigDescriptor.describe(SelectValuesMeta.class);
