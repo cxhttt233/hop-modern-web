@@ -109,9 +109,10 @@ expect(recovered, draft, "normal metadata still intact")
 code, _ = request("PUT", "/bad.name", dict(draft, name="bad.name"))
 # Dotted names are permitted, but we must not unexpectedly reject safe relative names.
 expect(code, 200, "allowed simple dotted name")
-code, _ = request("PUT", "/INVALID%", dict(draft, name="INVALID%"))
-if code not in (400, 404):
-    raise AssertionError(f"invalid path was accepted with HTTP {code}")
+# Use valid URL percent-encoding: a malformed trailing "%" is rejected by
+# Jersey itself (before reaching the resource) and is not a business API test.
+code, _ = request("PUT", "/INVALID%20NAME", dict(draft, name="INVALID NAME"))
+expect(code, 400, "invalid connection name rejected")
 
 print(json.dumps({
     "pass": True, "type": "POSTGRESQL", "nativeFile": "metadata/rdbms/RIVER_PG.json",
