@@ -10,6 +10,7 @@ import java.net.URI;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
+import org.apache.hop.core.database.DatabasePluginType;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
@@ -46,6 +47,7 @@ public final class ModernWebServer {
   /** Registers the pipeline transform plugin type required to parse real .hpl transforms. */
   public static void initializePipelinePlugins() throws Exception {
     PluginRegistry.addPluginType(TransformPluginType.getInstance());
+    PluginRegistry.addPluginType(DatabasePluginType.getInstance());
     PluginRegistry.init();
   }
 
@@ -62,6 +64,7 @@ public final class ModernWebServer {
     WorkflowResource workflowResource = new WorkflowResource(new WorkflowDocumentStore(metadataProvider, variables));
     return new ResourceConfig()
         .register(new WorkspaceFileCatalogResource())
+        .register(new NativeDatabaseResource())
         .register(openResource)
         .register(configResource)
         .register(editResource)
