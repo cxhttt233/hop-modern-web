@@ -40,6 +40,21 @@ code, _ = request("GET", auth=False)
 expect(code, 403, "missing-token denial")
 code, _ = request("GET", "/BAD", auth=False)
 expect(code, 403, "missing-token read denial")
+# Incorrect credentials must fail closed on read and write operations.
+wrong_headers = dict(headers, **{"X-HMW-Connection-Token": "wrong-token"})
+for method, suffix, payload in (("GET", "", None), ("GET", "/RIVER_PG", None),
+                                ("PUT", "/RIVER_PG", {"name": "RIVER_PG"})):
+    req = urllib.request.Request(
+        base + suffix, method=method, headers=wrong_headers,
+        data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=9) as response:
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    expect(status, 403, f"incorrect-token denial {method} {suffix}")
+
 
 draft = {
     "name": "RIVER_PG", "type": "POSTGRESQL", "hostname": "127.0.0.1",
@@ -113,6 +128,14 @@ expect(code, 200, "allowed simple dotted name")
 # Jersey itself (before reaching the resource) and is not a business API test.
 code, _ = request("PUT", "/INVALID%20NAME", dict(draft, name="INVALID NAME"))
 expect(code, 400, "invalid connection name rejected")
+# Encoded path traversal must not create metadata outside the rdbms directory.
+for suffix in ("/%2e%2e", "/%2e%2e%2fESCAPE", "/%2Ftmp%2FESCAPE"):
+    code, _ = request("PUT", suffix, dict(draft, name="ESCAPE"))
+    if code < 400:
+        raise AssertionError(f"encoded traversal accepted: {suffix}: {code}")
+if (workspace / "metadata" / "ESCAPE.json").exists():
+    raise AssertionError("encoded traversal wrote outside rdbms")
+
 
 print(json.dumps({
     "pass": True, "type": "POSTGRESQL", "nativeFile": "metadata/rdbms/RIVER_PG.json",
