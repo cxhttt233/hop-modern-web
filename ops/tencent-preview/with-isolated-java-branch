@@ -5,6 +5,16 @@ set -euo pipefail
 LAB=/home/ubuntu/hmw-agent-lab
 REPO="$LAB/source"
 RUNTIME=/home/ubuntu/hop-modern-preview/runtime/server
+EXTRA_CP=""
+# Opt in to a verified Hop PostgreSQL dialect for test JVMs, never the shared 8080.
+if [[ "${HMW_ISOLATED_PG_PLUGIN:-0}" == "1" ]]; then
+  PG_JAR="$LAB/vendor/postgres-plugin-proof/hop-databases-postgresql-2.20.0.jar"
+  [[ -f "$PG_JAR" ]] || { echo "Missing isolated PostgreSQL dialect plugin" >&2; exit 69; }
+  printf '%s  %s\\n' 'c60e8136cbee71b7623bc7262ba0583997d06bf3' "$PG_JAR" | sha1sum --check --status || {
+    echo "PostgreSQL dialect checksum mismatch" >&2; exit 65;
+  }
+  EXTRA_CP=":$PG_JAR"
+fi
 if [ "$#" -lt 2 ]; then echo "Usage: with-isolated-java-branch <branch> <test-command> [args...]" >&2; exit 2; fi
 BRANCH=$1; shift
 git check-ref-format --branch "$BRANCH" >/dev/null
@@ -44,7 +54,7 @@ if src.count(old)!=1: raise RuntimeError('backend launcher URI changed: review r
 p.write_text(src.replace(old,'http://127.0.0.1:'+port+'/'))
 PY
 mapfile -d '' FILES < <(find "$TMP/src/server/src/main/java" -name '*.java' -print0)
-timeout 90s /usr/bin/javac -proc:none -encoding UTF-8 --release 21 -cp "$RUNTIME/classes:$RUNTIME/lib/*" -d "$TMP/classes" "${FILES[@]}"
+timeout 90s /usr/bin/javac -proc:none -encoding UTF-8 --release 21 -cp "$RUNTIME/classes:$RUNTIME/lib/*$EXTRA_CP" -d "$TMP/classes" "${FILES[@]}"
 echo "COMPILED branch=$BRANCH commit=${SHA:0:12} classes=$(find "$TMP/classes" -name '*.class'|wc -l)"
 flock -u 9
 (
@@ -52,7 +62,7 @@ flock -u 9
  exec /usr/bin/java -Xms32m -Xmx224m -XX:ActiveProcessorCount=2 \
    -Dhop.modern.workspace="$TMP/workspace" \
    -Dhop.modern.connections.token=local-isolated-token \
-   -cp "$TMP/classes:$RUNTIME/classes:$RUNTIME/lib/*" org.apache.hop.modern.web.ModernWebServer
+   -cp "$TMP/classes:$RUNTIME/classes:$RUNTIME/lib/*$EXTRA_CP" org.apache.hop.modern.web.ModernWebServer
 ) >"$TMP/jvm.log" 2>&1 &
 PID=$!
 READY=0
