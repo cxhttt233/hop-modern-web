@@ -3,6 +3,7 @@ import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connec
 import type { HopGraphDocument } from "@hop-modern/contracts";
 import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
+import { WorkflowInspector } from "./editor/WorkflowInspector";
 import { TRANSFORM_ICONS_A } from "./transformIconsA";
 import { TRANSFORM_ICONS_B } from "./transformIconsB";
 import { CATEGORY_ORDER, P0_TRANSFORMS, transformMeta, transformPrimaryName, transformSecondaryName } from "./transformCatalog";
@@ -60,6 +61,7 @@ function graphNodes(document: HopGraphDocument): Node[] {
 export function App() {
   const initialPipelinePath = import.meta.env.VITE_HOP_PIPELINE_PATH?.trim() ?? "";
   const [document, setDocument] = useState<HopGraphDocument>(emptyDocument);
+  const [showWorkflowInspector, setShowWorkflowInspector] = useState(false);
   const [source, setSource] = useState<GraphSource>({ kind: "sample" });
   const [nodes, setNodes] = useState<Node[]>([]);
   const [configId, setConfigId] = useState<string>();
@@ -71,7 +73,6 @@ export function App() {
   const [pipelineOpenRevision, setPipelineOpenRevision] = useState(0);
   const [pipelinePathDraft, setPipelinePathDraft] = useState(initialPipelinePath);
   const [paletteQuery, setPaletteQuery] = useState("");
-  const paletteSearchRef = useRef<HTMLInputElement>(null);
   // Keep only successfully opened server paths, in memory for this editor session.
   const [recentPipelinePaths, setRecentPipelinePaths] = useState<string[]>([]);
   // Show only successfully added plugin types; never record failed Hop requests.
@@ -404,21 +405,6 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [pipelinePath, showOpenPanel]);
 
-  // Slash focuses Transform search from the canvas, without intercepting typing
-  // in editable controls or modal dialogs.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.repeat) return;
-      const target = event.target;
-      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable], [role='dialog']")) return;
-      if (source.kind !== "server" || showOpenPanel) return;
-      event.preventDefault();
-      paletteSearchRef.current?.focus();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [source.kind, showOpenPanel]);
-
   const configured = nodes.find((node) => node.id === configId);
   const isRealGraph = source.kind === "server";
   const displayPipelineName = isRealGraph ? (document.name || "未命名流程") : "未打开流程";
@@ -476,6 +462,7 @@ export function App() {
         </div>
 
         <div className="editor-actions">
+          <button type="button" aria-label="打开 Workflow（.hwf）" onClick={() => setShowWorkflowInspector(true)}>Workflow</button>
           <button type="button" aria-label="打开流程（Choose pipeline）" disabled={saving || pendingMutations > 0} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
           {isRealGraph && <>
             <button type="button" aria-label="重新打开当前流程（Reload pipeline）"
@@ -550,15 +537,7 @@ export function App() {
             </div>
             <div className="palette-search">
               <span aria-hidden="true">⌕</span>
-              <input ref={paletteSearchRef} aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} onKeyDown={(event) => {
-                if (event.key === "Escape") setPaletteQuery("");
-                // Only Enter-add a unique search result; ambiguous matches remain click-to-choose.
-                if (event.key === "Enter" && paletteQuery.trim() && filteredTransforms.length === 1) {
-                  event.preventDefault();
-                  addTransformFromPalette(filteredTransforms[0]);
-                }
-              }} />
-              {paletteQuery.trim() && filteredTransforms.length === 1 && <small role="status">回车添加唯一匹配组件</small>}
+              <input aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setPaletteQuery(""); }} />
               {paletteQuery && <button type="button" aria-label="清除组件搜索" title="清除搜索（Esc）" onClick={() => setPaletteQuery("")}>×</button>}
             </div>
             <div className="transform-list">
@@ -646,6 +625,7 @@ export function App() {
         </ReactFlow>
         </TransformNodeActionsContext.Provider>
 
+        {showWorkflowInspector && <WorkflowInspector onClose={() => setShowWorkflowInspector(false)} />}
         {configError && <div className="preview-note error-note" role="alert">操作失败：{configError}</div>}
         {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
           <GenericConfigPanel descriptor={serverConfig.descriptor} config={serverConfig.config}
