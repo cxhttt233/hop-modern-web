@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Real Hop DatabaseMeta + plugin registry smoke test, without DB network activity.
+# Safe for the small Tencent test VM: no shared JVM restart and no durable data.
+set -euo pipefail
+LAB=/home/ubuntu/hmw-agent-lab
+RUNTIME=/home/ubuntu/hop-modern-preview/runtime/server
+DEFAULT_JAR="$LAB/vendor/postgres-plugin-proof/hop-databases-postgresql-2.20.0.jar"
+JAR="${HMW_PG_PLUGIN_JAR:-$DEFAULT_JAR}"
+[[ -f "$JAR" ]] || { echo "PostgreSQL plugin missing: $JAR" >&2; exit 69; }
+# Check the exact Maven-published SHA-1 for the staged 2.20.0 jar.
+if [[ "$JAR" == "$DEFAULT_JAR" ]]; then
+  printf '%s  %s\n' 'c60e8136cbee71b7623bc7262ba0583997d06bf3' "$JAR" | sha1sum --check --status ||
+    { echo "PostgreSQL plugin checksum mismatch; refusing to load" >&2; exit 65; }
+fi
+TMP=$(mktemp -d "$LAB/.native-dbmeta-XXXXXXXX")
+trap 'rm -rf "$TMP"' EXIT
+cat > "$TMP/DatabaseMetaProbe.java" <<'JAVA'
+import org.apache.hop.core.HopClientEnvironment;
+import org.apache.hop.core.database.DatabaseMeta;
+import org.apache.hop.core.database.DatabasePluginType;
+import org.apache.hop.core.plugins.PluginRegistry;
+import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
+
+public class DatabaseMetaProbe {
+  public static void main(String[] args) throws Exception {
+    HopClientEnvironment.init();
+    PluginRegistry.addPluginType(DatabasePluginType.getInstance());
+    PluginRegistry.init();
+    if (!DatabaseMeta.getIDatabaseMap().containsKey("POSTGRESQL"))
+      throw new AssertionError("Database plugin registry is missing POSTGRESQL");
+    var db = new DatabaseMeta();
+    db.setName("NATIVE_METADATA_PROOF");
+    db.setDatabaseType("POSTGRESQL");
+    db.setHostname("127.0.0.1");
+    db.setDBName("water_test");
+    db.setPort("5432");
+    db.setUsername("proof_user");
+    db.setPassword("");
+    var provider = new MemoryMetadataProvider();
+    var serializer = provider.getSerializer(DatabaseMeta.class);
+    serializer.save(db);
+    var loaded = serializer.load("NATIVE_METADATA_PROOF");
+    if (loaded == null || !"POSTGRESQL".equals(loaded.getPluginId()) ||
+        !"127.0.0.1".equals(loaded.getHostname()) ||
+        !"water_test".equals(loaded.getDatabaseName()) ||
+        !"5432".equals(loaded.getPort()) ||
+        !"proof_user".equals(loaded.getUsername()) ||
+        !serializer.listObjectNames().contains("NATIVE_METADATA_PROOF"))
+      throw new AssertionError("Native Hop DatabaseMeta roundtrip changed connection metadata");
+    System.out.println("HOP_NATIVE_DATABASEMETA_PASS type=" + loaded.getPluginId()
+        + " host=" + loaded.getHostname() + " metadata=memory only");
+  }
+}
+JAVA
+/usr/bin/javac -proc:none --release 21 -cp "$RUNTIME/lib/*:$JAR" -d "$TMP" "$TMP/DatabaseMetaProbe.java"
+(cd /home/ubuntu/hop-modern-preview/runtime &&
+  /usr/bin/java -Xms32m -Xmx192m -cp "$TMP:$JAR:$RUNTIME/classes:$RUNTIME/lib/*" DatabaseMetaProbe)
