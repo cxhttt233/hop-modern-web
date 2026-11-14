@@ -38,6 +38,11 @@ export default function SqlWorkbench({ value, disabled, onChange }: SqlWorkbench
           // The built-in word highlighter debounces cursor changes and can reject
           // its pending Delayer promise when this optional editor is unmounted.
           occurrencesHighlight: "off",
+          wordBasedSuggestions: "off",
+          folding: false,
+          stickyScroll: { enabled: false },
+          linkedEditing: false,
+          parameterHints: { enabled: false },
         }}
       />
     </div>
