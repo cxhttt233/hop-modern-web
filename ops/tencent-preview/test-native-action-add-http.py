@@ -28,7 +28,7 @@ post("action-add", {"id":id,"type":"ABORT","name":"Bad level","message":"bad","l
 abort = post("action-add", {"id":id,"type":"ABORT","name":"Abort on failure",
     "message":"Water level threshold exceeded","logLevel":"ERROR","x":520,"y":180})
 assert len(abort["actions"]) == 4 and abort["dirty"]
-assert any(a["name"] == "Abort on failure" and "Abort workflow" in a["type"] for a in abort["actions"]), abort["actions"]
+assert any(a["name"] == "Abort on failure" and "Abort the workflow" in a["type"] for a in abort["actions"]), abort["actions"]
 connected = post("hop-create", {"id":id,"from":"Start","to":"Native completion"})
 connected = post("hop-create", {"id":id,"from":"Native completion","to":"Abort on failure"})
 assert any(h["from"] == "Start" and h["to"] == "Native completion" for h in connected["hops"])
@@ -42,6 +42,6 @@ assert "<loglevel>ERROR</loglevel>" in native_xml
 reopened = post("open", {"path":path.name})
 assert len(reopened["actions"]) == 4
 assert any(a["name"]=="Native completion" and "action does anything" in a["type"] for a in reopened["actions"]), reopened["actions"]
-assert any(a["name"]=="Abort on failure" and "Abort workflow" in a["type"] for a in reopened["actions"]), reopened["actions"]
+assert any(a["name"]=="Abort on failure" and "Abort the workflow" in a["type"] for a in reopened["actions"]), reopened["actions"]
 assert len(reopened["hops"]) == 2
 print("NATIVE_DUMMY_AND_ABORT_ADD_HOP_SAVE_REOPEN_PASS")
