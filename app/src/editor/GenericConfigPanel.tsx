@@ -181,6 +181,14 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const resetField = (property: ConfigPropertyDescriptor) => {
     setDraft((current) => ({ ...current, [property.key]: nativeValue(property) }));
     setInvalid((current) => ({ ...current, [property.key]: false }));
+    // Restore the rendered raw editor too; otherwise stale JSON text remains
+    // visible after the authoritative field value has been restored.
+    setJsonTextDrafts((current) => {
+      if (!(property.key in current)) return current;
+      const next = { ...current };
+      delete next[property.key];
+      return next;
+    });
     setRawListEditors((current) => ({ ...current, [property.key]: false }));
   };
   // Focus only visible descriptor-owned controls. Never inspect configuration values
