@@ -54,8 +54,17 @@ if not file.is_file():
 original = file.read_bytes()
 if b"POSTGRESQL" not in original or b"river_observation" not in original:
     raise AssertionError("native metadata did not persist required fields")
-if b"password" in original.lower():
-    raise AssertionError("unexpected password field in password-free metadata")
+# Hop's native serializer may include an empty password *property*, which
+# does not mean that a credential was supplied or stored. Verify that the
+# endpoint rejects or discards a deliberately supplied secret value instead.
+canary = "HMW_TEST_CANARY_PASSWORD_DO_NOT_PERSIST"
+code, _ = request("PUT", "/RIVER_PG", dict(draft, password=canary))
+if code not in (200, 400, 422):
+    raise AssertionError(f"unexpected password-injection status {code}")
+if canary.encode() in file.read_bytes():
+    raise AssertionError("client-supplied secret leaked into native metadata")
+# The test file may have been overwritten with identical password-free data.
+original = file.read_bytes()
 
 code, restored = request("GET", "/RIVER_PG")
 expect(code, 200, "native metadata reload")
