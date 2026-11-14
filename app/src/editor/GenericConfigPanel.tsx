@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSPropertie
 import { SqlWorkbenchBoundary } from "./SqlWorkbenchBoundary";
 import { NativeListEditor, canEditNativeList } from "./NativeListEditor";
 import { NativeObjectListEditor, canEditSelectValuesObject } from "./NativeObjectListEditor";
-import { FilterRowsAtomicEditor, canEditAtomicFilterRows } from "./FilterRowsAtomicEditor";
+import { FilterRowsAtomicEditor, canEditAtomicFilterRows, FilterRowsCompositeEditor, canEditCompositeFilterRows } from "./FilterRowsAtomicEditor";
 import { readNativeWireList, writeNativeWireList, resolveNativeWireListItem, type HopNativeWireDescriptor } from "@hop-modern/contracts";
 import type { ConfigPropertyDescriptor as NativeConfigPropertyDescriptor } from "./configDescriptor";
 
@@ -215,6 +215,9 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
       return <NativeObjectListEditor descriptor={descriptor} property={p} value={value}
         disabled={disabled} onChange={next => set(p.key, next)} />;
     }
+    if (p.shape === "OBJECT" && !rawListEditors[p.key] && canEditCompositeFilterRows(descriptor.className, p, value)) {
+      return <FilterRowsCompositeEditor value={value} disabled={disabled} onChange={next => set(p.key, next)} />;
+    }
     if (p.shape === "OBJECT" && !rawListEditors[p.key] &&
         canEditAtomicFilterRows(descriptor.className, p, value)) {
       return <FilterRowsAtomicEditor value={value} disabled={disabled} onChange={next => set(p.key, next)} />;
@@ -307,8 +310,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>{groupLabel}<small>{properties.length} 项</small>
         </button></legend>
         <div id={groupId} className="config-group-fields" hidden={!expanded}>{properties.map((p) =>
-          p.shape === "OBJECT" && (canEditAtomicFilterRows(descriptor.className, p, draft[p.key]) ||
-                (rawListEditors[p.key] && canEditAtomicFilterRows(descriptor.className, p, nativeValue(p))))
+          p.shape === "OBJECT" && (canEditAtomicFilterRows(descriptor.className, p, draft[p.key]) || canEditCompositeFilterRows(descriptor.className, p, draft[p.key]) ||
+                (rawListEditors[p.key] && (canEditAtomicFilterRows(descriptor.className, p, nativeValue(p)) || canEditCompositeFilterRows(descriptor.className, p, nativeValue(p)))))
             ? <div key={p.key} className="config-native-filter-field" role="group" aria-label="原生过滤条件配置">
                 <strong>过滤记录 · 条件</strong>
                 <button type="button" className="config-native-list-mode"
