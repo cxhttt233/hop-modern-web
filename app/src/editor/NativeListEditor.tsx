@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -25,6 +26,15 @@ export function canEditNativeList(value: unknown, properties: ConfigPropertyDesc
  * Hop's Java serializer remains authoritative for JSON/XML persistence and validation.
  */
 export function NativeListEditor({ title, value: rows, properties, disabled, onChange }: Props) {
+  const pendingFocusRow = useRef<number | null>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  useEffect(() => {
+    const index = pendingFocusRow.current;
+    if (index === null || index >= rows.length) return;
+    pendingFocusRow.current = null;
+    tableRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr")[index]
+      ?.querySelector<HTMLInputElement | HTMLSelectElement>("input:not([type=checkbox]), select, input[type=checkbox]")?.focus();
+  }, [rows]);
   const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) =>
     onChange(rows.map((row, i) => i === index ?
       { ...(row as Record<string, unknown>), [column.key]: nextValue } : row));
@@ -40,10 +50,13 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     const row = rows[index] as Record<string, unknown>;
     onChange([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
   };
-  const add = () => onChange([...rows, Object.fromEntries(properties.map(p =>
+  const add = () => {
+    pendingFocusRow.current = rows.length;
+    onChange([...rows, Object.fromEntries(properties.map(p =>
     [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
       p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
       p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]))]);
+  };
   return <div className="config-native-list" onKeyDown={event => {
     // Native field rows live inside the parent save form. Enter must not
     // accidentally submit the entire Transform while editing one cell.
@@ -53,7 +66,7 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     }
   }}>
     <div className="config-native-list-scroll">
-      <table aria-label={title + "原生字段列表"}>
+      <table ref={tableRef} aria-label={title + "原生字段列表"}>
         <thead><tr><th scope="col">序号</th>{properties.map(column =>
           <th scope="col" key={column.key}>{LABELS[column.key] ?? column.key}</th>)}<th scope="col">操作</th></tr></thead>
         <tbody>{rows.map((entry, index) => {
