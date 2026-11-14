@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+LAB=/home/ubuntu/hmw-agent-lab
+SRC="$LAB/source"
+RUNTIME=/home/ubuntu/hop-modern-preview/runtime/server
+STORE="$LAB/backend-main"
+SHA=$(git -C "$SRC" rev-parse refs/remotes/origin/main)
+mkdir -p "$STORE/builds"
+exec 9>"$LAB/build.lock"
+flock -w 120 9 || { echo 'Backend build lock busy'; exit 75; }
+CURRENT=$(readlink "$STORE/current" 2>/dev/null || true)
+if [[ "$CURRENT" == "builds/$SHA" && -f "$STORE/current/.built-ok" ]]; then
+  echo "BACKEND_UNCHANGED $SHA"
+  exit 0
+fi
+# Frontend-only and docs-only commits must not restart the shared Hop server.
+# Only the Java source tree is compiled by this script, so compare its tree hash.
+JAVA_TREE=$(git -C "$SRC" rev-parse "$SHA:server/src/main/java")
+if [[ -f "$STORE/current/.built-ok" ]]; then
+  CURRENT_TREE=$(cat "$STORE/current/java-tree" 2>/dev/null || true)
+  if [[ -z "$CURRENT_TREE" ]]; then
+    OLD_SHA=$(cat "$STORE/current/sha" 2>/dev/null || true)
+    if [[ "$OLD_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+      CURRENT_TREE=$(git -C "$SRC" rev-parse "$OLD_SHA:server/src/main/java" 2>/dev/null || true)
+    fi
+  fi
+  if [[ -n "$CURRENT_TREE" && "$JAVA_TREE" == "$CURRENT_TREE" ]]; then
+    echo "BACKEND_UNCHANGED_JAVA_TREE main=$SHA active=$(cat "$STORE/current/sha")"
+    exit 0
+  fi
+fi
+DIR="$STORE/builds/$SHA"
+if [[ ! -f "$DIR/.built-ok" ]]; then
+  TMP=$(mktemp -d "$STORE/builds/.working-XXXXXXXX")
+  trap 'rm -rf "$TMP"' EXIT
+  mkdir -p "$TMP/src" "$TMP/classes"
+  git -C "$SRC" archive "$SHA" server/src/main/java | tar -x -C "$TMP/src"
+  mapfile -d '' JAVA_FILES < <(find "$TMP/src/server/src/main/java" -name '*.java' -print0)
+  echo "BACKEND_COMPILING $SHA sources=${#JAVA_FILES[@]}"
+  timeout 90s /usr/bin/javac -proc:none -encoding UTF-8 --release 21 \
+    -cp "$RUNTIME/classes:$RUNTIME/lib/*" -d "$TMP/classes" "${JAVA_FILES[@]}"
+  printf '%s\n' "$SHA" > "$TMP/sha"
+  printf '%s\n' "$JAVA_TREE" > "$TMP/java-tree"
+  touch "$TMP/.built-ok"
+  rm -rf "$DIR" # only unpublished build cache, never current service target
+  mv "$TMP" "$DIR"
+  trap - EXIT
+fi
+ln -s "builds/$SHA" "$STORE/current.next"
+mv -Tf "$STORE/current.next" "$STORE/current"
+echo "BACKEND_STAGED $SHA; privileged activation timer will restart Java and verify health"
