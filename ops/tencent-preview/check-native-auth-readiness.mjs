@@ -1,5 +1,3 @@
-[Reading 24 lines from start (total: 24 lines, 0 remaining)]
-
 #!/usr/bin/env node
 // Deployment gate only: NEVER issues a session or enables a route.
 import fs from "node:fs";
