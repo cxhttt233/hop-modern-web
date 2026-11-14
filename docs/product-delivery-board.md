@@ -1,6 +1,6 @@
 # Hop Modern Web · 产品真实能力与交付验收
 
-> 2026-11-14 基线；下列“已验证”只表示此日期在腾讯云测试环境有明确证据，不能等同于多租户/生产验收。项目架构以 `cxhttt233/hop` 的 `docs/web-modern-architecture-plan.md` 为唯一依据。
+> 2026-11-14 夜间按主线复核；下列“已验证”只表示此日期在腾讯云测试环境有明确证据，不能等同于多租户/生产验收。项目架构以 `cxhttt233/hop` 的 `docs/web-modern-architecture-plan.md` 为唯一依据。
 
 ## 目标用户路径
 
@@ -9,19 +9,19 @@
 | 阶段 | 目前实际能力与证据 | 仍然缺失或未验收 |
 |---|---|---|
 | 文件/工程 | Pipeline/Workflow 文件目录 API、路径搜索、隔离工作区；现有文件打开，`.hpl` 原子保存 | 新建真实文件及工程管理的浏览器完整流程仍需逐步确认 |
-| 数据库连接 | TableInput 可以保存连接引用名称；#132 隔离 Java API 已验证认证拒绝和无密码草稿 CRUD（仍 Draft，非主线）；[ #138 ](https://github.com/cxhttt233/hop-modern-web/pull/138) 证明原生 PostgreSQL DatabaseMeta 插件 + MemoryMetadataProvider 内存往返 | **未实现项目级原生 metadata/rdbms 落盘、浏览器管理和跨 Transform 复用；当前测试运行时默认缺 PostgreSQL 方言与 JDBC 运行依赖；无生产会话权限体系** |
-| Pipeline/Transform | 真实 .hpl 编辑保存重开、SelectValues 三列表、TableInput 原生字段表；[#137](https://github.com/cxhttt233/hop-modern-web/pull/137) 原生 FilterRows 单条件比较与 True/False 目标表单经浏览器、config/write、.hpl 保存重开及 T5 主线重复验证 | **FilterRows AND/OR 组合与常量值、TableOutput/SortRows 完整配置**尚待验证；复杂过滤条件保留高级 JSON 回退，不应误称已全支持 |
-| Workflow | .hwf 原生开/改/保存与连接操作、[#125](https://github.com/cxhttt233/hop-modern-web/pull/125) 失败后重试；[#133](https://github.com/cxhttt233/hop-modern-web/pull/133) Action 重命名已在隔离 JVM 和共享后端真实浏览器验证保存重开，原有 Hop 引用保持 | Action 新增、删除、复杂参数、完整拖动和执行流程尚未交付 |
-| React 交互 | #124 取消不落盘，#129 安全列表筛选与源索引，[#134](https://github.com/cxhttt233/hop-modern-web/pull/134) 数字草稿/取消，[#136](https://github.com/cxhttt233/hop-modern-web/pull/136) 中文 IME 组合/取消都已通过真实 .hpl 浏览器保存重开；T5 集成测试复跑 #136 成功 | 尚未全面验证未知原生枚举值保留、复杂 JSON/SQL 编辑和异常恢复 |
+| 数据库连接 | #140 已合入：Apache Hop 原生 DatabaseMeta/JsonMetadataProvider 工作区 JSON CRUD，隔离 Java/HTTP 及授权拒绝、symlink 拒绝实测；#144 隔离 PostgreSQL 2.20 加载器已合入，未授权外联数据库 | **React 入口及 per-user/per-slot 可信授权域缺失**；共享 8080 因未配 token 返回 503，预览桥 8181 当前路由 404，不能简单反代或公开 token；尚未完成在浏览器创建、关闭重开、TableInput 引用 |
+| Pipeline/Transform | 真实 .hpl 编辑保存重开、SelectValues 三组列表、TableInput 原生字段表；#137 FilterRows 单条件/True/False、#142 取消安全回归、#60 原生空字段列表保存重开的专项测试已合并 | **FilterRows AND/OR/原生常量 CValue**尚待验证；复杂条件仍可退回高级 JSON |
+| Workflow | 真实 .hwf 原生开/改/保存与连接操作，#125 保存失败恢复、#133 Action 改名、#141 Action 删除并校验关联 Hop 409 已在浏览器真实 .hwf 保存重开 | **Action 新增、复杂参数配置、授权执行与日志链路**未交付 |
+| React 交互 | #124 取消安全、#129 安全筛选、#134 数字草稿、#136 中文 IME 的真实 .hpl 文件往返已验收集成；#143 ENUM 代码只有 Draft | **可见的复杂 JSON/SQL 编辑、恢复**仍需专项；ENUM 必须先有原生 producer-attested 可见列，不能用假的 native wire fixture |
 | 运行/结果 | 现有 Hop 核心拥有执行能力，但不等于当前 SPA 已安全接通 | 前端授权运行、实时日志、指标、错误追踪、结果查看和多用户权限体系缺少完整闭环 |
 
 ## 当前优先级
 
-1. **T1：连接元数据链路**。使用已经安装并独立验证的 Apache Hop 2.20.0 PostgreSQL 方言及 `DatabaseMeta`，实现带访问控制的项目级持久化、浏览器创建/重开/复用；现有 #132 只能视为草稿起点。
-2. **T2：Workflow Action 链路**。在可保存的真实 .hwf 中新增/删除一个 Action，保留完整连接关系，并证明重新打开不丢失。
-3. **T3：扩展已可用的 FilterRows 单条件**。安全实现原生 Condition AND/OR、常量比较，或转向下一个真实缺口类型；不能破坏复杂 JSON 的默认保留行为。
-4. **T4：原生未知枚举与复杂表单**。数值草稿和中文 IME 已测试集成，继续审查旧未知值 Draft、从最新 main 构造能复现的错误并修复。
-5. **T5：贯通与集成**。优先审查有完整测试证据的分支，确认主线在五槽位中都可使用，持续压缩重复 Draft，而不是为小修堆积 PR。
+1. **T1：连接安全桥接**。以 #140 原生持久化为基础，先实现请求级/槽位级可信 workspace 授权与路由拒绝测试，再接 React 创建/重开/引用；不要暴露服务 token。
+2. **T2：Action 新增**。#141 已交付删除，下一步只做新增、合法原生参数初始化、连线及 .hwf 保存重开。
+3. **T3：FilterRows 复合条件**。先证明 Condition/CValue 的原生序列化再支持 AND/OR 与常量比较；#60 空列表专项测试已合并。
+4. **T4：可见的 SQL/JSON 交互问题**。旧枚举 Draft 收敛至 #143，必须先由 T3 提供真实可见 ENUM producer；优先处理复杂编辑器的输入/取消/错误恢复。
+5. **T5：真正的产品链路**。先验收已合主线功能，合并有真实保存重开证据的 PR；防止旧 Draft 和过时文档误导任务方向，长期目标是授权运行/日志。
 
 ## 可重复验证
 
