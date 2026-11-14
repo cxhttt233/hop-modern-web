@@ -125,6 +125,30 @@ public final class WorkflowResource {
   }
 
   @POST
+  @Path("/hop-delete")
+  public Response deleteHop(HopDeleteRequest request) {
+    if (request == null || request.id() == null || request.index() < 0
+        || request.from() == null || request.to() == null) {
+      return error(400, "valid id, hop index and endpoints are required");
+    }
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      var hops = document.workflow.getWorkflowHops();
+      if (request.index() >= hops.size()) return error(404, "workflow hop not found");
+      var hop = hops.get(request.index());
+      if (!request.from().equals(hop.getFromAction().getName())
+          || !request.to().equals(hop.getToAction().getName())) {
+        return error(409, "workflow hop changed; reopen before editing");
+      }
+      hops.remove(request.index());
+      document.workflow.setChanged();
+      document.dirty = true;
+      return Response.ok(snapshot(request.id(), document)).build();
+    }
+  }
+
+  @POST
   @Path("/save")
   public Response save(SaveRequest request) {
     if (request == null || request.id() == null) return error(400, "id is required");
@@ -170,6 +194,7 @@ public final class WorkflowResource {
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}
   public record MoveRequest(String id, String name, int x, int y) {}
+  public record HopDeleteRequest(String id, int index, String from, String to) {}
   public record HopEnabledRequest(String id, int index, String from, String to, boolean enabled) {}
   public record ActionSummary(String name, String type, int x, int y) {}
   public record HopSummary(String from, String to, boolean enabled) {}

@@ -4,7 +4,7 @@ type WorkflowAction = { name: string; type: string; x: number; y: number };
 type WorkflowHop = { from: string; to: string; enabled: boolean };
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[]; hops?: WorkflowHop[] };
 
-async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "save", body: object): Promise<T> {
+async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -119,7 +119,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
         <h2 style={{ margin: 0 }}>Workflow · .hwf</h2>
         <button type="button" onClick={closeSafely} disabled={busy}>关闭</button>
       </div>
-      <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持修改节点坐标；连线编辑尚未开放。</p>
+      <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持修改节点坐标；可切换连接状态或删除连接。</p>
       <form onSubmit={event => {
         event.preventDefault();
         if (!path.trim()) return;
@@ -178,6 +178,14 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
                   onChange={() => void execute(() => command("hop-enabled", {
                     id: workflow.id, index, from: hop.from, to: hop.to, enabled: !hop.enabled
                   }), true)} />启用</label>
+                <button type="button" disabled={busy} style={{ marginLeft: 8 }}
+                  aria-label={`删除连接 ${hop.from} 到 ${hop.to}`}
+                  onClick={() => {
+                    if (!window.confirm(`删除连接 ${hop.from} → ${hop.to}？保存后将写入 .hwf 文件。`)) return;
+                    void execute(() => command("hop-delete", {
+                      id: workflow.id, index, from: hop.from, to: hop.to
+                    }), true);
+                  }}>删除连接</button>
               </li>)}
             </ol>}
         </section>
