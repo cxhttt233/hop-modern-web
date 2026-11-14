@@ -3,6 +3,7 @@
 import pathlib
 import re
 import subprocess
+import time
 
 LAB = pathlib.Path("/home/ubuntu/hmw-agent-lab")
 PREVIEWS = LAB / "previews"
@@ -94,6 +95,7 @@ def run():
     if refs is None:
         print("PREVIEW_REFRESH_SKIPPED: no fresh branch information", flush=True)
         return
+    failed_smokes = []
     for slot in PATTERNS:
         pin = PREVIEWS / slot / '.preview-pin'
         if pin.exists():
@@ -102,6 +104,7 @@ def run():
         branch = choose(slot, refs)
         previous = PREVIEWS / slot / ".preview-sha"
         old_sha = previous.read_text().strip() if previous.exists() else ""
+        smoke_failed = PREVIEWS / slot / ".smoke-failed"
         if not branch or branch.startswith("-"):
             print(slot, "skip invalid ref", flush=True)
             continue
@@ -112,7 +115,7 @@ def run():
         if remote_sha.returncode != 0:
             print(slot, branch, "REF_NOT_AVAILABLE", flush=True)
             continue
-        if old_sha == expected and (PREVIEWS / slot / ".preview-api").read_text().strip() == "connected-v1":
+        if old_sha == expected and (PREVIEWS / slot / ".preview-api").read_text().strip() == "connected-v1" and not smoke_failed.exists():
             print(slot, branch, old_sha[:12], "UNCHANGED", flush=True)
             continue
         cmd = [str(LAB / "bin/preview-branch"), slot, branch]
@@ -128,11 +131,37 @@ def run():
             continue
         current_sha = previous.read_text().strip() if previous.exists() else ""
         print(slot, branch, current_sha[:12], "UPDATED" if current_sha != old_sha else "UNCHANGED", flush=True)
-        if current_sha != old_sha:
-            smoke = subprocess.run(["/usr/bin/node", str(LAB / "bin/smoke-product.mjs"), slot],
-                                   capture_output=True, text=True, timeout=45, check=False)
-            (LOGS / ("auto-smoke-" + slot + ".log")).write_text(smoke.stdout + smoke.stderr)
-            print(slot, "BROWSER_OK" if smoke.returncode == 0 else "BROWSER_FAILED", flush=True)
+        if current_sha != old_sha or smoke_failed.exists():
+            # When a Java backend revision is activated concurrently, the first
+            # browser smoke may race a brief JVM restart. Retry once, but do not
+            # silently mark a failed preview as healthy.
+            outcome = None
+            logs = []
+            for attempt in range(2):
+                if attempt:
+                    time.sleep(3)
+                try:
+                    smoke = subprocess.run(
+                        ["/usr/bin/node", str(LAB / "bin/smoke-product.mjs"), slot],
+                        capture_output=True, text=True, timeout=45, check=False)
+                    outcome = smoke.returncode
+                    logs.append(f"attempt {attempt + 1} exit={smoke.returncode}\n" +
+                                smoke.stdout + smoke.stderr)
+                except Exception as exc:
+                    outcome = -1
+                    logs.append(f"attempt {attempt + 1} error={exc!r}\n")
+                if outcome == 0:
+                    break
+            (LOGS / ("auto-smoke-" + slot + ".log")).write_text("\n".join(logs))
+            if outcome == 0:
+                smoke_failed.unlink(missing_ok=True)
+                print(slot, "BROWSER_OK", flush=True)
+            else:
+                smoke_failed.write_text(f"commit={current_sha} browser validation failed\n")
+                failed_smokes.append(slot)
+                print(slot, "BROWSER_FAILED", "after 2 attempts", flush=True)
+    if failed_smokes:
+        raise SystemExit("PREVIEW_SMOKE_FAILURE: " + ",".join(failed_smokes))
 
 if __name__ == "__main__":
     run()
