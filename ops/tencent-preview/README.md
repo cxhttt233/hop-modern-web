@@ -58,6 +58,25 @@ HMW_ISOLATED_PG_PLUGIN=1 /home/ubuntu/hmw-agent-lab/bin/with-isolated-java-branc
 The connection REST endpoint still needs `X-HMW-Connection-Token` authorization; the loopback runner exports a test-only token for the regression script. No real database network activity or password is involved. Verified real `JsonMetadataProvider` persistence under temporary `metadata/rdbms/RIVER_PG.json` with genuine `POSTGRESQL` dialect and HTTP PUT/GET/list; do not mistake this for a complete user-facing React management path.
 
 
+## Native Hop ABORT Action plugin (T2)
+
+The shared runtime initially contained only Hop-native `DUMMY` and `START` action classes. The source distribution has additional action modules, but they are separate plugin artifacts and are not discovered unless their JAR is on the Java classpath.
+
+T2 now supports the official Apache Hop 2.20.0 `hop-action-abort` plugin. The server POM declares the dependency; `ops/tencent-preview/backend-refresh` downloads it from Maven Central into `runtime/server/lib` before compiling, and verifies SHA-256:
+
+- Artifact: `org.apache.hop:hop-action-abort:2.20.0`
+- SHA-256: `827269a44e13ae018fe5cc89738ca5f4b4ebc5ca8f31a83ede61ce287ed99ad1`
+- Plugin id: `ABORT`
+- Native metadata: message + `LogLevel`
+
+For isolated tests only, the runner can add the same checksum-pinned JAR without touching the shared 8080 runtime:
+
+```sh
+HMW_ISOLATED_ACTION_ABORT=1 /home/ubuntu/hmw-agent-lab/bin/with-isolated-java-branch feat/t2-native-abort-action-20261114 bash ops/tencent-preview/test-native-action-add-roundtrip.sh
+```
+
+ABORT marks a workflow failed and stops execution when reached. The UI warns users to connect it only to an error-handling branch; it does not execute the workflow during editing.
+
 ## Preview Smoke failures are now retried and reported
 
 After a changed preview is built, `auto-refresh.py` runs Chromium. Because shared Java 8080 activation may briefly interrupt a browser request, it retries once after 3 seconds. If both attempts fail, it records `previews/tN/.smoke-failed`, keeps the last preview files, exits non-zero, and re-tests that slot on the next invocation **even if its commit SHA did not change**. A passing check clears the marker. Both attempts are written to `logs/auto-smoke-tN.log`.
