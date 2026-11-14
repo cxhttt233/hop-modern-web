@@ -49,7 +49,19 @@ public final class NativeDatabaseResource {
     if (Files.exists(metadata, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(metadata)) throw new IllegalStateException("metadata symlink");
     Files.createDirectories(metadata);
     var rdbms = metadata.resolve("rdbms");
-    if (Files.exists(rdbms, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(rdbms)) throw new IllegalStateException("rdbms symlink");
+    if (Files.exists(rdbms, LinkOption.NOFOLLOW_LINKS) &&
+        (!Files.isDirectory(rdbms, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(rdbms)))
+      throw new IllegalStateException("rdbms is not a safe directory");
+    Files.createDirectories(rdbms);
+    // Hop's JsonMetadataProvider reads each listed JSON entry by path. Refuse any
+    // symlink entry BEFORE list/load/save, rather than allowing metadata escaping
+    // to an arbitrary file outside the authorized workspace.
+    try (var stream = Files.newDirectoryStream(rdbms)) {
+      for (var entry : stream) {
+        if (Files.isSymbolicLink(entry))
+          throw new IllegalStateException("metadata entry is a symlink");
+      }
+    }
     var result = new JsonMetadataProvider();
     result.setBaseFolder(metadata.toString());
     return result;
