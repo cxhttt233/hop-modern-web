@@ -6,7 +6,8 @@ import path from "node:path";
 
 const base = process.env.T4_PREVIEW_URL ?? "http://127.0.0.1:4196/t4/";
 const workspace = process.env.T4_TEST_WORKSPACE ?? "/home/ubuntu/hmw-agent-lab/workspaces/t4";
-const basename = "table-input-sql-" + randomUUID() + ".hpl";
+const basename = process.env.T4_FIXTURE_BASENAME ?? ("table-input-sql-" + randomUUID() + ".hpl");
+if (!/^table-input-sql-[a-f0-9-]{36}\.hpl$/.test(basename)) throw new Error("invalid TableInput test fixture basename");
 const fixture = path.join(workspace, basename);
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -100,9 +101,10 @@ try {
   assert(writes.length === beforeCancelWrites + 1 && writes.every(x => x === 200), "unexpected config write sequence " + JSON.stringify(writes));
   const xml = await readFile(fixture, "utf8");
   assert(xml.includes("125.50") && xml.includes("PAID"), "native .hpl XML does not contain committed SQL");
+  console.log("T4_FIXTURE_PATH=" + fixture);
   console.log(JSON.stringify({ pass: true, transform: "TableInput", monacoToRaw: true, rawToMonaco: true,
     collapseReopen: true, cancelNoWrite: true, nativeSaveReopen: true, writes, errors }));
 } finally {
   await browser.close();
-  await unlink(fixture).catch(() => {});
+  if (process.env.T4_KEEP_FIXTURE !== "1") await unlink(fixture).catch(() => {});
 }
