@@ -23,14 +23,25 @@ assert any(a["name"] == "Native completion" for a in created["actions"])
 post("action-add", {"id":id,"type":"DUMMY","name":"native completion","x":1,"y":1},409)
 post("action-add", {"id":id,"type":"FAKE","name":"Injected","x":1,"y":1},400)
 post("action-add", {"id":id,"type":"DUMMY","name":"Invalid","x":-1,"y":1},400)
+post("action-add", {"id":id,"type":"ABORT","name":"Missing message","x":1,"y":1},400)
+post("action-add", {"id":id,"type":"ABORT","name":"Bad level","message":"bad","logLevel":"TRACE","x":1,"y":1},400)
+abort = post("action-add", {"id":id,"type":"ABORT","name":"Abort on failure",
+    "message":"Water level threshold exceeded","logLevel":"ERROR","x":520,"y":180})
+assert len(abort["actions"]) == 4 and abort["dirty"]
+assert any(a["name"] == "Abort on failure" and "Abort workflow" in a["type"] for a in abort["actions"]), abort["actions"]
 connected = post("hop-create", {"id":id,"from":"Start","to":"Native completion"})
+connected = post("hop-create", {"id":id,"from":"Native completion","to":"Abort on failure"})
 assert any(h["from"] == "Start" and h["to"] == "Native completion" for h in connected["hops"])
+assert any(h["from"] == "Native completion" and h["to"] == "Abort on failure" for h in connected["hops"])
 post("save", {"id":id})
 native_xml = path.read_text()
 assert "<type>DUMMY</type>" in native_xml, "not serialized as native Hop DUMMY"
-assert "Native completion" in native_xml
+assert "<type>ABORT</type>" in native_xml, "not serialized as native Hop ABORT"
+assert "Water level threshold exceeded" in native_xml
+assert "<loglevel>ERROR</loglevel>" in native_xml
 reopened = post("open", {"path":path.name})
-assert len(reopened["actions"]) == 3
+assert len(reopened["actions"]) == 4
 assert any(a["name"]=="Native completion" and "action does anything" in a["type"] for a in reopened["actions"]), reopened["actions"]
-assert any(h["to"] == "Native completion" for h in reopened["hops"])
-print("NATIVE_ACTION_ADD_HOP_SAVE_REOPEN_PASS")
+assert any(a["name"]=="Abort on failure" and "Abort workflow" in a["type"] for a in reopened["actions"]), reopened["actions"]
+assert len(reopened["hops"]) == 2
+print("NATIVE_DUMMY_AND_ABORT_ADD_HOP_SAVE_REOPEN_PASS")
