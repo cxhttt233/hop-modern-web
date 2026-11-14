@@ -410,6 +410,12 @@ export function App() {
     if (dirty) setSaveStatus("");
   }, [dirty]);
 
+  // A copied-path confirmation belongs to the file it was copied from.
+  // Never show the previous file's success message after switching pipelines.
+  useEffect(() => {
+    setPathCopyStatus("");
+  }, [pipelinePath, pipelineOpenRevision]);
+
   const copyPipelinePath = async () => {
     if (!isRealGraph) return;
     try {
