@@ -85,6 +85,8 @@ export function App() {
   const pendingMutationsRef = useRef(0);
   const [pendingMutations, setPendingMutations] = useState(0);
   const beginMutation = useCallback(() => {
+    // Any subsequent edit invalidates the previous save result.
+    setSaveStatus("");
     pendingMutationsRef.current += 1;
     setPendingMutations(pendingMutationsRef.current);
   }, []);
