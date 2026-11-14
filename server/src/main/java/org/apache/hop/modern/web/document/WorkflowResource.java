@@ -24,6 +24,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.workflow.WorkflowMeta;
+import org.apache.hop.workflow.action.ActionMeta;
+import org.apache.hop.workflow.actions.dummy.ActionDummy;
 
 /** Small authoritative .hwf open/edit/save boundary; no XML rewriting in the browser. */
 @Path("/api/workflows")
@@ -124,6 +126,34 @@ public final class WorkflowResource {
         return error(409, "workflow action name already exists");
       }
       action.setName(request.newName());
+      document.workflow.setChanged();
+      document.dirty = true;
+      return Response.ok(snapshot(request.id(), document)).build();
+    }
+  }
+
+  /** Only whitelisted native Hop action classes may be constructed, never arbitrary client JSON. */
+  @POST
+  @Path("/action-add")
+  public Response addAction(ActionAddRequest request) {
+    if (request == null || request.id() == null || request.name() == null
+        || request.name().isBlank() || !request.name().equals(request.name().trim())
+        || request.name().length() > 200 || request.type() == null
+        || request.x() < 0 || request.y() < 0 || request.x() > 100000 || request.y() > 100000) {
+      return error(400, "valid id, native action type, name and coordinates are required");
+    }
+    // First supported type: built-in Hop DUMMY action (no unrecognized extension parameters).
+    if (!"DUMMY".equals(request.type())) return error(400, "unsupported native action type");
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      if (document.workflow.getActions().stream()
+          .anyMatch(action -> action.getName().equalsIgnoreCase(request.name()))) {
+        return error(409, "workflow action name already exists");
+      }
+      ActionMeta action = new ActionMeta(new ActionDummy(request.name()));
+      action.setLocation(request.x(), request.y());
+      document.workflow.addAction(action);
       document.workflow.setChanged();
       document.dirty = true;
       return Response.ok(snapshot(request.id(), document)).build();
@@ -281,6 +311,7 @@ public final class WorkflowResource {
   public record MoveRequest(String id, String name, int x, int y) {}
   public record ActionDeleteRequest(String id, String name, int connectedHops) {}
   public record ActionRenameRequest(String id, String name, String newName) {}
+  public record ActionAddRequest(String id, String type, String name, int x, int y) {}
   public record HopCreateRequest(String id, String from, String to) {}
   public record HopDeleteRequest(String id, int index, String from, String to) {}
   public record HopEnabledRequest(String id, int index, String from, String to, boolean enabled) {}
