@@ -55,3 +55,10 @@ HMW_ISOLATED_PG_PLUGIN=1 /home/ubuntu/hmw-agent-lab/bin/with-isolated-java-branc
 ```
 
 The connection REST endpoint still needs `X-HMW-Connection-Token` authorization; the loopback runner exports a test-only token for the regression script. No real database network activity or password is involved. Verified real `JsonMetadataProvider` persistence under temporary `metadata/rdbms/RIVER_PG.json` with genuine `POSTGRESQL` dialect and HTTP PUT/GET/list; do not mistake this for a complete user-facing React management path.
+
+
+## Preview Smoke failures are now retried and reported
+
+After a changed preview is built, `auto-refresh.py` runs Chromium. Because shared Java 8080 activation may briefly interrupt a browser request, it retries once after 3 seconds. If both attempts fail, it records `previews/tN/.smoke-failed`, keeps the last preview files, exits non-zero, and re-tests that slot on the next invocation **even if its commit SHA did not change**. A passing check clears the marker. Both attempts are written to `logs/auto-smoke-tN.log`.
+
+2026-11-14 verification: after switching Java backends, one T3 browser check transiently failed although the overall refresh previously exited 0. After this change, we placed an artificial failure marker on an unchanged T3 preview and ran the actual auto-refresh; it rechecked Chromium, returned success, and cleared the marker. This avoids silently treating previously failed browser checks as healthy.
