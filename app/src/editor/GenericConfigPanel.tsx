@@ -312,9 +312,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
                 <strong>过滤记录 · 条件</strong>
                 <button type="button" className="config-native-list-mode"
                   aria-label={rawListEditors[p.key] ? "返回过滤条件表单" : "编辑过滤条件原始 JSON"}
-                  disabled={Boolean(rawListEditors[p.key] && invalid[p.key])}
-                  title={rawListEditors[p.key] && invalid[p.key] ? "请先修正 JSON 格式，或取消本次配置" : undefined}
                   disabled={Boolean(invalid[p.key])}
+                  title={rawListEditors[p.key] && invalid[p.key] ? "请先修正 JSON 格式，或取消本次配置" : undefined}
                   onClick={() => setRawListEditors(current => ({ ...current, [p.key]: !current[p.key] }))}>
                   {rawListEditors[p.key] ? "返回条件表单" : "高级：原始 JSON 编辑"}
                 </button>
