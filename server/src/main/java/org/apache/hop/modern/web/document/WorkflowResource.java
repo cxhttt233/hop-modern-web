@@ -125,6 +125,33 @@ public final class WorkflowResource {
   }
 
   @POST
+  @Path("/action-delete")
+  public Response deleteAction(ActionDeleteRequest request) {
+    if (request == null || request.id() == null || request.name() == null
+        || request.name().isBlank()) return error(400, "valid id and action name are required");
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      var action = document.workflow.findAction(request.name());
+      if (action == null) return error(404, "workflow action not found");
+      // Never silently discard edges: require an explicit acknowledgement of their count.
+      long connected = document.workflow.getWorkflowHops().stream()
+          .filter(hop -> hop.getFromAction() == action || hop.getToAction() == action).count();
+      if (request.connectedHops() != connected) {
+        return error(409, "connected hops changed; review and confirm deletion again");
+      }
+      document.workflow.getWorkflowHops().removeIf(
+          hop -> hop.getFromAction() == action || hop.getToAction() == action);
+      int index = document.workflow.getActions().indexOf(action);
+      if (index < 0) return error(409, "workflow action list changed");
+      document.workflow.removeAction(index);
+      document.workflow.setChanged();
+      document.dirty = true;
+      return Response.ok(snapshot(request.id(), document)).build();
+    }
+  }
+
+  @POST
   @Path("/hop-enabled")
   public Response setHopEnabled(HopEnabledRequest request) {
     if (request == null || request.id() == null || request.index() < 0) {
@@ -246,6 +273,7 @@ public final class WorkflowResource {
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}
   public record MoveRequest(String id, String name, int x, int y) {}
+  public record ActionDeleteRequest(String id, String name, int connectedHops) {}
   public record ActionRenameRequest(String id, String name, String newName) {}
   public record HopCreateRequest(String id, String from, String to) {}
   public record HopDeleteRequest(String id, int index, String from, String to) {}

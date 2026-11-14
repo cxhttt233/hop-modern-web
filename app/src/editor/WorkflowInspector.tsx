@@ -4,7 +4,7 @@ type WorkflowAction = { name: string; type: string; x: number; y: number };
 type WorkflowHop = { from: string; to: string; enabled: boolean };
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[]; hops?: WorkflowHop[] };
 
-async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "save", body: object): Promise<T> {
+async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -161,6 +161,21 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
             <label>新名称 <input name="newName" key={action.name} defaultValue={action.name} required maxLength={200} disabled={busy} /></label>
             <button type="submit" disabled={busy}>重命名</button>
           </form>)}
+        </section>}
+        {(workflow.actions?.length ?? 0) > 0 && <section aria-label="删除工作流节点">
+          <strong>删除节点</strong>
+          <p style={{ fontSize: 13 }}>删除节点时会同时删除与它相连的连接；其他节点及其原生参数保持不变。保存后才写入 .hwf。</p>
+          {(workflow.actions ?? []).map(action => {
+            const connectedHops = (workflow.hops ?? []).filter(h => h.from === action.name || h.to === action.name).length;
+            return <div key={action.name} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <span>{action.name} · {connectedHops} 条关联连接</span>
+              <button type="button" disabled={busy} aria-label={`删除节点 ${action.name}`}
+                onClick={() => {
+                  if (!window.confirm(`删除节点「${action.name}」及 ${connectedHops} 条关联连接？保存后将写入 .hwf 文件。`)) return;
+                  void execute(() => command("action-delete", { id: workflow.id, name: action.name, connectedHops }), true);
+                }}>删除节点</button>
+            </div>;
+          })}
         </section>}
         <p style={{ fontSize: 13, margin: 0 }}>可直接拖动流程图中的节点调整位置；拖动后仍需点击“保存 .hwf”写入磁盘。</p>
         <WorkflowMap actions={workflow.actions ?? []} hops={workflow.hops ?? []} disabled={busy}
