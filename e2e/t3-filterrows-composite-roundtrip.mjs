@@ -103,10 +103,11 @@ try {
   assert(writes.length === 2 && writes.every(x => x === 200),
     "unexpected write count/status " + JSON.stringify(writes));
   assert(errors.length === 0, "browser errors: " + errors.join("; "));
+  console.log("T3_FIXTURE_PATH=" + file);
   console.log(JSON.stringify({ pass: true, plugin: "FilterRows",
     comparison: "water_level >= warning_level", trueTarget: "sink", falseTarget: "source",
     nativeDiskRoundtrip: true, writes, errors }));
 } finally {
   await browser.close();
-  await unlink(file).catch(() => {});
+  if (process.env.T3_KEEP_FIXTURE !== "1") await unlink(file).catch(() => {});
 }
