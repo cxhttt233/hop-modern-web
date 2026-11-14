@@ -87,7 +87,11 @@ public final class PipelineEditResource {
     if (document == null) return error(404, "document_not_found", "opened pipeline document was not found");
     synchronized (document) {
       try {
+        if (!registry.isUnchanged(document)) {
+          return error(409, "external_change", "pipeline file changed on disk; reopen before saving");
+        }
         store.save(document.path(), document.pipeline());
+        registry.refreshSnapshot(document);
         return graph(document);
       } catch (Exception e) {
         return error(500, "save_failed", "pipeline could not be saved");
