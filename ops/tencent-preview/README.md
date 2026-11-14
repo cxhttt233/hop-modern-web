@@ -45,3 +45,13 @@ A **test-only** compatible plugin has been staged **outside** the shared Java se
 Run `/home/ubuntu/hmw-agent-lab/bin/check-native-database-meta` (repository source: `ops/tencent-preview/check-native-database-meta`). It compiles a disposable Java program using the installed Hop Java 21 runtime and dialect plugin, then registers `DatabasePluginType` and saves/loads a genuine `DatabaseMeta` through `MemoryMetadataProvider`. It verifies name, dialect, host, DB name, port and user. It does **not** store a credential, connect externally, change the Java 8080 service, or prove project disk persistence. Output: `HOP_NATIVE_DATABASEMETA_PASS`.
 
 **Required product work remains:** T1 must integrate a version-compatible set of dialect plugins into the actual secured runtime, use a real project `IHopMetadataProvider` with durable `metadata/rdbms` storage and workspace/session authorization, connect the React management view and demonstrate save/reopen/reuse in a Transform. Do not treat the old `.properties` draft store from PR #132 as Hop-native database metadata. JDBC drivers and secure external connection tests are separate; do not assume the dialect plugin ships a working JDBC driver for every database.
+
+### Opt-in native PostgreSQL dialect for an isolated API PR
+
+Set `HMW_ISOLATED_PG_PLUGIN=1` before `with-isolated-java-branch` to include the already verified and checksum-checked Apache Hop 2.20.0 PostgreSQL dialect JAR in the temporary Java process. This modifies **only** that disposable JVM's classpath, not the five preview services or the shared Java 8080 service. Example:
+
+```sh
+HMW_ISOLATED_PG_PLUGIN=1 /home/ubuntu/hmw-agent-lab/bin/with-isolated-java-branch t1/native-dbmeta-20261114-19 python3 ops/tencent-preview/test-native-dbmeta-http.py
+```
+
+The connection REST endpoint still needs `X-HMW-Connection-Token` authorization; the loopback runner exports a test-only token for the regression script. No real database network activity or password is involved. Verified real `JsonMetadataProvider` persistence under temporary `metadata/rdbms/RIVER_PG.json` with genuine `POSTGRESQL` dialect and HTTP PUT/GET/list; do not mistake this for a complete user-facing React management path.
