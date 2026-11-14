@@ -354,6 +354,18 @@ export function App() {
       });
   }, [dirty, document.id, reconcileGraph, source]);
 
+  // Browser reload, tab close, and external navigation must not silently discard
+  // unsaved Hop edits. Native beforeunload prompts are browser-controlled.
+  useEffect(() => {
+    if (source.kind !== "server" || !dirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirty, source.kind]);
+
   // Familiar editor shortcut. Keep native input behavior and never bypass
   // the existing dirty/in-flight mutation guards in saveDocument.
   useEffect(() => {
