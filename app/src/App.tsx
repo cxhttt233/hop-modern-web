@@ -3,6 +3,7 @@ import { Background, Controls, MiniMap, ReactFlow, applyNodeChanges, type Connec
 import type { HopGraphDocument } from "@hop-modern/contracts";
 import { addPipelineTransform, connectPipelineTransforms, deletePipelineTransform, movePipelineTransforms, openPipelineGraph, readPipelineTransformConfig, redoPipelineEdit, savePipeline, undoPipelineEdit, writePipelineTransformConfig, type GraphSource, type TransformConfigDocument } from "./editor/graphProvider";
 import { GenericConfigPanel } from "./editor/GenericConfigPanel";
+import { WorkflowInspector } from "./editor/WorkflowInspector";
 import { TRANSFORM_ICONS_A } from "./transformIconsA";
 import { TRANSFORM_ICONS_B } from "./transformIconsB";
 import { CATEGORY_ORDER, P0_TRANSFORMS, transformMeta, transformPrimaryName, transformSecondaryName } from "./transformCatalog";
@@ -60,6 +61,7 @@ function graphNodes(document: HopGraphDocument): Node[] {
 export function App() {
   const initialPipelinePath = import.meta.env.VITE_HOP_PIPELINE_PATH?.trim() ?? "";
   const [document, setDocument] = useState<HopGraphDocument>(emptyDocument);
+  const [showWorkflowInspector, setShowWorkflowInspector] = useState(false);
   const [source, setSource] = useState<GraphSource>({ kind: "sample" });
   const [nodes, setNodes] = useState<Node[]>([]);
   const [configId, setConfigId] = useState<string>();
@@ -476,6 +478,7 @@ export function App() {
         </div>
 
         <div className="editor-actions">
+          <button type="button" aria-label="打开 Workflow（.hwf）" onClick={() => setShowWorkflowInspector(true)}>Workflow</button>
           <button type="button" aria-label="打开流程（Choose pipeline）" disabled={saving || pendingMutations > 0} onClick={() => setShowOpenPanel((current) => !current)}>打开</button>
           {isRealGraph && <>
             <button type="button" aria-label="重新打开当前流程（Reload pipeline）"
@@ -646,6 +649,7 @@ export function App() {
         </ReactFlow>
         </TransformNodeActionsContext.Provider>
 
+        {showWorkflowInspector && <WorkflowInspector onClose={() => setShowWorkflowInspector(false)} />}
         {configError && <div className="preview-note error-note" role="alert">操作失败：{configError}</div>}
         {configured && isRealGraph && serverConfig?.nodeId === configured.id && (
           <GenericConfigPanel descriptor={serverConfig.descriptor} config={serverConfig.config}
