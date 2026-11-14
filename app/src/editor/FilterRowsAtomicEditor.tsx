@@ -85,11 +85,12 @@ export function canEditCompositeFilterRows(className: string, property: ConfigPr
   const children = root.conditions.condition;
   if (!Array.isArray(children) || children.length < 2) return false;
   return children.every((child, index) => record(child) &&
-    child.operator === (index === 0 ? "-" : child.operator) &&
+    (index !== 0 || child.operator === "-") &&
     (index === 0 || child.operator === "AND" || child.operator === "OR") &&
     FUNCTIONS.some(([code]) => code === child.function) &&
     typeof child.negated === "boolean" && typeof child.leftvalue === "string" &&
-    (!record(child.conditions) || !Array.isArray(child.conditions.condition) || child.conditions.condition.length === 0) &&
+    (child.conditions == null || (record(child.conditions) &&
+      (child.conditions.condition == null || (Array.isArray(child.conditions.condition) && child.conditions.condition.length === 0)))) &&
     (child.value == null ? (child.rightvalue == null || typeof child.rightvalue === "string") :
       record(child.value) && child.value.type === "Number" && typeof child.value.text === "string" && child.rightvalue == null));
 }
