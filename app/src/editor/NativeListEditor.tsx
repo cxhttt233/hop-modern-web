@@ -21,6 +21,30 @@ export function canEditNativeList(value: unknown, properties: ConfigPropertyDesc
     properties.every(p => !p.sensitive && ["STRING", "NUMBER", "BOOLEAN", "ENUM"].includes(p.shape));
 }
 
+/** Keep intermediate numeric text (such as "-" or "1.") while the user types. */
+function NativeNumberCell({ value, label, disabled, fallback, onCommit }: {
+  value: unknown; label: string; disabled?: boolean; fallback: number; onCommit: (value: number) => void;
+}) {
+  const [raw, setRaw] = useState(value == null ? "" : String(value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setRaw(value == null ? "" : String(value)); }, [value, editing]);
+  const commit = () => {
+    setEditing(false);
+    const next = raw.trim() === "" ? fallback : Number(raw);
+    if (Number.isFinite(next)) {
+      onCommit(next);
+      setRaw(String(next));
+    } else {
+      setRaw(value == null ? "" : String(value));
+    }
+  };
+  return <input type="text" inputMode="decimal" aria-label={label} disabled={disabled}
+    value={raw} onFocus={() => setEditing(true)} onChange={event => setRaw(event.target.value)}
+    onBlur={commit} onKeyDown={event => { if (event.key === "Escape") {
+      setRaw(value == null ? "" : String(value)); setEditing(false); event.currentTarget.blur();
+    } }} />;
+}
+
 /**
  * Typed rows of a producer-attested native LIST; untouched row properties remain intact.
  * Hop's Java serializer remains authoritative for JSON/XML persistence and validation.
@@ -102,17 +126,11 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
                     onChange={e => edit(index, column, e.target.value)}>
                     {options.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                   </select>
-                : <input aria-label={aria} disabled={disabled}
-                    type={column.shape === "NUMBER" ? "number" : "text"}
-                    step={column.shape === "NUMBER" ? "any" : undefined}
-                    value={val == null ? "" : String(val)}
-                    onChange={e => {
-                      const raw = e.target.value;
-                      // Do not push NaN or Infinity into the authoritative native config.
-                      const number = Number(raw);
-                      if (column.shape === "NUMBER" && !Number.isFinite(number)) return;
-                      edit(index, column, column.shape === "NUMBER" ? (raw === "" ? (column.nativeNumberDefault ?? 0) : number) : raw);
-                    }} />
+                : column.shape === "NUMBER"
+                ? <NativeNumberCell value={val} label={aria} disabled={disabled}
+                    fallback={column.nativeNumberDefault ?? 0} onCommit={next => edit(index, column, next)} />
+                : <input aria-label={aria} disabled={disabled} type="text"
+                    value={val == null ? "" : String(val)} onChange={e => edit(index, column, e.target.value)} />
             }</td>;
           })}<td className="config-native-list-actions">
               <button type="button" aria-label={title + " 上移第" + (index + 1) + "行"}
