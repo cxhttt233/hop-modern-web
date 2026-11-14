@@ -307,7 +307,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>{groupLabel}<small>{properties.length} 项</small>
         </button></legend>
         <div id={groupId} className="config-group-fields" hidden={!expanded}>{properties.map((p) =>
-          p.shape === "OBJECT" && canEditAtomicFilterRows(descriptor.className, p, draft[p.key])
+          p.shape === "OBJECT" && (canEditAtomicFilterRows(descriptor.className, p, draft[p.key]) ||
+                (rawListEditors[p.key] && canEditAtomicFilterRows(descriptor.className, p, nativeValue(p))))
             ? <div key={p.key} className="config-native-filter-field" role="group" aria-label="原生过滤条件配置">
                 <strong>过滤记录 · 条件</strong>
                 <button type="button" className="config-native-list-mode"
@@ -324,7 +325,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
                     </label>
                   : field(p)}
               </div>
-            : p.shape === "OBJECT" && canEditSelectValuesObject(descriptor, p, draft[p.key])
+            : p.shape === "OBJECT" && (canEditSelectValuesObject(descriptor, p, draft[p.key]) ||
+                (rawListEditors[p.key] && canEditSelectValuesObject(descriptor, p, nativeValue(p))))
             ? <div key={p.key} className="config-native-list-field" role="group" aria-label="选取字段配置">
                 <strong>字段操作</strong>
                 <button type="button" className="config-native-list-mode"
