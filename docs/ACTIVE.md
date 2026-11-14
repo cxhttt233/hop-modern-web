@@ -25,5 +25,6 @@
 - T1 可在隔离环境直接运行 `/home/ubuntu/hmw-agent-lab/bin/check-native-database-meta`：已核验 PostgreSQL 2.20.0 方言插件，使用真正的 Hop DatabaseMeta/MemoryMetadataProvider 读写；此命令**不做持久化、外部连接或共享 Java 部署**。
 - 安装的 Hop SNAPSHOT Java JAR 可直接编译独立分支：`/home/ubuntu/hmw-agent-lab/bin/check-java-branch <branch>`，不需要 Maven 解析远端依赖；**它仅做编译，不代替 JUnit、HTTP、安全与真实保存重开测试**。
 - 各槽位测试工作区独立；测试必须使用临时 .hpl/.hwf 副本并清理，不污染共享样例。云服务器物理内存仅 3.3GiB、Swap 已扩至 6GiB（原 4GiB 已占满），仍需严格错峰，五项任务按 :26/:34/:42/:50/:58 错峰，分支构建有共享锁。
-- 原生连接 8080 API 目前无 token 配置返回 503，预览桥 8181 的 native-connections 路由仍为 404，**不得用简单放行 GET/PUT 或将静态 token 放在浏览器来绕过**。\n- 系统安全验证与真实授权执行尚未完成；请勿把隔离的预览桥接当作生产权限体系。保留密码秘密，不在日志中输出。
+- 原生连接 8080 API 目前无 token 配置返回 503，预览桥 8181 的 native-connections 路由仍为 404，**不得用简单放行 GET/PUT 或将静态 token 放在浏览器来绕过**。
+- 系统安全验证与真实授权执行尚未完成；请勿把隔离的预览桥接当作生产权限体系。保留密码秘密，不在日志中输出。
 - 旧问题与 PR 仅作可追溯证据，当前产品事实见 [产品交付板](product-delivery-board.md)，不要复制旧“Workflow 尚不可编辑”等已经过时的文字。
