@@ -29,7 +29,7 @@ public final class NativeWorkflowActionProof {
       require(workflow.getActions().size() == 4, "expected two Start + DUMMY + ABORT actions");
       require(workflow.getWorkflowHops().size() == 2, "expected two native workflow hops");
       ActionMeta dummyMeta = workflow.getActions().stream()
-          .filter(a -> "Native completion".equals(a.getName())).findFirst()
+          .filter(a -> "Native UI proof".equals(a.getName())).findFirst()
           .orElseThrow(() -> new AssertionError("native DUMMY node missing"));
       ActionMeta abortMeta = workflow.getActions().stream()
           .filter(a -> "Abort on failure".equals(a.getName())).findFirst()
@@ -44,7 +44,7 @@ public final class NativeWorkflowActionProof {
       require("Water level threshold exceeded".equals(getMessage.invoke(abort)), "ABORT message lost");
       require("ERROR".equals(String.valueOf(getLogLevel.invoke(abort))), "ABORT log level lost");
       require(workflow.getWorkflowHops().stream().anyMatch(h ->
-          "Native completion".equals(h.getFromAction().getName())
+          "Native UI proof".equals(h.getFromAction().getName())
               && "Abort on failure".equals(h.getToAction().getName())), "native error branch hop lost");
       System.out.println("NATIVE_HWF_DUMMY_ABORT_PLUGIN_REVERSE_PARSE_PASS");
       System.out.println("workflow=" + workflow.getName() + ", actions=" + workflow.getActions().size()
