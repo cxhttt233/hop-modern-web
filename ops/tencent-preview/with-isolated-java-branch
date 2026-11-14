@@ -10,7 +10,7 @@ EXTRA_CP=""
 if [[ "${HMW_ISOLATED_PG_PLUGIN:-0}" == "1" ]]; then
   PG_JAR="$LAB/vendor/postgres-plugin-proof/hop-databases-postgresql-2.20.0.jar"
   [[ -f "$PG_JAR" ]] || { echo "Missing isolated PostgreSQL dialect plugin" >&2; exit 69; }
-  printf '%s  %s\\n' 'c60e8136cbee71b7623bc7262ba0583997d06bf3' "$PG_JAR" | sha1sum --check --status || {
+  printf '%s  %s\n' 'c60e8136cbee71b7623bc7262ba0583997d06bf3' "$PG_JAR" | sha1sum --check --status || {
     echo "PostgreSQL dialect checksum mismatch" >&2; exit 65;
   }
   EXTRA_CP="${EXTRA_CP}:$PG_JAR"
