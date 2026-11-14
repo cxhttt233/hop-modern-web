@@ -7,9 +7,15 @@ RUNTIME=/home/ubuntu/hop-modern-preview/runtime/server
 BRANCH="${1:-main}"
 git check-ref-format --branch "$BRANCH" >/dev/null
 [[ "$BRANCH" != -* ]] || { echo "invalid branch" >&2; exit 2; }
-SHA=$(git -C "$SRC" rev-parse --verify "refs/remotes/origin/$BRANCH^{commit}")
 exec 9>"$LAB/build.lock"
 flock -w 150 9 || { echo "Shared build lock busy" >&2; exit 75; }
+# Agents publish through GitHub connector; preview mirror may not know new PR refs.
+if ! timeout 25s git -C "$SRC" fetch -q --no-tags --depth=1 origin     "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"; then
+  echo "WARNING: GitHub unavailable, checking cached branch; verify SHA before reporting success" >&2
+fi
+SHA=$(git -C "$SRC" rev-parse --verify "refs/remotes/origin/$BRANCH^{commit}" 2>/dev/null) || {
+  echo "Missing branch $BRANCH: publish to GitHub, then retry" >&2; exit 69;
+}
 TMP=$(mktemp -d "$LAB/.java-check-XXXXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/src" "$TMP/classes"
