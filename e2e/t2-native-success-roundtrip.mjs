@@ -74,9 +74,10 @@ try {
   const duplicate = dialog.locator('form[aria-label="新增工作流节点"]');
   await duplicate.locator('[name="actionType"]').selectOption("SUCCESS");
   await duplicate.locator('[name="actionName"]').fill("Success terminal");
+  const rejected = page.waitForResponse(response => response.url().includes("/action-add") && response.status() === 409);
   await duplicate.getByRole("button", {name:"新增原生节点"}).click();
+  await rejected;
   await dialog.getByText("工作流节点 · 4").waitFor();
-  await page.waitForFunction(() => true); // yield after the rejected request
   assert.ok(calls.some(c=>c.endpoint.endsWith("/action-add")&&c.status===409),"duplicate action must return HTTP 409");
   assert.equal(errors.length,0,"browser errors");
   for (const name of ["open","action-add","hop-create","save"])
