@@ -7,7 +7,8 @@ import path from "node:path";
 
 const base = process.env.T3_PREVIEW_URL ?? "http://127.0.0.1:4196/t3/";
 const workspace = process.env.T3_TEST_WORKSPACE ?? "/home/ubuntu/hmw-agent-lab/workspaces/t3";
-const basename = "filterrows-composite-" + randomUUID() + ".hpl";
+const basename = process.env.T3_FIXTURE_BASENAME ?? ("filterrows-composite-" + randomUUID() + ".hpl");
+if (!/^filterrows-composite-[a-f0-9-]{36}\.hpl$/.test(basename)) throw new Error("invalid test fixture basename");
 const file = path.join(workspace, basename);
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
