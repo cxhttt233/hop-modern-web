@@ -82,6 +82,7 @@ export function App() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
+  const [saveConflict, setSaveConflict] = useState(false);
   const [pathCopyStatus, setPathCopyStatus] = useState("");
   const savingRef = useRef(false);
   // Save must not race with an in-flight authoritative edit/config write.
@@ -90,6 +91,7 @@ export function App() {
   const beginMutation = useCallback(() => {
     // Any subsequent edit invalidates the previous save result.
     setSaveStatus("");
+    setSaveConflict(false);
     pendingMutationsRef.current += 1;
     setPendingMutations(pendingMutationsRef.current);
   }, []);
@@ -128,6 +130,7 @@ export function App() {
     setConfigLoading(false);
     setDirty(false);
     setSaveStatus("");
+    setSaveConflict(false);
     if (!pipelinePath) {
       setSource({ kind: "sample" });
       return;
@@ -344,16 +347,23 @@ export function App() {
     savingRef.current = true;
     setSaving(true);
     setSaveStatus("");
+    setSaveConflict(false);
     setConfigError(undefined);
     savePipeline(document.id)
       .then((graph) => {
         reconcileGraph(graph);
         setDirty(false);
+        setSaveConflict(false);
         setSaveStatus("已保存到服务器");
       })
       .catch((error: unknown) => {
-        setConfigError(error instanceof Error ? error.message : "Pipeline save failed");
-        setSaveStatus("保存失败，请重试");
+        const detail = error instanceof Error ? error.message : "Pipeline save failed";
+        const externalConflict = /\(409\).*external_change/.test(detail);
+        setConfigError(detail);
+        setSaveConflict(externalConflict);
+        setSaveStatus(externalConflict
+          ? "外部文件已变更，未覆盖（编辑仍保留）；核对或恢复磁盘文件后重试"
+          : "保存失败，请重试");
       })
       .finally(() => {
         savingRef.current = false;
@@ -472,8 +482,8 @@ export function App() {
           <strong title={isRealGraph ? pipelinePath : undefined}>{displayPipelineName}</strong>
           {isRealGraph && <button type="button" aria-label="复制当前流程路径" title={pipelinePath} onClick={() => { void copyPipelinePath(); }}>复制路径</button>}
           {isRealGraph && pathCopyStatus && <span role="status">{pathCopyStatus}</span>}
-          {isRealGraph && dirty && <span className="dirty-state is-dirty" role="status">{saveStatus || "未保存"}</span>}
-          {isRealGraph && dirty && saveStatus === "保存失败，请重试" && (
+          {isRealGraph && dirty && <span className="dirty-state is-dirty" role={saveConflict ? "alert" : "status"}>{saveStatus || "未保存"}</span>}
+          {isRealGraph && dirty && (saveStatus === "保存失败，请重试" || saveConflict) && (
             <button type="button" aria-label="重试保存当前流程" disabled={saving || pendingMutations > 0} onClick={saveDocument}>重试保存</button>
           )}
           {isRealGraph && !dirty && saveStatus && <span className="dirty-state" role="status">{saveStatus}</span>}
