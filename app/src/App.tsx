@@ -550,7 +550,15 @@ export function App() {
             </div>
             <div className="palette-search">
               <span aria-hidden="true">⌕</span>
-              <input ref={paletteSearchRef} aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setPaletteQuery(""); }} />
+              <input ref={paletteSearchRef} aria-label="搜索组件（Search transforms）" placeholder="搜索组件…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} onKeyDown={(event) => {
+                if (event.key === "Escape") setPaletteQuery("");
+                // Only Enter-add a unique search result; ambiguous matches remain click-to-choose.
+                if (event.key === "Enter" && paletteQuery.trim() && filteredTransforms.length === 1) {
+                  event.preventDefault();
+                  addTransformFromPalette(filteredTransforms[0]);
+                }
+              }} />
+              {paletteQuery.trim() && filteredTransforms.length === 1 && <small role="status">回车添加唯一匹配组件</small>}
               {paletteQuery && <button type="button" aria-label="清除组件搜索" title="清除搜索（Esc）" onClick={() => setPaletteQuery("")}>×</button>}
             </div>
             <div className="transform-list">
