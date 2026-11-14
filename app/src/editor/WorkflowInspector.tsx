@@ -187,6 +187,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
             <label>Y <input name="actionY" type="number" min={0} max={100000} defaultValue={200} required disabled={busy}
               style={{ width: 85 }} /></label>
             <button type="submit" disabled={busy}>新增原生节点</button>
+            <button type="reset" disabled={busy} onClick={() => setNewActionType("DUMMY")}>取消新增</button>
           </form>
         </section>
         {(workflow.actions?.length ?? 0) > 0 && <section aria-label="重命名工作流节点">
