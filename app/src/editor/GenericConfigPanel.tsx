@@ -204,8 +204,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     }
     if (p.shape === "LIST" && !rawListEditors[p.key] &&
         resolveNativeWireListItem(descriptor, p.key, 0) &&
-        canEditNativeList(value, p.elementProperties ?? [])) {
-      return <NativeListEditor title={label(p)} value={value} properties={p.elementProperties ?? []}
+        canEditNativeList(value ?? [], p.elementProperties ?? [])) {
+      return <NativeListEditor title={label(p)} value={Array.isArray(value) ? value : []} properties={p.elementProperties ?? []}
         disabled={disabled} onChange={rows => set(p.key, rows)} />;
     }
     if (p.shape === "OBJECT" || p.shape === "LIST") {
@@ -308,13 +308,13 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
             : p.shape === "LIST" && resolveNativeWireListItem(descriptor, p.key, 0)
             ? <div key={p.key} className="config-native-list-field" role="group" aria-label={label(p)}>
                 <strong>{label(p)}</strong>
-                {canEditNativeList(draft[p.key], p.elementProperties ?? []) &&
+                {canEditNativeList(draft[p.key] ?? [], p.elementProperties ?? []) &&
                   <button type="button" className="config-native-list-mode"
                     aria-label={rawListEditors[p.key] ? "返回字段表格" : "切换字段原始 JSON 编辑"}
                     onClick={() => setRawListEditors(current => ({ ...current, [p.key]: !current[p.key] }))}>
                     {rawListEditors[p.key] ? "返回字段表格" : "原始 JSON 编辑"}
                   </button>}
-                {rawListEditors[p.key] || !canEditNativeList(draft[p.key], p.elementProperties ?? [])
+                {rawListEditors[p.key] || !canEditNativeList(draft[p.key] ?? [], p.elementProperties ?? [])
                   ? <label data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}>
                       <span>原生字段 JSON</span>{field(p)}
                       {invalid[p.key] && <small role="alert">请输入有效的列表 JSON</small>}
