@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Safe Java compile-only check for PR branches. No service restart or deployment.
+LAB=/home/ubuntu/hmw-agent-lab
+SRC="$LAB/source"
+RUNTIME=/home/ubuntu/hop-modern-preview/runtime/server
+BRANCH="${1:-main}"
+git check-ref-format --branch "$BRANCH" >/dev/null
+[[ "$BRANCH" != -* ]] || { echo "invalid branch" >&2; exit 2; }
+SHA=$(git -C "$SRC" rev-parse --verify "refs/remotes/origin/$BRANCH^{commit}")
+exec 9>"$LAB/build.lock"
+flock -w 150 9 || { echo "Shared build lock busy" >&2; exit 75; }
+TMP=$(mktemp -d "$LAB/.java-check-XXXXXXXX")
+trap 'rm -rf "$TMP"' EXIT
+mkdir -p "$TMP/src" "$TMP/classes"
+git -C "$SRC" archive "$SHA" server/src/main/java | tar -x -C "$TMP/src"
+mapfile -d '' JAVA_FILES < <(find "$TMP/src/server/src/main/java" -name '*.java' -print0)
+if (( ${#JAVA_FILES[@]} == 0 )); then echo "No server Java sources" >&2; exit 1; fi
+echo "JAVA_COMPILE_START branch=$BRANCH commit=${SHA:0:12} files=${#JAVA_FILES[@]}"
+timeout 90s /usr/bin/javac -proc:none -encoding UTF-8 --release 21 \
+  -cp "$RUNTIME/classes:$RUNTIME/lib/*" -d "$TMP/classes" "${JAVA_FILES[@]}"
+echo "JAVA_COMPILE_OK branch=$BRANCH commit=${SHA:0:12} classes=$(find "$TMP/classes" -name '*.class' | wc -l)"

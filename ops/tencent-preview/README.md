@@ -11,3 +11,7 @@ Version-controlled copy of the tested server refresh script.
 - Validate with `python3 -m py_compile ops/tencent-preview/auto-refresh.py` and check service logs after the next run. Browser smoke must be run against all five slots before claiming deployment is healthy.
 
 This file is documentation/source control for the server script, not a substitute for existing authentication or privileged backend activation. Update server deployment deliberately when changing it.
+
+## Compile a Java branch without Maven SNAPSHOT resolution
+
+`/home/ubuntu/hmw-agent-lab/bin/check-java-branch <branch>` uses the currently installed Java 21 runtime and Hop jars to compile all `server/src/main/java` sources from an existing cached origin branch. It acquires the common build lock, uses a temporary directory, does **not** deploy or restart Java, and deletes compiled objects after checking. It is a compile check, not a replacement for JUnit, integration/security review, or actual HTTP browser tests. Run `preview-branch` and focused API tests after it passes. On 2026-11-14 both `main` and `t1/catalog-bounded-scan-20261114` compiled successfully (47 and 46 `.class` files).
