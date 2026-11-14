@@ -15,6 +15,7 @@ import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import org.apache.hop.modern.server.files.WorkspacePaths;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +43,12 @@ public final class WorkflowResource {
       return error(400, "path is required");
     }
     try {
-      java.nio.file.Path file = java.nio.file.Path.of(request.path()).toAbsolutePath().normalize();
+      // Enforce the same server-side workspace boundary as pipeline documents.
+      // The browser bridge is not a security boundary: direct API callers must be checked.
+      String workspace = System.getProperty("hop.modern.workspace");
+      java.nio.file.Path file = workspace == null || workspace.isBlank()
+          ? java.nio.file.Path.of(request.path()).toAbsolutePath().normalize()
+          : new WorkspacePaths(java.nio.file.Path.of(workspace)).existingFile(request.path());
       if (!Files.isRegularFile(file)) return error(404, "workflow file not found");
       WorkflowMeta workflow = store.open(file);
       String id = UUID.randomUUID().toString();
@@ -50,7 +56,7 @@ public final class WorkflowResource {
       opened.put(id, document);
       return Response.ok(snapshot(id, document)).build();
     } catch (IllegalArgumentException e) {
-      return error(400, "path must reference a .hwf file");
+      return error(400, "path must reference a .hwf file inside the workspace");
     } catch (IOException e) {
       return error(422, "workflow could not be read");
     } catch (Exception e) {
