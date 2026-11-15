@@ -1,20 +1,26 @@
 # Hop Modern Web · 当前开发入口
 
-> 状态核查：2026-11-14 21 点（GitHub main、共享 8080 与 T5 主线浏览器回归已确认）。后续仍以实际文件往返和最新 main 为准。
+> 最后复核：2026-11-15 13:22（Asia/Shanghai）。GitHub main `52e087d`，T1–T5 预览均为该版本；共享 Java `aab4faf`（其后提交是 docs/ops/前端/测试，无后端业务代码差异），8080 systemd 单实例正常。后续状态以实际 GitHub、Java active SHA、浏览器和原生文件重开为准。
 
 **产品目标**：在浏览器里完成真实 Hop 文件/数据库连接管理 → Transform 或 Workflow 编辑 → 保存重开 → 经授权运行和查看结果。
 
-**架构依据**：`cxhttt233/hop` 分支 `design/web-modern-architecture` 的 `docs/web-modern-architecture-plan.md` 是原项目唯一架构与实现依据。本仓库本页和 [产品交付板](product-delivery-board.md) 只负责当前进度、用户路径和验收，不重新设计架构。
+**架构唯一依据**：`cxhttt233/hop` 分支 `design/web-modern-architecture` 的 `docs/web-modern-architecture-plan.md`。本页和产品交付板只说明现行分工/状态/验收，不能改写架构；重点看原方案 A3、4.5、6 节的 FormSchemaGenerator / T0-T1-T2 分层。
 
 ## 五项任务的下一产品断点
 
-| 任务 | 已证明的基础 | 下一步最高价值的未闭环 |
+**2026-11-15 用户确认：专业表单自动生成器从 Java 元数据到 React 渲染，完全且仅由 T3 一个任务负责。** 不再跨 T1/T3/T4 拆 Schema、样式和 Action 表单。对既有已合并功能只维护，不重复实现。五个独立工作边界如下：
+
+| 任务 | 独占责任（不跨界修改） | 当前证据与下一步真正阻塞 |
 |---|---|---|
-| T1 服务端 | 工作区安全基础、#140 Apache Hop 原生 DatabaseMeta/JsonMetadataProvider JSON CRUD（含 token 拒绝、symlink 拒绝），#144 PostgreSQL 2.20 隔离 runner | **连接 API 的可信用户/槽位授权域与 React 入口**：共享 8080 无后端 token 返回 503，桥 8181 目前 404；不可简单开放代理或向浏览器提供服务端 token；之后验收创建→保存重开→TableInput 引用 |
-| T2 Workflow | 真实 .hwf 编辑、连接、Action 删除/改名，#147 已增加配置工作区时的直接 Java API 文件越界保护，并通过独立 JVM 真文件重开测试 | **原生 Action 新增、参数合法初始化、连接/保存/重开**；后续安全授权执行和日志 |
-| T3 Transform | SelectValues 三列表、TableInput、FilterRows 单条件（#137）+ 取消回归（#142）；#60 原生空列表的 Hop .hpl 往返专项测试已合入 | **原生 FilterRows AND/OR + 常量比较**，需证明 Condition/CValue 真实序列化；复杂条件维持 JSON 回退，随后 TableOutput/JsonInput |
-| T4 React | #124/#129/#134/#136 + #151 外部变更 409 可理解提示/草稿保留/重试已通过真实浏览器保存重开；#143 ENUM 未验收 | **真实可见的复杂 JSON/SQL 编辑、保存失败恢复**；原生 ENUM 需真实 producer 后再验证 |
-| T5 集成 | #147/#149/#150/#151 已合主线，Pipeline 外部改动/删除/symlink 防覆盖、409 浏览器恢复；共享 8080 与 T5 main 37d2aa6 复测 4→5 节点保存重开、无 JS 错误；重复旧 PR 已关闭 | **T1 安全数据库连接全链路、T2 Action 新增、T3 复合条件、T4 JSON/SQL，然后授权执行/日志**；不能用单纯 Smoke 代替真实能力 |
+| **T1 · 服务端与认证** | 文件/工作区、数据库连接元数据、可信用户身份与授权；**不修改表单 Schema/生成器/渲染器/API** | 原生 DatabaseMeta 隔离测试与未授权 25/25 fail-closed 已通过。**没有可信身份发行者，原生数据库管理入口必须继续关闭**；不得用槽位/IP/浏览器静态 token/伪造 X-User 请求头代替用户身份。T1 继续审核可验证的身份与最小权限边界，不阻塞 T3 的只读元数据生成。 |
+| **T2 · Workflow 图与 Action 能力** | 原生 .hwf 图节点、Action 创建/连接/修改、图保存冲突与回归；**不实现 Action 配置表单生成器** | START/DUMMY/ABORT/SUCCESS 原生闭环已验收，已有 ABORT 参数编辑/503 保留草稿。下一候选 FILE_EXISTS 官方 Hop 2.20 JAR 已取得、sha256 `66d423e8832af84651e90a990c378270ed6a1e2f6bbac36a4a51cf2a52b1ea78`，可在隔离 JVM 通过 `HMW_ISOLATED_ACTION_FILE_EXISTS=1` 加载，独立原生 Java .hwf 生成→反解析已验证；**未在共享 Java 启用**。可继续 Action/图功能，但不要自己开发/改动表单引擎。 |
+| **T3 · 唯一表单生成器负责人** | **独占**：SWT-free Hop Metadata/注解/i18n、业务语义、FormSchema 生成与扩展、Widget/布局/Tab/组/字段顺序/密度/宽幅、自适应 React 通用渲染、Transform **和 Workflow Action** 共用机制、完整批量覆盖分析与真实持久化验收 | TableInput/InsertUpdate/TableOutput 和现有 NativeListEditor 的原生功能已验收，但目前只是若干局部能力，**不能宣称整体智能生成器已完成**。先从三类代表插件抽象统一 T0 元数据 Schema、T1 `form.json` 声明布局、T2 必要专用插槽；再枚举所有已安装 Transform/Action，输出生成成功/降级/失败及原因；随机抽取未手写适配插件实测无需 React 改码即可形成专业布局并经 Hop Java .hpl/.hwf 重开。T3 自己完成前后端，其他任务不进入本代码边界。 |
+| **T4 · 非表单 React 全局交互** | 画布、导航、图操作与非表单的通用体验、安全的独立 UI 回归；**不修改 GenericConfigPanel/NativeListEditor/FormSchema/生成器样式** | ExecSql/TableInput Monaco 与 #180 连续撤销的现有成果均已通过，停止重复。对于表单样式/IME/布局问题交由 T3 修复；T4 只处理明确属于独立画布/全局交互的故障。 |
+| **T5 · 总集成和外部验收** | 五槽部署版本、8080 单实例、资源/回滚、跨模块 E2E、安全验收；**不接管生成器代码** | #173 secure .hpl/.hwf descriptor-relative 保存，T5 409→200 恢复，5/5 Smoke 与业务回归已通过。T5 主要检查 T3 交付是否在**未特殊处理插件**中生成用户可理解表单，不以字段数量/PR 数量/Smoke 代替体验；其他四条保持分工。 |
+
+**T3 交付门槛**：同一套生成器支持 Transform + Workflow Action；一批真实插件可批量试用，报告统计覆盖率/降级原因；至少 TableInput、InsertUpdate、TableOutput 和未特化抽样插件在真实浏览器中完成“找到连接/主要参数 → 可读的专业布局 → 取消不写盘/保存成功 → 官方 Hop Java 原生磁盘重开”。专门的布局声明是通用 Schema 的可选增强，不是为每个 Transform 写一个 React 页面。安全凭据不能出现在客户端 Schema 中。
+
+**交接/代码冲突规则**：T3 是本里程碑唯一负责人的 GitHub 跟踪入口 [Issue #3](https://github.com/cxhttt233/hop-modern-web/issues/3)。T1/T2/T4/T5 遇到生成器问题仅向 #3 提供复现/原生样本/验收反馈，不直接改 T3 独占的 Java Schema 或 React 表单模块。T3 所需外部基础设施必须是稳定独立接口，不能成为其完整交付的前置等待。
 
 ## 共同执行规则
 
