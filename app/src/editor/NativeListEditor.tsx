@@ -11,6 +11,7 @@ interface Props {
 
 const LABELS: Record<string, string> = {
   name: "字段名称", type: "数据类型", format: "格式", length: "长度",
+  stream_name: "输入字段", column_name: "目标表列",
   precision: "精度", ascending: "升序", case_sensitive: "大小写敏感",
 };
 const isRecord = (value: unknown): value is Record<string, unknown> =>
