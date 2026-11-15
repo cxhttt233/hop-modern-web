@@ -117,16 +117,31 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
   // Edits, moves, adds or duplicates invalidate the history rather than
   // restoring a stale row into a different structure.
   const [deletedRows, setDeletedRows] = useState<Array<{ index: number; row: unknown }>>([]);
+  // The outer GenericConfigPanel can reset this entire field independently.
+  // Invalidate old undo entries on an external replacement; do not allow
+  // restoring deleted rows from a prior version of the native list.
+  const localRows = useRef<unknown[] | null>(null);
+  const emitRows = (nextRows: unknown[]) => {
+    localRows.current = nextRows;
+    onChange(nextRows);
+  };
+  useEffect(() => {
+    if (localRows.current === rows) {
+      localRows.current = null;
+    } else {
+      setDeletedRows([]);
+    }
+  }, [rows]);
   const remove = (index: number) => {
     if (disabled || index < 0 || index >= rows.length) return;
     setDeletedRows(previous => [...previous, { index, row: rows[index] }]);
-    onChange(rows.filter((_, i) => i !== index));
+    emitRows(rows.filter((_, i) => i !== index));
   };
   const undoDelete = () => {
     if (disabled || deletedRows.length === 0) return;
     const last = deletedRows[deletedRows.length - 1];
     const index = Math.min(last.index, rows.length);
-    onChange([...rows.slice(0, index), last.row, ...rows.slice(index)]);
+    emitRows([...rows.slice(0, index), last.row, ...rows.slice(index)]);
     setDeletedRows(previous => previous.slice(0, -1));
   };
   const needle = query.trim().toLocaleLowerCase();
@@ -148,7 +163,7 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
   }, [rows]);
   const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) => {
     setDeletedRows([]);
-    onChange(rows.map((row, i) => i === index ?
+    emitRows(rows.map((row, i) => i === index ?
       { ...(row as Record<string, unknown>), [column.key]: nextValue } : row));
   };
   const move = (from: number, to: number) => {
@@ -156,19 +171,19 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
     const [item] = changed.splice(from, 1);
     changed.splice(to, 0, item);
     setDeletedRows([]);
-    onChange(changed);
+    emitRows(changed);
   };
   // Duplicate the entire native row, including properties not shown in the editor.
   // This lets users add similar fields without silently dropping Hop metadata.
   const duplicate = (index: number) => {
     const row = rows[index] as Record<string, unknown>;
     setDeletedRows([]);
-    onChange([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
+    emitRows([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
   };
   const add = () => {
     pendingFocusRow.current = rows.length;
     setDeletedRows([]);
-    onChange([...rows, Object.fromEntries(properties.map(p =>
+    emitRows([...rows, Object.fromEntries(properties.map(p =>
     [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
       p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
       p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]))]);
