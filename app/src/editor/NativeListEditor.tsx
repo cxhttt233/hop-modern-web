@@ -97,6 +97,20 @@ function NativeNumberCell({ value, label, disabled, fallback, onCommit }: {
 export function NativeListEditor({ title, value: rows, properties, columnLabels, disabled, onChange }: Props) {
   const pendingFocusRow = useRef<number | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+  // NativeTextCell owns an uncommitted IME/editing draft. Index keys would
+  // reuse that draft for a different row after deletion/insertion/undo.
+  // Identify rows by their original object identity; a modified row gets a
+  // fresh identity on commit, while moved/undone rows retain their identity.
+  const rowIds = useRef(new WeakMap<object, number>());
+  const nextRowId = useRef(0);
+  const keyForRow = (row: unknown): number => {
+    const record = row as object;
+    const known = rowIds.current.get(record);
+    if (known !== undefined) return known;
+    const next = ++nextRowId.current;
+    rowIds.current.set(record, next);
+    return next;
+  };
   const [query, setQuery] = useState("");
   // Keep a LIFO history only for consecutive deletions. The complete native
   // row object is retained, including properties not shown as UI columns.
@@ -180,7 +194,7 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
           <th scope="col" key={column.key}>{columnLabels?.[column.key] ?? LABELS[column.key] ?? column.key}</th>)}<th scope="col">操作</th></tr></thead>
         <tbody>{visibleRows.map(({ entry, index }) => {
           const row = entry as Record<string, unknown>;
-          return <tr key={index}><th scope="row">{index + 1}</th>{properties.map(column => {
+          return <tr key={keyForRow(entry)}><th scope="row">{index + 1}</th>{properties.map(column => {
             const val = row[column.key];
             const aria = title + " 第" + (index + 1) + "行 " + (columnLabels?.[column.key] ?? LABELS[column.key] ?? column.key);
             const options = column.options ?? [];
