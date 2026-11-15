@@ -57,6 +57,11 @@ public final class AutomaticConfigDescriptor {
            // native serialized collection is under "fields/field".
            "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
           List.of(new WireListContract("field", "/fields/field", "/fields/field/{index}"));
+      // Producer-attested InsertUpdateMeta wire JSON uses a nested lookup object:
+      // /lookup/key (match stream fields) and /lookup/value (updated target columns).
+      case "org.apache.hop.pipeline.transforms.insertupdate.InsertUpdateMeta" -> List.of(
+          new WireListContract("lookup.key", "/lookup/key", "/lookup/key/{index}"),
+          new WireListContract("lookup.value", "/lookup/value", "/lookup/value/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
           new WireListContract("fields.remove", "/fields/remove", "/fields/remove/{index}"),

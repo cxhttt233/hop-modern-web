@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSPropertie
 import { SqlWorkbenchBoundary } from "./SqlWorkbenchBoundary";
 import { NativeListEditor, canEditNativeList } from "./NativeListEditor";
 import { NativeObjectListEditor, canEditSelectValuesObject } from "./NativeObjectListEditor";
+import { NativeInsertUpdateEditor, canEditInsertUpdateLookup } from "./NativeInsertUpdateEditor";
 import { FilterRowsAtomicEditor, canEditAtomicFilterRows, FilterRowsCompositeEditor, canEditCompositeFilterRows } from "./FilterRowsAtomicEditor";
 import { readNativeWireList, writeNativeWireList, resolveNativeWireListItem, type HopNativeWireDescriptor } from "@hop-modern/contracts";
 import type { ConfigPropertyDescriptor as NativeConfigPropertyDescriptor } from "./configDescriptor";
@@ -221,6 +222,11 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
       return <NativeObjectListEditor descriptor={descriptor} property={p} value={value}
         disabled={disabled} onChange={next => set(p.key, next)} />;
     }
+    if (p.shape === "OBJECT" && !rawListEditors[p.key] &&
+        canEditInsertUpdateLookup(descriptor, p, value)) {
+      return <NativeInsertUpdateEditor descriptor={descriptor} property={p} value={value}
+        disabled={disabled} onChange={next => set(p.key, next)} />;
+    }
     if (p.shape === "OBJECT" && !rawListEditors[p.key] && canEditCompositeFilterRows(descriptor.className, p, value)) {
       return <FilterRowsCompositeEditor value={value} disabled={disabled} onChange={next => set(p.key, next)} />;
     }
@@ -330,6 +336,24 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
                 {rawListEditors[p.key]
                   ? <label data-config-key={p.key} htmlFor={"config-" + p.javaField}>
                       <span>完整原生过滤条件 JSON</span>{field(p)}
+                      {invalid[p.key] && <small role="alert">请输入有效的对象 JSON</small>}
+                    </label>
+                  : field(p)}
+              </div>
+            : p.shape === "OBJECT" && (canEditInsertUpdateLookup(descriptor, p, draft[p.key]) ||
+                (rawListEditors[p.key] && canEditInsertUpdateLookup(descriptor, p, nativeValue(p))))
+            ? <div key={p.key} className="config-native-list-field" role="group" aria-label="InsertUpdate 原生字段映射配置">
+                <strong>InsertUpdate · 匹配和更新字段</strong>
+                <button type="button" className="config-native-list-mode"
+                  aria-label={rawListEditors[p.key] ? "返回 InsertUpdate 字段表格" : "编辑 InsertUpdate 原始 JSON"}
+                  disabled={Boolean(invalid[p.key])}
+                  title={rawListEditors[p.key] && invalid[p.key] ? "请先修正 JSON 格式，或取消本次配置" : undefined}
+                  onClick={() => setRawListEditors(current => ({...current,[p.key]:!current[p.key]}))}>
+                  {rawListEditors[p.key] ? "返回原生字段表格" : "高级：原始 JSON 编辑"}
+                </button>
+                {rawListEditors[p.key]
+                  ? <label data-config-key={p.key} htmlFor={`config-${p.javaField}`} title={p.key}>
+                      <span>完整原生 InsertUpdate JSON</span>{field(p)}
                       {invalid[p.key] && <small role="alert">请输入有效的对象 JSON</small>}
                     </label>
                   : field(p)}

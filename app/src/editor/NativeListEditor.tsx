@@ -5,6 +5,7 @@ interface Props {
   title: string;
   value: unknown[];
   properties: ConfigPropertyDescriptor[];
+  columnLabels?: Record<string, string>;
   disabled?: boolean;
   onChange: (rows: unknown[]) => void;
 }
@@ -93,7 +94,7 @@ function NativeNumberCell({ value, label, disabled, fallback, onCommit }: {
  * Typed rows of a producer-attested native LIST; untouched row properties remain intact.
  * Hop's Java serializer remains authoritative for JSON/XML persistence and validation.
  */
-export function NativeListEditor({ title, value: rows, properties, disabled, onChange }: Props) {
+export function NativeListEditor({ title, value: rows, properties, columnLabels, disabled, onChange }: Props) {
   const pendingFocusRow = useRef<number | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const [query, setQuery] = useState("");
@@ -154,12 +155,12 @@ export function NativeListEditor({ title, value: rows, properties, disabled, onC
     <div className="config-native-list-scroll">
       <table ref={tableRef} aria-label={title + "原生字段列表"}>
         <thead><tr><th scope="col">序号</th>{properties.map(column =>
-          <th scope="col" key={column.key}>{LABELS[column.key] ?? column.key}</th>)}<th scope="col">操作</th></tr></thead>
+          <th scope="col" key={column.key}>{columnLabels?.[column.key] ?? LABELS[column.key] ?? column.key}</th>)}<th scope="col">操作</th></tr></thead>
         <tbody>{visibleRows.map(({ entry, index }) => {
           const row = entry as Record<string, unknown>;
           return <tr key={index}><th scope="row">{index + 1}</th>{properties.map(column => {
             const val = row[column.key];
-            const aria = title + " 第" + (index + 1) + "行 " + (LABELS[column.key] ?? column.key);
+            const aria = title + " 第" + (index + 1) + "行 " + (columnLabels?.[column.key] ?? LABELS[column.key] ?? column.key);
             const options = column.options ?? [];
             return <td key={column.key}>{
               column.shape === "BOOLEAN"
