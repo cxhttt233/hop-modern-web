@@ -6,9 +6,11 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 const isolated=process.env.HMW_ISOLATED_URL;
-assert.ok(isolated && isolated.includes("127.0.0.1:"),"FILE_EXISTS test requires isolated loopback JVM");
-const workspace=process.env.HMW_ISOLATED_WORKSPACE;
-assert.ok(workspace,"isolated test workspace required");
+const live=process.env.T2_LIVE_SHARED_BACKEND==="1";
+assert.ok(live || (isolated && isolated.includes("127.0.0.1:")),
+  "FILE_EXISTS test requires isolated JVM or explicit T2 live slot opt-in");
+const workspace=process.env.HMW_ISOLATED_WORKSPACE??process.env.T2_TEST_WORKSPACE;
+assert.ok(workspace,"explicit test workspace required");
 const basename=process.env.T2_FIXTURE_BASENAME??("t2-fileexists-"+randomUUID()+".hwf");
 assert.match(basename,/^t2-fileexists-[a-f0-9-]{36}\.hwf$/);
 const file=path.join(workspace,basename);
@@ -40,7 +42,7 @@ try{
   await copyFile("/home/ubuntu/hmw-agent-lab/workspaces/t2/two-actions.hwf",file);
   const original=await readFile(file);
   await page.goto(base,{waitUntil:"networkidle",timeout:25000});
-  await page.route("**/t2/api/workflows/**",async route=>{
+  if(isolated)await page.route("**/t2/api/workflows/**",async route=>{
     const uri=new URL(route.request().url());
     const response=await route.fetch({url:isolated+uri.pathname.slice(3)+uri.search});
     await route.fulfill({response});
