@@ -31,7 +31,7 @@ try {
     await page.route("**/t5/api/pipelines/**", async (route) => {
       const uri = new URL(route.request().url());
       const response = await route.fetch({
-        url: isolated + uri.pathname.replace(/^\\/t5/, "") + uri.search,
+        url: isolated + uri.pathname.slice(3) + uri.search,
       });
       await route.fulfill({ response });
     });
