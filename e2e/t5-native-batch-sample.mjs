@@ -72,6 +72,7 @@ try{
          'label[data-config-key="httpPassword"] input, label[data-config-key="trustStorePassword"] input'
        ).evaluateAll(inputs=>inputs.map(input=>input.type));
        row.secretInputsMasked=secretTypes.length===2&&secretTypes.every(type=>type==="password");
+       if(!row.secretInputsMasked)throw Error("REST password controls are not properly masked");
      }
      const nativeWrite=page.waitForResponse(r=>r.url().endsWith("/config/write")&&r.request().method()==="POST",{timeout:11000});
      await form.getByRole("button",{name:/保存配置/}).click();
