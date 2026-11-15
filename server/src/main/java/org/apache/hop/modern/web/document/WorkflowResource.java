@@ -461,7 +461,7 @@ public final class WorkflowResource {
 
   public record ActionConfigReadRequest(String id, String name) {}
   public record ActionConfigWriteRequest(String id, String name, JsonNode config) {}
-  public record ActionConfigResponse(String nodeId, String pluginId, JsonNode config, AutomaticConfigDescriptor.Descriptor descriptor) {}
+  public record ActionConfigResponse(String name, String pluginId, JsonNode config, AutomaticConfigDescriptor.Descriptor descriptor) {}
   public record OpenRequest(String path) {}
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}
