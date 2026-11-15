@@ -94,7 +94,9 @@ try {
     r.request().method()==="POST");
   await form.getByRole("button",{name:/保存配置/}).click();
   assert.equal((await configured).status(),200,"native config/write");
-  await api("/"+id+"/save",{});
+  const saved=page.waitForResponse(r=>r.url().endsWith("/save") && r.request().method()==="POST");
+  await page.getByRole("button",{name:"保存（Save）"}).click();
+  assert.equal((await saved).status(),200,"native pipeline save");
   id=await openFile();
   await verify(id,"level_m_revised","water_level_m_verified");
   assert.deepEqual(writes,[200],"exactly one committed native config/write");
