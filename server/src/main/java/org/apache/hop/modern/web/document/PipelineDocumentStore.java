@@ -40,6 +40,19 @@ public final class PipelineDocumentStore {
     }
   }
 
+  /** Checked, descriptor-relative native .hpl save; preserves the opened SHA on conflict. */
+  public byte[] saveIfUnchanged(Path path, PipelineMeta pipeline,
+      byte[] expectedSha256, Path workspaceRoot) throws IOException, HopException {
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(pipeline, "pipeline");
+    Objects.requireNonNull(expectedSha256, "expectedSha256");
+    byte[] replacement = pipeline.getXml(variables).getBytes(StandardCharsets.UTF_8);
+    byte[] saved = SecureWorkspaceSave.write(path, expectedSha256, replacement, workspaceRoot);
+    pipeline.setFilename(path.toString());
+    pipeline.clearChanged();
+    return saved;
+  }
+
   public void save(Path path, PipelineMeta pipeline) throws IOException, HopException {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(pipeline, "pipeline");

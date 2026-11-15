@@ -69,6 +69,24 @@ public final class WorkflowDocumentStore {
     workflow.clearChanged();
   }
 
+  /**
+   * Save the originally opened revision through a shared, descriptor-relative
+   * workspace writer. A moved parent/symlink is never followed to an outside file.
+   */
+  public byte[] saveIfUnchanged(Path path, WorkflowMeta workflow, byte[] original,
+      Path workspaceRoot) throws IOException, HopException {
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(workflow, "workflow");
+    Objects.requireNonNull(original, "original");
+    requireWorkflowPath(path);
+    byte[] replacement = workflow.getXml(variables).getBytes(StandardCharsets.UTF_8);
+    byte[] saved = SecureWorkspaceSave.write(path, SecureWorkspaceSave.digest(original),
+        replacement, workspaceRoot);
+    workflow.setFilename(path.toString());
+    workflow.clearChanged();
+    return saved;
+  }
+
   private static void requireWorkflowPath(Path path) {
     Path name = path.getFileName();
     if (name == null || !name.toString().toLowerCase(Locale.ROOT).endsWith(".hwf")) {

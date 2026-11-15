@@ -87,12 +87,21 @@ public final class PipelineEditResource {
     if (document == null) return error(404, "document_not_found", "opened pipeline document was not found");
     synchronized (document) {
       try {
-        if (!registry.isUnchanged(document)) {
-          return error(409, "external_change", "pipeline file changed on disk; reopen before saving");
+        byte[] originalRevision = registry.snapshotDigest(document);
+        if (originalRevision == null) {
+          return error(409, "external_change", "opened pipeline revision unavailable; reopen before saving");
         }
-        store.save(document.path(), document.pipeline());
-        registry.refreshSnapshot(document);
+        String configured = System.getProperty("hop.modern.workspace");
+        java.nio.file.Path workspace = configured == null || configured.isBlank()
+            ? null : java.nio.file.Path.of(configured);
+        // The compare and replace must use the same anchored directory handle:
+        // checking a pathname and then writing through it permits parent symlink swaps.
+        byte[] written = store.saveIfUnchanged(document.path(), document.pipeline(),
+            originalRevision, workspace);
+        registry.refreshSnapshot(document, written);
         return graph(document);
+      } catch (SecureWorkspaceSave.ExternalModificationException e) {
+        return error(409, "external_change", "pipeline file changed or path replaced; reopen before saving");
       } catch (Exception e) {
         return error(500, "save_failed", "pipeline could not be saved");
       }

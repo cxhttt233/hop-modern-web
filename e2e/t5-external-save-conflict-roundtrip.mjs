@@ -7,7 +7,9 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 const base = process.env.T5_PREVIEW_URL ?? "http://127.0.0.1:4196/t5/";
-const workspace = process.env.T5_TEST_WORKSPACE ?? "/home/ubuntu/hmw-agent-lab/workspaces/t5";
+const isolated = process.env.HMW_ISOLATED_URL;
+const workspace = process.env.T5_TEST_WORKSPACE ?? process.env.HMW_ISOLATED_WORKSPACE ??
+  "/home/ubuntu/hmw-agent-lab/workspaces/t5";
 const name = "t5-external-conflict-" + randomUUID() + ".hpl";
 const file = path.join(workspace, name);
 const check = (ok, detail) => { if (!ok) throw Error(detail); };
@@ -17,11 +19,25 @@ const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
 
 try {
-  await copyFile(path.join(workspace, "example.hpl"), file);
+  // Use the same original fixture when the Java backend is isolated.
+  await copyFile(isolated
+    ? "/home/ubuntu/hmw-agent-lab/workspaces/t5/example.hpl"
+    : path.join(workspace, "example.hpl"), file);
   const original = await readFile(file);
+  // Route only after the UI has loaded, so its initial shared sample open does
+  // not refer to a nonexistent fixture in the isolated JVM workspace.
   await page.goto(base, { waitUntil: "networkidle" });
+  if (isolated) {
+    await page.route("**/t5/api/pipelines/**", async (route) => {
+      const uri = new URL(route.request().url());
+      const response = await route.fetch({
+        url: isolated + uri.pathname.slice(3) + uri.search,
+      });
+      await route.fulfill({ response });
+    });
+  }
   await page.getByRole("button", { name: /打开流程/ }).first().click();
-  await page.getByRole("textbox", { name: /服务器流程路径/ }).fill("/workspace/" + name);
+  await page.getByRole("textbox", { name: /服务器流程路径/ }).fill(isolated ? name : "/workspace/" + name);
   const opened = page.waitForResponse((r) => r.url().endsWith("/api/pipelines/open") && r.request().method() === "POST");
   await page.getByRole("button", { name: /打开文件/ }).first().click();
   check((await opened).status() === 200, "Could not open actual Hop pipeline");

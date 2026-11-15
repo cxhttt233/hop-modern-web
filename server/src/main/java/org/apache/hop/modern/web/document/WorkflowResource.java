@@ -16,7 +16,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import org.apache.hop.modern.server.files.WorkspacePaths;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.apache.hop.workflow.WorkflowHopMeta;
@@ -294,16 +293,18 @@ public final class WorkflowResource {
     if (document == null) return error(404, "workflow document not found");
     synchronized (document) {
       try {
-        // A different editor or process may have changed the file since open.
-        // Never silently overwrite its newer version.
-        if (!Files.isRegularFile(document.file)
-            || !Arrays.equals(document.originalBytes, Files.readAllBytes(document.file))) {
-          return error(409, "workflow changed on disk; reopen before saving");
-        }
-        store.save(document.file, document.workflow);
-        document.originalBytes = Files.readAllBytes(document.file);
+        // The checked write itself must resolve every parent through anchored
+        // directory descriptors. A pre-save Files.isRegularFile/hash check is
+        // unsafe if a parent is replaced with an external symlink afterwards.
+        String configured = System.getProperty("hop.modern.workspace");
+        java.nio.file.Path workspace = configured == null || configured.isBlank()
+            ? null : java.nio.file.Path.of(configured);
+        document.originalBytes = store.saveIfUnchanged(document.file,
+            document.workflow, document.originalBytes, workspace);
         document.dirty = false;
         return Response.ok(snapshot(request.id(), document)).build();
+      } catch (SecureWorkspaceSave.ExternalModificationException e) {
+        return error(409, "workflow changed on disk or path replaced; reopen before saving");
       } catch (IOException | HopException e) {
         return error(500, "workflow could not be saved");
       }
