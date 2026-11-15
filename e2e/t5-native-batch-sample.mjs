@@ -60,6 +60,19 @@ try{
      doc=await open(filename);
      await page.locator(".react-flow__node").first().dblclick();
      await form.waitFor();
+     // REST is deliberately *not* specially adapted in React. Prove a real
+     // business parameter edit on the same generated native form; never execute
+     // or contact example.invalid (reserved non-resolving domain).
+     const restUrl="https://example.invalid/hmw-native-rest-witness";
+     if(pluginId==="Rest"){
+       const urlInput=form.locator('label[data-config-key="url"] input');
+       await urlInput.fill(restUrl);
+       row.editedScalar="url";
+       const secretTypes=await form.locator(
+         'label[data-config-key="httpPassword"] input, label[data-config-key="trustStorePassword"] input'
+       ).evaluateAll(inputs=>inputs.map(input=>input.type));
+       row.secretInputsMasked=secretTypes.length===2&&secretTypes.every(type=>type==="password");
+     }
      const nativeWrite=page.waitForResponse(r=>r.url().endsWith("/config/write")&&r.request().method()==="POST",{timeout:11000});
      await form.getByRole("button",{name:/保存配置/}).click();
      const response=await nativeWrite;
@@ -72,7 +85,9 @@ try{
      if(row.saveStatus!==200)throw Error("disk save status "+row.saveStatus);
      doc=await open(filename);
      const reopened=await nativeRead(doc,pluginId);
-     row.reopenEqual=JSON.stringify(reopened)===JSON.stringify(original);
+     const expected=pluginId==="Rest"?{...original,url:"https://example.invalid/hmw-native-rest-witness"}:original;
+     row.reopenEqual=JSON.stringify(reopened)===JSON.stringify(expected);
+     if(pluginId==="Rest")row.actualEditedUrl=reopened.url;
      if(!row.reopenEqual)throw Error("native decoded config differs after no-op UI save");
    }catch(e){row.issue=String(e.message??e).slice(0,350);}
    finally{
