@@ -78,6 +78,16 @@ try{
     const original=await api(page,id,spec.name);
     let form=await openPanel(page);
     await cycleTwice(form,spec.listLabel,spec.initialRows);
+    // A whole-field reset must invalidate the prior deletion undo stack.
+    const nativeList=form.locator(".config-native-list").first();
+    await nativeList.getByRole("button",{name:spec.listLabel+" 删除第1行"}).click();
+    assert.equal(await nativeList.locator("table tbody tr").count(),spec.initialRows-1);
+    await form.getByText("查看未保存字段",{exact:true}).click();
+    await form.getByRole("button",{name:/^撤销.*的修改$/}).first().click();
+    assert.equal(await nativeList.locator("table tbody tr").count(),spec.initialRows,
+      "whole-field reset did not restore the native rows");
+    assert.equal(await nativeList.getByRole("button",{name:spec.listLabel+" 撤销上次删除"}).count(),0,
+      "stale undo action remained after whole-field reset");
     await form.getByRole("button",{name:/取消配置/}).click();
     assert.deepEqual(writes,[],"cancel after undo must never call config/write");
     assert.deepEqual(await readFile(target),originalBytes,"cancel after undo modified real .hpl");
