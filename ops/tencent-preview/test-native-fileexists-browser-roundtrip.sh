@@ -3,7 +3,8 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 RUNTIME=/home/ubuntu/hop-modern-preview/runtime/server
 JAR=/home/ubuntu/hmw-agent-lab/vendor/action-plugin-proof/hop-action-fileexists-2.20.0.jar
-WORKSPACE="${HMW_ISOLATED_WORKSPACE:?requires isolated Hop JVM}"
+WORKSPACE="${HMW_ISOLATED_WORKSPACE:-${T2_TEST_WORKSPACE:-}}"
+[[ -n "$WORKSPACE" ]] || { echo "isolated JVM or explicit live T2 test workspace required" >&2; exit 69; }
 UUID=$(python3 -c 'import uuid; print(uuid.uuid4())')
 NAME=t2-fileexists-$UUID.hwf
 FILE=$WORKSPACE/$NAME
