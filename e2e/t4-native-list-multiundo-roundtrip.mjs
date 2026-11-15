@@ -39,9 +39,10 @@ async function openPanel(page){
   return form;
 }
 async function cycleTwice(form,label,count) {
-  const list=form.locator(".config-native-list").filter({
-    has:form.locator("table[aria-label="+JSON.stringify(label+"原生字段列表")+"]")});
+  const list=form.locator(".config-native-list").first();
   assert.equal(await list.count(),1,"native list not found "+label);
+  assert.equal(await list.locator("table").getAttribute("aria-label"),
+    label+"原生字段列表","wrong producer-native list selected");
   const rows=list.locator("table tbody tr");
   assert.equal(await rows.count(),count,"starting rows");
   const firstSnapshot=await rows.evaluateAll(els=>els.map(e=>Array.from(
