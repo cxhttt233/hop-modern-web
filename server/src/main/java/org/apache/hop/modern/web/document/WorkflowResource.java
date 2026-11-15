@@ -182,6 +182,42 @@ public final class WorkflowResource {
     }
   }
 
+  /** Update only native ABORT fields; never replace the ActionMeta or its hops. */
+  @POST
+  @Path("/action-abort-edit")
+  public Response editAbort(ActionAbortEditRequest request) {
+    if (request == null || request.id() == null || request.name() == null
+        || request.name().isBlank() || request.message() == null
+        || request.message().isBlank() || request.message().length() > 1000
+        || request.logLevel() == null) {
+      return error(400, "ABORT message (1-1000) and log level are required");
+    }
+    final LogLevel level;
+    try {
+      level = LogLevel.valueOf(request.logLevel());
+    } catch (IllegalArgumentException invalid) {
+      return error(400, "unsupported ABORT log level");
+    }
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      ActionMeta action = document.workflow.findAction(request.name());
+      if (action == null) return error(404, "workflow action not found");
+      if (!(action.getAction() instanceof ActionAbort abort)) {
+        return error(409, "selected action is not a native ABORT");
+      }
+      if (request.message().equals(abort.getMessageAbort())
+          && level == abort.getMessageLogLevel()) {
+        return Response.ok(snapshot(request.id(), document)).build();
+      }
+      abort.setMessageAbort(request.message());
+      abort.setMessageLogLevel(level);
+      document.workflow.setChanged();
+      document.dirty = true;
+      return Response.ok(snapshot(request.id(), document)).build();
+    }
+  }
+
   @POST
   @Path("/action-delete")
   public Response deleteAction(ActionDeleteRequest request) {
@@ -314,6 +350,8 @@ public final class WorkflowResource {
   private static Snapshot snapshot(String id, Opened document) {
     List<ActionSummary> actions = document.workflow.getActions().stream()
         .map(action -> new ActionSummary(action.getName(), action.getTypeDesc(),
+            action.getAction() instanceof ActionAbort abort ? abort.getMessageAbort() : null,
+            action.getAction() instanceof ActionAbort abort && abort.getMessageLogLevel() != null ? abort.getMessageLogLevel().name() : null,
             action.getLocation() == null ? 0 : action.getLocation().x,
             action.getLocation() == null ? 0 : action.getLocation().y))
         .toList();
@@ -340,7 +378,8 @@ public final class WorkflowResource {
   public record HopCreateRequest(String id, String from, String to) {}
   public record HopDeleteRequest(String id, int index, String from, String to) {}
   public record HopEnabledRequest(String id, int index, String from, String to, boolean enabled) {}
-  public record ActionSummary(String name, String type, int x, int y) {}
+  public record ActionAbortEditRequest(String id, String name, String message, String logLevel) {}
+  public record ActionSummary(String name, String type, String message, String logLevel, int x, int y) {}
   public record HopSummary(String from, String to, boolean enabled) {}
   public record Snapshot(String id, String path, String name, String description, boolean dirty,
       List<ActionSummary> actions, List<HopSummary> hops) {}
