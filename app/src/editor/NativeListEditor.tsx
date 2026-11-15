@@ -98,6 +98,23 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
   const pendingFocusRow = useRef<number | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const [query, setQuery] = useState("");
+  // Keep a LIFO history only for consecutive deletions. The complete native
+  // row object is retained, including properties not shown as UI columns.
+  // Edits, moves, adds or duplicates invalidate the history rather than
+  // restoring a stale row into a different structure.
+  const [deletedRows, setDeletedRows] = useState<Array<{ index: number; row: unknown }>>([]);
+  const remove = (index: number) => {
+    if (disabled || index < 0 || index >= rows.length) return;
+    setDeletedRows(previous => [...previous, { index, row: rows[index] }]);
+    onChange(rows.filter((_, i) => i !== index));
+  };
+  const undoDelete = () => {
+    if (disabled || deletedRows.length === 0) return;
+    const last = deletedRows[deletedRows.length - 1];
+    const index = Math.min(last.index, rows.length);
+    onChange([...rows.slice(0, index), last.row, ...rows.slice(index)]);
+    setDeletedRows(previous => previous.slice(0, -1));
+  };
   const needle = query.trim().toLocaleLowerCase();
   const filtering = needle.length > 0;
   // All mutations must use the original, unfiltered row index.
@@ -115,23 +132,28 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
     tableRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr")[index]
       ?.querySelector<HTMLInputElement | HTMLSelectElement>("input:not([type=checkbox]), select, input[type=checkbox]")?.focus();
   }, [rows]);
-  const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) =>
+  const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) => {
+    setDeletedRows([]);
     onChange(rows.map((row, i) => i === index ?
       { ...(row as Record<string, unknown>), [column.key]: nextValue } : row));
+  };
   const move = (from: number, to: number) => {
     const changed = [...rows];
     const [item] = changed.splice(from, 1);
     changed.splice(to, 0, item);
+    setDeletedRows([]);
     onChange(changed);
   };
   // Duplicate the entire native row, including properties not shown in the editor.
   // This lets users add similar fields without silently dropping Hop metadata.
   const duplicate = (index: number) => {
     const row = rows[index] as Record<string, unknown>;
+    setDeletedRows([]);
     onChange([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
   };
   const add = () => {
     pendingFocusRow.current = rows.length;
+    setDeletedRows([]);
     onChange([...rows, Object.fromEntries(properties.map(p =>
     [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
       p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
@@ -186,11 +208,16 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
                 title="复制此行并保留原生属性" disabled={disabled}
                 onClick={() => duplicate(index)}>复制</button>
               <button type="button" aria-label={title + " 删除第" + (index + 1) + "行"}
-                title="删除此行" disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))}>删除</button>
+                title="删除此行（可逐次撤销）" disabled={disabled} onClick={() => remove(index)}>删除</button>
             </td></tr>;
         })}</tbody>
       </table>
     </div>
+    {deletedRows.length > 0 && <div className="config-native-list-undo" role="status" aria-live="polite">
+      已删除 {deletedRows.length} 行（尚未保存）
+      <button type="button" disabled={disabled} aria-label={title + " 撤销上次删除"}
+        onClick={undoDelete}>撤销上次删除</button>
+    </div>}
     {rows.length === 0 && <small className="config-native-list-empty">当前没有字段行</small>}
     {rows.length > 0 && visibleRows.length === 0 && <small className="config-native-list-empty">没有匹配的字段行，可清除筛选查看全部</small>}
     <button type="button" className="config-native-list-add" disabled={disabled} onClick={() => { setQuery(""); add(); }}>
