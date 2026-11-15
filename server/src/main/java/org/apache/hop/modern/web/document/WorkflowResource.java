@@ -351,7 +351,9 @@ public final class WorkflowResource {
     List<ActionSummary> actions = document.workflow.getActions().stream()
         .map(action -> new ActionSummary(action.getName(), action.getTypeDesc(),
             action.getAction() instanceof ActionAbort abort ? abort.getMessageAbort() : null,
-            action.getAction() instanceof ActionAbort abort && abort.getMessageLogLevel() != null ? abort.getMessageLogLevel().name() : null,
+            action.getAction() instanceof ActionAbort abort
+                ? (abort.getMessageLogLevel() == null ? "ERROR" : abort.getMessageLogLevel().name())
+                : null,
             action.getLocation() == null ? 0 : action.getLocation().x,
             action.getLocation() == null ? 0 : action.getLocation().y))
         .toList();
