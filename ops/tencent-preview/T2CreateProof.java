@@ -23,6 +23,7 @@ public class T2CreateProof {
    check(created.getStatus()==201,"create status "+created.getStatus());
    var snapshot=(WorkflowResource.Snapshot)created.getEntity();
    check(snapshot.actions().size()==1,"missing start");
+   check("New workflow".equals(snapshot.name()),"create response lost requested name: "+snapshot.name());
    check(resource.create(req).getStatus()==409,"overwrite not rejected");
    check(resource.create(new WorkflowResource.CreateRequest("../outside.hwf","bad")).getStatus()==409,"traversal not rejected");
    Path outside=Files.createTempDirectory("t2-external-");
@@ -33,7 +34,11 @@ public class T2CreateProof {
    }finally{Files.delete(dir.resolve("escape"));Files.delete(outside);}
    var loaded=store.open(dir.resolve("new.hwf"));
    check(loaded.getActions().size()==1 && loaded.getActions().get(0).getAction() instanceof ActionStart,"native START lost");
-   check(resource.open(new WorkflowResource.OpenRequest("new.hwf")).getStatus()==200,"reopen failed");
+   check("New workflow".equals(loaded.getName()),"official Hop reopen lost requested name: "+loaded.getName());
+   var reopened=resource.open(new WorkflowResource.OpenRequest("new.hwf"));
+   check(reopened.getStatus()==200,"reopen failed");
+   var reopenedSnapshot=(WorkflowResource.Snapshot)reopened.getEntity();
+   check("New workflow".equals(reopenedSnapshot.name()),"HTTP reopen lost requested name: "+reopenedSnapshot.name());
    System.out.println("T2_NATIVE_CREATE_201_DUPLICATE_409_TRAVERSAL_409_SYMLINK_409_OFFICIAL_REOPEN_PASS");
   }finally{if(before==null)System.clearProperty("hop.modern.workspace");else System.setProperty("hop.modern.workspace",before);Files.deleteIfExists(dir.resolve("new.hwf"));Files.delete(dir);}
  }
