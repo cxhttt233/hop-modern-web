@@ -1,10 +1,10 @@
 import { useRef, useState } from "react";
 
-type WorkflowAction = { name: string; type: string; x: number; y: number };
+type WorkflowAction = { name: string; type: string; x: number; y: number; message?: string | null; logLevel?: string | null };
 type WorkflowHop = { from: string; to: string; enabled: boolean };
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[]; hops?: WorkflowHop[] };
 
-async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "action-add" | "save", body: object): Promise<T> {
+async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "action-add" | "action-abort-edit" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -190,6 +190,32 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
             <button type="reset" disabled={busy} onClick={() => setNewActionType("DUMMY")}>取消新增</button>
           </form>
         </section>
+        {(workflow.actions ?? []).some(action => action.logLevel != null) && <section aria-label="编辑 ABORT 原生参数">
+          <strong>ABORT 节点参数</strong>
+          <p style={{ fontSize: 13 }}>直接读取原生 Hop 参数；修改后需保存 .hwf。取消不会提交。</p>
+          {(workflow.actions ?? []).filter(action => action.logLevel != null).map(action =>
+            <form key={action.name + ":" + action.message + ":" + action.logLevel}
+              aria-label={`编辑 ABORT ${action.name}`}
+              onSubmit={event => {
+                event.preventDefault();
+                const data = new FormData(event.currentTarget);
+                void execute(() => command("action-abort-edit", {
+                  id: workflow.id, name: action.name,
+                  message: String(data.get("message") ?? ""),
+                  logLevel: String(data.get("logLevel") ?? "")
+                }), true);
+              }}>
+              <strong>{action.name}</strong>
+              <label>终止原因 <input name="message" aria-label={`${action.name} 终止原因`}
+                required maxLength={1000} defaultValue={action.message ?? ""} disabled={busy} /></label>
+              <label>日志级别 <select name="logLevel" defaultValue={action.logLevel ?? "ERROR"} disabled={busy}>
+                {["NOTHING", "ERROR", "MINIMAL", "BASIC", "DETAILED", "DEBUG", "ROWLEVEL"].map(level =>
+                  <option key={level} value={level}>{level}</option>)}
+              </select></label>
+              <button type="submit" disabled={busy}>更新 ABORT 参数</button>
+              <button type="reset" disabled={busy}>取消修改</button>
+            </form>)}
+        </section>}
         {(workflow.actions?.length ?? 0) > 0 && <section aria-label="重命名工作流节点">
           <strong>重命名节点</strong>
           <p style={{ fontSize: 13 }}>重命名会保留节点原有配置和连接关系；保存 .hwf 后生效于磁盘。</p>
