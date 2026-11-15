@@ -303,7 +303,7 @@ public final class WorkflowResource {
             document.workflow, document.originalBytes, workspace);
         document.dirty = false;
         return Response.ok(snapshot(request.id(), document)).build();
-      } catch (WorkflowDocumentStore.ExternalModificationException e) {
+      } catch (SecureWorkspaceSave.ExternalModificationException e) {
         return error(409, "workflow changed on disk or path replaced; reopen before saving");
       } catch (IOException | HopException e) {
         return error(500, "workflow could not be saved");
