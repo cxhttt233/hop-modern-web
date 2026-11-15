@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -125,7 +125,8 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
     localRows.current = nextRows;
     onChange(nextRows);
   };
-  useEffect(() => {
+  // Reset stale row history before the browser paints an external field reset.
+  useLayoutEffect(() => {
     if (localRows.current === rows) {
       localRows.current = null;
     } else {
