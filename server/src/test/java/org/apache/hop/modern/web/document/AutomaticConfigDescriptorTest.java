@@ -61,6 +61,24 @@ class AutomaticConfigDescriptorTest {
   }
 
   @Test
+  void infersSemanticGroupsWithoutOverridingNativeGroups() {
+    Descriptor descriptor = AutomaticConfigDescriptor.describe(SemanticFixture.class);
+    assertEquals("SQL", property(descriptor.properties(), "sql").layout().group());
+    assertEquals("Connection", property(descriptor.properties(), "database_connection").layout().group());
+    assertEquals("Fields", property(descriptor.properties(), "field_names").layout().group());
+    assertEquals("native-tab", property(descriptor.properties(), "table_name").layout().group());
+    assertEquals("Input", property(descriptor.properties(), "enabled").layout().group());
+  }
+
+  private static final class SemanticFixture {
+    @HopMetadataProperty private String sql;
+    @HopMetadataProperty private String database_connection;
+    @HopMetadataProperty private String field_names;
+    @HopMetadataProperty(groupKey = "native-tab") private String table_name;
+    @HopMetadataProperty private boolean enabled;
+  }
+
+  @Test
   void exposesEnumOptionsFromMetadataWithoutPluginDescriptor() {
     Property mode = property(AutomaticConfigDescriptor.describe(EnumFixture.class).properties(), "mode");
 

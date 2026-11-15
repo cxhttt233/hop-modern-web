@@ -40,12 +40,24 @@ public final class AutomaticConfigDescriptor {
             metadata.groupKey(), metadata.password(), metadata.storeWithName(), metadata.storeWithCode(),
             metadata.defaultBoolean(), metadata.enumNameWhenNotFound(),
             itemType == null ? null : itemType.getName(), children, itemProperties, options,
-            new LayoutHint(order++, metadata.groupKey(), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
+            new LayoutHint(order++, semanticGroup(key, metadata.groupKey(), shape), shape == Shape.LIST ? Presentation.TABLE : Presentation.FIELD),
             nativeNumericDefault(type, key, shape), nativeBooleanDefault(type, key, shape),
             nativeStringDefault(type, key, shape)));
       }
     }
     return new Descriptor(type.getName(), List.copyOf(properties), canonicalWireLists(type));
+  }
+
+  /** T0 fallback grouping: never override explicit native Hop group metadata. */
+  private static String semanticGroup(String key, String nativeGroup, Shape shape) {
+    if (nativeGroup != null && !nativeGroup.isBlank()) return nativeGroup;
+    String normalized = key.replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase(java.util.Locale.ROOT);
+    if (shape == Shape.LIST || normalized.contains("field") || normalized.contains("column")) return "Fields";
+    if (normalized.contains("sql") || normalized.contains("query")) return "SQL";
+    if (normalized.contains("connection") || normalized.contains("database") || normalized.contains("schema")) return "Connection";
+    if (normalized.contains("table") || normalized.contains("target") || normalized.contains("output")) return "Output";
+    if (normalized.contains("password") || normalized.contains("token") || normalized.contains("secret")) return "Advanced";
+    return "Input";
   }
 
   /** Canonical LIST paths verified against the pinned native Hop ConfigJsonSerializer. */
