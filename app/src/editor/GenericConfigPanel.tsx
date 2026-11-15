@@ -59,6 +59,12 @@ const FIELD_LABELS: Record<string, string> = {
   sendfalseto: "条件不成立流向",
 };
 
+// Hop native groupKey often differs only by case from our semantic T0 group
+// (e.g. "fields" vs "Fields"). Merge those groups for display only; never
+// mutate the original native property or serialized Hop metadata.
+const canonicalGroup = (group: string) =>
+  Object.keys(GROUP_LABELS).find((known) => known.toLowerCase() === group.toLowerCase()) ?? group;
+
 const localLabel = (key: string) => {
   const leaf = key.split(".").at(-1) ?? key;
   const compact = leaf.replace(/[_-]/g, "").toLowerCase();
@@ -132,7 +138,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   };
   const groups = useMemo(() => {
     const result = new Map<string, ConfigPropertyDescriptor[]>();
-    descriptor.properties.forEach((p) => { const group = p.groupKey?.trim() || p.layout?.group?.trim() || "General"; result.set(group, [...(result.get(group) ?? []), p]); });
+    descriptor.properties.forEach((p) => { const group = canonicalGroup(p.groupKey?.trim() || p.layout?.group?.trim() || "General"); result.set(group, [...(result.get(group) ?? []), p]); });
     return [...result.entries()];
   }, [descriptor]);
   const normalizedFieldQuery = fieldQuery.trim().toLocaleLowerCase();
@@ -169,7 +175,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const locateInvalidField = () => {
     const property = invalidProperties[0];
     if (!property || disabled) return;
-    const group = property.groupKey?.trim() || property.layout?.group?.trim() || "General";
+    const group = canonicalGroup(property.groupKey?.trim() || property.layout?.group?.trim() || "General");
     setCollapsedGroups((current) => ({ ...current, [group]: false }));
     setInvalidFocusKey(property.key);
   };
