@@ -60,6 +60,7 @@ public final class WorkflowResource {
       java.nio.file.Path file = new WorkspacePaths(root).destinationFile(request.path());
       if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return error(409, "workflow already exists");
       WorkflowMeta workflow = new WorkflowMeta();
+      workflow.setNameSynchronizedWithFilename(false);
       workflow.setName(request.name().trim());
       ActionMeta start = new ActionMeta(new ActionStart("Start"));
       start.setLocation(160, 120);
