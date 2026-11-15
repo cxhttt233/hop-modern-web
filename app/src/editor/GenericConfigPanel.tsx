@@ -21,6 +21,8 @@ export interface GenericConfigPanelProps {
 
 const GROUP_LABELS: Record<string, string> = {
   General: "常规",
+  SQL: "SQL 查询",
+  Connection: "数据库连接",
   Input: "输入",
   Output: "输出",
   Fields: "字段",
@@ -130,7 +132,7 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   };
   const groups = useMemo(() => {
     const result = new Map<string, ConfigPropertyDescriptor[]>();
-    descriptor.properties.forEach((p) => { const group = p.groupKey?.trim() || "General"; result.set(group, [...(result.get(group) ?? []), p]); });
+    descriptor.properties.forEach((p) => { const group = p.groupKey?.trim() || p.layout?.group?.trim() || "General"; result.set(group, [...(result.get(group) ?? []), p]); });
     return [...result.entries()];
   }, [descriptor]);
   const normalizedFieldQuery = fieldQuery.trim().toLocaleLowerCase();
@@ -167,17 +169,18 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
   const locateInvalidField = () => {
     const property = invalidProperties[0];
     if (!property || disabled) return;
-    const group = property.groupKey?.trim() || "General";
+    const group = property.groupKey?.trim() || property.layout?.group?.trim() || "General";
     setCollapsedGroups((current) => ({ ...current, [group]: false }));
     setInvalidFocusKey(property.key);
   };
   // Both TableInputMeta and ExecSqlMeta resolve a non-empty sql_from_file before
   // their inline SQL. Keep the native fields authoritative: the optional Monaco
   // editor changes only the inline 'sql' draft, not the actual file selection.
-  const isSqlTransform = descriptor.className.endsWith(".TableInputMeta") ||
-    descriptor.className.endsWith(".ExecSqlMeta");
-  const hasInlineSql = isSqlTransform && descriptor.properties.some((property) => property.key === "sql");
-  const fileSqlSelected = isSqlTransform &&
+  // Consume semantic T0 SQL metadata instead of maintaining a transform whitelist.
+  const sqlProperty = descriptor.properties.find((property) => property.shape === "STRING" &&
+    (property.textEditorHint === "SQL" || property.key.toLowerCase() === "sql"));
+  const hasInlineSql = Boolean(sqlProperty);
+  const fileSqlSelected = hasInlineSql &&
     descriptor.properties.some((property) => property.key === "sql") &&
     descriptor.properties.some((property) => property.key === "sql_from_file") &&
     typeof draft.sql_from_file === "string" && draft.sql_from_file.trim().length > 0;
@@ -410,8 +413,8 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
       {sqlWorkbenchMounted && <div hidden={!sqlWorkbenchExpanded}>
         <SqlWorkbenchBoundary>
           <Suspense fallback={<p role="status">正在加载本地 SQL 编辑器…</p>}>
-            <SqlWorkbench value={typeof draft.sql === "string" ? draft.sql : ""} disabled={Boolean(disabled)}
-              onChange={(value) => set("sql", value)} />
+            <SqlWorkbench value={sqlProperty && typeof draft[sqlProperty.key] === "string" ? String(draft[sqlProperty.key]) : ""} disabled={Boolean(disabled)}
+              onChange={(value) => { if (sqlProperty) set(sqlProperty.key, value); }} />
           </Suspense>
         </SqlWorkbenchBoundary>
       </div>}
