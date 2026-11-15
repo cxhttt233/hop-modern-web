@@ -14,7 +14,8 @@ const basename=process.env.T2_FIXTURE_BASENAME ?? ("native-abort-edit-"+randomUU
 assert.match(basename,/^native-abort-edit-[a-f0-9-]{36}\.hwf$/);
 const fixture=path.join(workspace,basename);
 const base="http://127.0.0.1:4196/t2/";
-const endpoint=(isolated??"http://127.0.0.1:8080")+"/api/workflows/";
+const endpoint=live ? new URL("api/workflows/",base).href
+  : (isolated??"http://127.0.0.1:8080")+"/api/workflows/";
 const browser=await chromium.launch({headless:true,args:["--no-sandbox"]});
 const page=await browser.newPage({viewport:{width:1440,height:900}});
 const errors=[], calls=[];
