@@ -170,11 +170,13 @@ export function GenericConfigPanel({ descriptor, config, transformName, transfor
     setCollapsedGroups((current) => ({ ...current, [group]: false }));
     setInvalidFocusKey(property.key);
   };
-  // Native TableInput gives a non-empty SQL file priority over inline SQL.
-  // This notice describes the current unsaved draft; it never rewrites either source.
-  const isTableInput = descriptor.className.endsWith(".TableInputMeta");
-  const hasInlineSql = isTableInput && descriptor.properties.some((property) => property.key === "sql");
-  const fileSqlSelected = isTableInput &&
+  // Both TableInputMeta and ExecSqlMeta resolve a non-empty sql_from_file before
+  // their inline SQL. Keep the native fields authoritative: the optional Monaco
+  // editor changes only the inline 'sql' draft, not the actual file selection.
+  const isSqlTransform = descriptor.className.endsWith(".TableInputMeta") ||
+    descriptor.className.endsWith(".ExecSqlMeta");
+  const hasInlineSql = isSqlTransform && descriptor.properties.some((property) => property.key === "sql");
+  const fileSqlSelected = isSqlTransform &&
     descriptor.properties.some((property) => property.key === "sql") &&
     descriptor.properties.some((property) => property.key === "sql_from_file") &&
     typeof draft.sql_from_file === "string" && draft.sql_from_file.trim().length > 0;
