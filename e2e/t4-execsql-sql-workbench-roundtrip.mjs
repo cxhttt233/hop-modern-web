@@ -7,7 +7,7 @@ import path from "node:path";
 const base = process.env.T4_PREVIEW_URL ?? "http://127.0.0.1:4196/t4/";
 const workspace = process.env.T4_TEST_WORKSPACE ?? "/home/ubuntu/hmw-agent-lab/workspaces/t4";
 const basename = process.env.T4_FIXTURE_BASENAME ?? ("execsql-sql-" + randomUUID() + ".hpl");
-if (!/^execsql-sql-[a-f0-9-]{36}\.hpl$/.test(basename)) throw new Error("invalid TableInput test fixture basename");
+if (!/^execsql-sql-[a-f0-9-]{36}\.hpl$/.test(basename)) throw new Error("invalid ExecSql test fixture basename");
 const fixture = path.join(workspace, basename);
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -88,7 +88,7 @@ try {
 
   form = await panel();
   editor = await openMonaco(form);
-  const finalSql = "SELECT station_code, total_amount, currency\nFROM invoices\nWHERE total_amount >= 125.50 AND status = 'PAID'\nORDER BY total_amount DESC;";
+  const finalSql = "SELECT station_code, level_m, observed_at\nFROM river_observation\nWHERE level_m >= 2.75 AND status = 'ALERT'\nORDER BY observed_at DESC;";
   await monacoReplace(editor, finalSql);
   const configWrite = page.waitForResponse(r => r.url().endsWith("/config/write") && r.request().method() === "POST");
   await form.getByRole("button", { name: /保存配置/ }).click();
