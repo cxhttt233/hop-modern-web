@@ -7,6 +7,7 @@
 package org.apache.hop.modern.web.document;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -100,7 +101,19 @@ public final class PipelineConfigResource {
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   private ITransformMeta decode(JsonNode config, Class<?> type) throws HopException {
-    Object decoded = ConfigJsonSerializer.fromJson(config, (Class) type, metadataProvider);
+    JsonNode wire = config;
+    // Apache Hop 2.20 TableOutputMeta serializes a null partitionDataPer,
+    // but its setPartitionDataPer(String) dereferences null during fromJson.
+    // Omitting ONLY this null property makes the native codec invertible:
+    // the freshly constructed metadata retains the same null value on toJson.
+    // Never change a non-null value or normalize any unknown metadata fields.
+    if (type.getName().equals("org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta")
+        && config.isObject() && config.path("partitionDataPer").isNull()) {
+      ObjectNode normalized = ((ObjectNode) config).deepCopy();
+      normalized.remove("partitionDataPer");
+      wire = normalized;
+    }
+    Object decoded = ConfigJsonSerializer.fromJson(wire, (Class) type, metadataProvider);
     return (ITransformMeta) decoded;
   }
 
