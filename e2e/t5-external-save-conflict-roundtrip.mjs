@@ -37,7 +37,7 @@ try {
     });
   }
   await page.getByRole("button", { name: /打开流程/ }).first().click();
-  await page.getByRole("textbox", { name: /服务器流程路径/ }).fill("/workspace/" + name);
+  await page.getByRole("textbox", { name: /服务器流程路径/ }).fill(isolated ? name : "/workspace/" + name);
   const opened = page.waitForResponse((r) => r.url().endsWith("/api/pipelines/open") && r.request().method() === "POST");
   await page.getByRole("button", { name: /打开文件/ }).first().click();
   check((await opened).status() === 200, "Could not open actual Hop pipeline");
