@@ -93,7 +93,10 @@
     "writeStatus": 200,
     "saveStatus": 200,
     "reopenEqual": true,
-    "errors": []
+    "errors": [],
+    "editedScalar": "url",
+    "secretInputsMasked": true,
+    "actualEditedUrl": "https://example.invalid/hmw-native-rest-witness"
   },
   {
     "pluginId": "SetVariable",
