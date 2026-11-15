@@ -4,7 +4,7 @@ type WorkflowAction = { name: string; type: string; x: number; y: number; messag
 type WorkflowHop = { from: string; to: string; enabled: boolean };
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[]; hops?: WorkflowHop[] };
 
-async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "action-add" | "action-abort-edit" | "save", body: object): Promise<T> {
+async function command<T>(operation: "create" | "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "action-add" | "action-abort-edit" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -86,6 +86,7 @@ function WorkflowMap({ actions, hops, onMove, disabled }: { actions: WorkflowAct
 
 export function WorkflowInspector({ onClose }: { onClose: () => void }) {
   const [path, setPath] = useState("/workspace/example.hwf");
+  const [newName, setNewName] = useState("新建工作流");
   const [workflow, setWorkflow] = useState<WorkflowSnapshot>();
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -134,6 +135,15 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
           <button type="submit" disabled={busy || !path.trim()}>打开</button>
         </div>
       </form>
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <input aria-label="新工作流名称" value={newName} onChange={event => setNewName(event.target.value)} />
+        <button type="button" disabled={busy || !path.trim() || !newName.trim()}
+          onClick={() => {
+            if (!window.confirm(`创建新的原生 Workflow：${path}？已存在文件不会覆盖。`)) return;
+            if (hasUnsavedChanges && !window.confirm("当前修改尚未保存，确定放弃并新建吗？")) return;
+            void execute(() => command("create", { path: path.trim(), name: newName.trim() }));
+          }}>新建 Workflow</button>
+      </div>
       {workflow && <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
         <strong>{workflow.name || "未命名工作流"}</strong>
         <section aria-label="工作流节点概览" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: 12 }}>
