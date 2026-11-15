@@ -98,6 +98,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
   const [actionConfigError, setActionConfigError] = useState("");
   async function editActionConfig(name: string) {
     if (!workflow || actionConfigBusy) return;
+    if (actionConfig && !window.confirm("切换 Action 会放弃当前参数草稿，确定继续吗？")) return;
     setActionConfigBusy(true);
     setActionConfigError("");
     try {
@@ -128,6 +129,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
   }
 
   async function execute(action: () => Promise<WorkflowSnapshot>, preserveDescriptionDraft = false) {
+    if (actionConfig && !window.confirm("执行此操作会放弃当前 Action 参数草稿，确定继续吗？")) return;
     setBusy(true);
     setError("");
     try {
@@ -155,6 +157,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
       <form onSubmit={event => {
         event.preventDefault();
         if (!path.trim()) return;
+        if (actionConfig && !window.confirm("打开其他 Workflow 会放弃当前 Action 参数草稿，确定继续吗？")) return;
         if (hasUnsavedChanges && !window.confirm("打开其他 Workflow 会放弃当前未保存的修改，确定继续吗？")) return;
         void execute(() => command("open", { path: path.trim() }));
       }}>
