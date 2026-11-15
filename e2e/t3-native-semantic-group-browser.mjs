@@ -24,9 +24,8 @@ try {
   await page.locator(".react-flow__node").first().dblclick();
   const form=page.locator("form.generic-config");
   await form.waitFor();
-  const titles=await form.locator(".config-field-group legend button span").allTextContents();
   const groups=await form.locator(".config-field-group legend button").allTextContents();
-  const normalized=groups.map(s=>s.replace(/[▾▸]/g,"").replace(/\\d+ 项.*/,"").trim());
+  const normalized=groups.map(s=>s.replace(/[▾▸]/g,"").replace(/[0-9]+ 项.*/,"").trim());
   assert.equal(normalized.filter(v=>v==="字段配置").length,1,
     "native fields + semantic Fields must be one Chinese group");
   assert.ok(!normalized.includes("fields"),"raw native field group leaked into user UI");
