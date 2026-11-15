@@ -1,5 +1,5 @@
 /** Real Hop no-op metadata invariance. Copies a producer fixture; never edits the original. */
-import { chromium, request as apiRequest } from "playwright";
+import { request as apiRequest } from "playwright";
 import { copyFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -13,7 +13,6 @@ const cases = [
   ["ExecSql", process.env.T1_EXECSQL_FIXTURE ?? path.join(fixtureDir, "execsql-native-waterlevel.hpl"), "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta"],
   ["SelectValues", process.env.T1_SELECTVALUES_FIXTURE ?? path.join(fixtureDir, "v9-select-values-proof.hpl"), "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta"],
 ];
-const browser = await chromium.launch({ headless: true });
 const request = await apiRequest.newContext();
 const created = [];
 const results = [];
@@ -53,6 +52,5 @@ try {
   console.log(JSON.stringify({ pass: true, results }));
 } finally {
   await request.dispose();
-  await browser.close();
   for (const file of created) await unlink(file).catch(() => {});
 }
