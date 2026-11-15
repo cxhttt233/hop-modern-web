@@ -25,7 +25,7 @@ const GROUP_LABELS: Record<string, string> = {
   Connection: "数据库连接",
   Input: "输入",
   Output: "输出",
-  Fields: "字段",
+  Fields: "字段配置",
   Settings: "设置",
   Advanced: "高级",
 };
@@ -35,7 +35,7 @@ const FIELD_LABELS: Record<string, string> = {
   sql: "SQL",
   name: "名称",
   field: "字段",
-  fields: "字段",
+  fields: "字段映射",
   type: "类型",
   format: "格式",
   length: "长度",
