@@ -28,6 +28,7 @@ import org.apache.hop.workflow.action.ActionMeta;
 import org.apache.hop.workflow.actions.abort.ActionAbort;
 import org.apache.hop.workflow.actions.dummy.ActionDummy;
 import org.apache.hop.workflow.actions.success.ActionSuccess;
+import org.apache.hop.workflow.actions.fileexists.ActionFileExists;
 
 /** Small authoritative .hwf open/edit/save boundary; no XML rewriting in the browser. */
 @Path("/api/workflows")
@@ -144,7 +145,8 @@ public final class WorkflowResource {
         || request.x() < 0 || request.y() < 0 || request.x() > 100000 || request.y() > 100000) {
       return error(400, "valid id, native action type, name and coordinates are required");
     }
-    if (!"DUMMY".equals(request.type()) && !"ABORT".equals(request.type()) && !"SUCCESS".equals(request.type())) {
+    if (!"DUMMY".equals(request.type()) && !"ABORT".equals(request.type()) && !"SUCCESS".equals(request.type())
+        && !"FILE_EXISTS".equals(request.type())) {
       return error(400, "unsupported native action type");
     }
     ActionMeta action;
@@ -152,6 +154,13 @@ public final class WorkflowResource {
       action = new ActionMeta(new ActionDummy(request.name()));
     } else if ("SUCCESS".equals(request.type())) {
       action = new ActionMeta(new ActionSuccess(request.name(), ""));
+    } else if ("FILE_EXISTS".equals(request.type())) {
+      if (!validFileExistsPath(request.filename())) {
+        return error(400, "FILE_EXISTS requires a safe workspace-relative filename");
+      }
+      ActionFileExists exists = new ActionFileExists(request.name());
+      exists.setFilename(request.filename());
+      action = new ActionMeta(exists);
     } else {
       if (request.message() == null || request.message().isBlank() || request.message().length() > 1000) {
         return error(400, "ABORT requires a message of 1-1000 characters");
@@ -179,6 +188,23 @@ public final class WorkflowResource {
       document.workflow.setChanged();
       document.dirty = true;
       return Response.ok(snapshot(request.id(), document)).build();
+    }
+  }
+
+  /** FILE_EXISTS is metadata only: no filesystem probes or workflow execution here. */
+  private static boolean validFileExistsPath(String filename) {
+    if (filename == null || filename.isBlank() || filename.length() > 1024
+        || filename.indexOf('\\') >= 0 || filename.indexOf('\0') >= 0
+        || filename.contains("${") || filename.contains("%{") || filename.contains("://")) return false;
+    try {
+      java.nio.file.Path path = java.nio.file.Path.of(filename);
+      if (path.isAbsolute()) return false;
+      for (java.nio.file.Path part : path) {
+        if ("..".equals(part.toString()) || ".".equals(part.toString())) return false;
+      }
+      return true;
+    } catch (java.nio.file.InvalidPathException invalid) {
+      return false;
     }
   }
 
@@ -350,10 +376,13 @@ public final class WorkflowResource {
   private static Snapshot snapshot(String id, Opened document) {
     List<ActionSummary> actions = document.workflow.getActions().stream()
         .map(action -> new ActionSummary(action.getName(), action.getTypeDesc(),
+            org.apache.hop.core.plugins.PluginRegistry.getInstance().getPluginId(
+                org.apache.hop.core.plugins.ActionPluginType.class, action.getAction()),
             action.getAction() instanceof ActionAbort abort ? abort.getMessageAbort() : null,
             action.getAction() instanceof ActionAbort abort
                 ? (abort.getMessageLogLevel() == null ? "ERROR" : abort.getMessageLogLevel().name())
                 : null,
+            action.getAction() instanceof ActionFileExists exists ? exists.getFilename() : null,
             action.getLocation() == null ? 0 : action.getLocation().x,
             action.getLocation() == null ? 0 : action.getLocation().y))
         .toList();
@@ -376,12 +405,12 @@ public final class WorkflowResource {
   public record ActionDeleteRequest(String id, String name, int connectedHops) {}
   public record ActionRenameRequest(String id, String name, String newName) {}
   public record ActionAddRequest(String id, String type, String name, int x, int y,
-      String message, String logLevel) {}
+      String message, String logLevel, String filename) {}
   public record HopCreateRequest(String id, String from, String to) {}
   public record HopDeleteRequest(String id, int index, String from, String to) {}
   public record HopEnabledRequest(String id, int index, String from, String to, boolean enabled) {}
   public record ActionAbortEditRequest(String id, String name, String message, String logLevel) {}
-  public record ActionSummary(String name, String type, String message, String logLevel, int x, int y) {}
+  public record ActionSummary(String name, String type, String pluginId, String message, String logLevel, String filename, int x, int y) {}
   public record HopSummary(String from, String to, boolean enabled) {}
   public record Snapshot(String id, String path, String name, String description, boolean dirty,
       List<ActionSummary> actions, List<HopSummary> hops) {}
