@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ConfigPropertyDescriptor } from "./configDescriptor";
 
 interface Props {
@@ -97,7 +97,54 @@ function NativeNumberCell({ value, label, disabled, fallback, onCommit }: {
 export function NativeListEditor({ title, value: rows, properties, columnLabels, disabled, onChange }: Props) {
   const pendingFocusRow = useRef<number | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+  // NativeTextCell owns an uncommitted IME/editing draft. Index keys would
+  // reuse that draft for a different row after deletion/insertion/undo.
+  // Identify rows by their original object identity; a modified row gets a
+  // fresh identity on commit, while moved/undone rows retain their identity.
+  const rowIds = useRef(new WeakMap<object, number>());
+  const nextRowId = useRef(0);
+  const keyForRow = (row: unknown): number => {
+    const record = row as object;
+    const known = rowIds.current.get(record);
+    if (known !== undefined) return known;
+    const next = ++nextRowId.current;
+    rowIds.current.set(record, next);
+    return next;
+  };
   const [query, setQuery] = useState("");
+  // Keep a LIFO history only for consecutive deletions. The complete native
+  // row object is retained, including properties not shown as UI columns.
+  // Edits, moves, adds or duplicates invalidate the history rather than
+  // restoring a stale row into a different structure.
+  const [deletedRows, setDeletedRows] = useState<Array<{ index: number; row: unknown }>>([]);
+  // The outer GenericConfigPanel can reset this entire field independently.
+  // Invalidate old undo entries on an external replacement; do not allow
+  // restoring deleted rows from a prior version of the native list.
+  const localRows = useRef<unknown[] | null>(null);
+  const emitRows = (nextRows: unknown[]) => {
+    localRows.current = nextRows;
+    onChange(nextRows);
+  };
+  // Reset stale row history before the browser paints an external field reset.
+  useLayoutEffect(() => {
+    if (localRows.current === rows) {
+      localRows.current = null;
+    } else {
+      setDeletedRows([]);
+    }
+  }, [rows]);
+  const remove = (index: number) => {
+    if (disabled || index < 0 || index >= rows.length) return;
+    setDeletedRows(previous => [...previous, { index, row: rows[index] }]);
+    emitRows(rows.filter((_, i) => i !== index));
+  };
+  const undoDelete = () => {
+    if (disabled || deletedRows.length === 0) return;
+    const last = deletedRows[deletedRows.length - 1];
+    const index = Math.min(last.index, rows.length);
+    emitRows([...rows.slice(0, index), last.row, ...rows.slice(index)]);
+    setDeletedRows(previous => previous.slice(0, -1));
+  };
   const needle = query.trim().toLocaleLowerCase();
   const filtering = needle.length > 0;
   // All mutations must use the original, unfiltered row index.
@@ -115,24 +162,29 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
     tableRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr")[index]
       ?.querySelector<HTMLInputElement | HTMLSelectElement>("input:not([type=checkbox]), select, input[type=checkbox]")?.focus();
   }, [rows]);
-  const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) =>
-    onChange(rows.map((row, i) => i === index ?
+  const edit = (index: number, column: ConfigPropertyDescriptor, nextValue: unknown) => {
+    setDeletedRows([]);
+    emitRows(rows.map((row, i) => i === index ?
       { ...(row as Record<string, unknown>), [column.key]: nextValue } : row));
+  };
   const move = (from: number, to: number) => {
     const changed = [...rows];
     const [item] = changed.splice(from, 1);
     changed.splice(to, 0, item);
-    onChange(changed);
+    setDeletedRows([]);
+    emitRows(changed);
   };
   // Duplicate the entire native row, including properties not shown in the editor.
   // This lets users add similar fields without silently dropping Hop metadata.
   const duplicate = (index: number) => {
     const row = rows[index] as Record<string, unknown>;
-    onChange([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
+    setDeletedRows([]);
+    emitRows([...rows.slice(0, index + 1), { ...row }, ...rows.slice(index + 1)]);
   };
   const add = () => {
     pendingFocusRow.current = rows.length;
-    onChange([...rows, Object.fromEntries(properties.map(p =>
+    setDeletedRows([]);
+    emitRows([...rows, Object.fromEntries(properties.map(p =>
     [p.key, p.shape === "BOOLEAN" ? (p.nativeBooleanDefault ?? false) :
       p.shape === "NUMBER" ? (p.nativeNumberDefault ?? 0) :
       p.shape === "ENUM" ? (p.nativeStringDefault ?? p.options?.[0]?.value ?? "") : (p.nativeStringDefault ?? "")]))]);
@@ -158,7 +210,7 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
           <th scope="col" key={column.key}>{columnLabels?.[column.key] ?? LABELS[column.key] ?? column.key}</th>)}<th scope="col">操作</th></tr></thead>
         <tbody>{visibleRows.map(({ entry, index }) => {
           const row = entry as Record<string, unknown>;
-          return <tr key={index}><th scope="row">{index + 1}</th>{properties.map(column => {
+          return <tr key={keyForRow(entry)}><th scope="row">{index + 1}</th>{properties.map(column => {
             const val = row[column.key];
             const aria = title + " 第" + (index + 1) + "行 " + (columnLabels?.[column.key] ?? LABELS[column.key] ?? column.key);
             const options = column.options ?? [];
@@ -186,11 +238,16 @@ export function NativeListEditor({ title, value: rows, properties, columnLabels,
                 title="复制此行并保留原生属性" disabled={disabled}
                 onClick={() => duplicate(index)}>复制</button>
               <button type="button" aria-label={title + " 删除第" + (index + 1) + "行"}
-                title="删除此行" disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))}>删除</button>
+                title="删除此行（可逐次撤销）" disabled={disabled} onClick={() => remove(index)}>删除</button>
             </td></tr>;
         })}</tbody>
       </table>
     </div>
+    {deletedRows.length > 0 && <div className="config-native-list-undo" role="status" aria-live="polite">
+      已删除 {deletedRows.length} 行（尚未保存）
+      <button type="button" disabled={disabled} aria-label={title + " 撤销上次删除"}
+        onClick={undoDelete}>撤销上次删除</button>
+    </div>}
     {rows.length === 0 && <small className="config-native-list-empty">当前没有字段行</small>}
     {rows.length > 0 && visibleRows.length === 0 && <small className="config-native-list-empty">没有匹配的字段行，可清除筛选查看全部</small>}
     <button type="button" className="config-native-list-add" disabled={disabled} onClick={() => { setQuery(""); add(); }}>
