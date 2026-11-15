@@ -1,5 +1,5 @@
 /**
- * Real browser + bridge + Hop metadata witness smoke for TableOutput and ExecSql.
+ * Real browser + bridge + Hop metadata witness smoke for TableOutput, ExecSql and InsertUpdate.
  * The source .hpl fixtures were PRODUCED and reverse-parsed by Hop Java, not fabricated.
  * Every run copies them to unique workspace files; nothing modifies the originals.
  */
@@ -13,7 +13,8 @@ import { chromium } from "playwright";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cases = [
   { slot: "t3", source: "tableoutput-native-waterlevel.hpl", type: "TableOutput", name: "water-level-archive" },
-  { slot: "t4", source: "execsql-native-waterlevel.hpl", type: "ExecSql", name: "read-water-observation" }
+  { slot: "t4", source: "execsql-native-waterlevel.hpl", type: "ExecSql", name: "read-water-observation" },
+  { slot: "t3", source: "insertupdate-native-waterlevel.hpl", type: "InsertUpdate", name: "upsert-water-level" }
 ];
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 try {
@@ -51,11 +52,38 @@ try {
         assert.equal(data.config.specify_fields, true);
         assert.deepEqual(data.config.fields.field.map(f => [f.stream_name, f.column_name]),
           [["station_code", "station_id"], ["level_m", "water_level_m"], ["observed_at", "observation_time"]]);
-      } else {
+      } else if (spec.type === "ExecSql") {
         assert.equal(data.config.connection, "Warehouse");
         assert.equal(data.config.single_statement, true);
         assert.equal(data.config.sql, "SELECT station_code, level_m FROM river_observation WHERE level_m >= 1.5;");
         assert.equal(await panel.locator("#config-sql").inputValue(), data.config.sql);
+      } else {
+        const config = data.config;
+        assert.equal(config.connection, "Warehouse");
+        assert.equal(config.commit, "250");
+        assert.equal(config.lookup.schema, "public");
+        assert.equal(config.lookup.table, "water_level_archive");
+        assert.deepEqual(config.lookup.key.map(f => [f.name, f.field, f.condition]),
+          [["station_code", "station_id", "="], ["observed_at", "observation_time", "="]]);
+        assert.deepEqual(config.lookup.value.map(f => [f.name, f.rename, f.update]),
+          [["water_level_m", "level_m", true], ["quality_flag", "quality_status", true]]);
+        // Independently prove that the native JSON codec can round-trip this nested
+        // structure through the real Hop JVM and disk, without hand-writing XML.
+        const write = await page.request.post(new URL("api/pipelines/" + id + "/config/write", base).href,
+          { data: {nodeId:spec.name, config} });
+        assert.equal(write.status(), 200, "InsertUpdate no-op native config/write");
+        const saved = await page.request.post(new URL("api/pipelines/" + id + "/save", base).href,
+          { data: {} });
+        assert.equal(saved.status(), 200, "InsertUpdate native .hpl save");
+        const reopened = await page.request.post(new URL("api/pipelines/open", base).href,
+          { data: {path:"/workspace/"+basename} });
+        assert.equal(reopened.status(), 200, "InsertUpdate disk reopen");
+        const reopenedId = (await reopened.json()).id;
+        const verified = await page.request.post(
+          new URL("api/pipelines/" + reopenedId + "/config/read", base).href,
+          { data: {nodeId:spec.name} });
+        assert.equal(verified.status(), 200, "InsertUpdate native reopen config/read");
+        assert.deepEqual((await verified.json()).config, config, "InsertUpdate native codec reordered or discarded fields");
       }
       assert.deepEqual(errors, [], spec.type + " browser errors");
       console.log(JSON.stringify({ pass: true, slot: spec.slot, plugin: spec.type,
