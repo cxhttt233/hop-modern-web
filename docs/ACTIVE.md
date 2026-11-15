@@ -1,6 +1,6 @@
 # Hop Modern Web · 当前开发入口
 
-> 最后复核：2026-11-15 13:22（Asia/Shanghai）。GitHub main `52e087d`，T1–T5 预览均为该版本；共享 Java `aab4faf`（其后提交是 docs/ops/前端/测试，无后端业务代码差异），8080 systemd 单实例正常。后续状态以实际 GitHub、Java active SHA、浏览器和原生文件重开为准。
+> 最后复核：2026-11-15（Asia/Shanghai）。GitHub main `9ef3413`，T1–T5 预览均为该版本；共享 Java `f2dc076`（新增提交均是文档、测试和前端变化，无后端业务 Java 差异），8080 systemd 单实例正常。后续状态以实际 GitHub、Java active SHA、浏览器和原生文件重开为准.
 
 **产品目标**：在浏览器里完成真实 Hop 文件/数据库连接管理 → Transform 或 Workflow 编辑 → 保存重开 → 经授权运行和查看结果。
 
@@ -13,10 +13,12 @@
 | 任务 | 独占责任（不跨界修改） | 当前证据与下一步真正阻塞 |
 |---|---|---|
 | **T1 · 服务端与认证** | 文件/工作区、数据库连接元数据、可信用户身份与授权；**不修改表单 Schema/生成器/渲染器/API** | 原生 DatabaseMeta 隔离测试与未授权 25/25 fail-closed 已通过。**没有可信身份发行者，原生数据库管理入口必须继续关闭**；不得用槽位/IP/浏览器静态 token/伪造 X-User 请求头代替用户身份。T1 继续审核可验证的身份与最小权限边界，不阻塞 T3 的只读元数据生成。 |
-| **T2 · Workflow 图与 Action 能力** | 原生 .hwf 图节点、Action 创建/连接/修改、图保存冲突与回归；**不实现 Action 配置表单生成器** | START/DUMMY/ABORT/SUCCESS 原生闭环已验收，已有 ABORT 参数编辑/503 保留草稿。下一候选 FILE_EXISTS 官方 Hop 2.20 JAR 已取得、sha256 `66d423e8832af84651e90a990c378270ed6a1e2f6bbac36a4a51cf2a52b1ea78`，可在隔离 JVM 通过 `HMW_ISOLATED_ACTION_FILE_EXISTS=1` 加载，独立原生 Java .hwf 生成→反解析已验证；**未在共享 Java 启用**。可继续 Action/图功能，但不要自己开发/改动表单引擎。 |
-| **T3 · 唯一表单生成器负责人** | **独占**：SWT-free Hop Metadata/注解/i18n、业务语义、FormSchema 生成与扩展、Widget/布局/Tab/组/字段顺序/密度/宽幅、自适应 React 通用渲染、Transform **和 Workflow Action** 共用机制、完整批量覆盖分析与真实持久化验收 | TableInput/InsertUpdate/TableOutput 和现有 NativeListEditor 的原生功能已验收，但目前只是若干局部能力，**不能宣称整体智能生成器已完成**。先从三类代表插件抽象统一 T0 元数据 Schema、T1 `form.json` 声明布局、T2 必要专用插槽；再枚举所有已安装 Transform/Action，输出生成成功/降级/失败及原因；随机抽取未手写适配插件实测无需 React 改码即可形成专业布局并经 Hop Java .hpl/.hwf 重开。T3 自己完成前后端，其他任务不进入本代码边界。 |
+| **T2 · Workflow 图与 Action 能力** | 原生 .hwf 图节点、Action 创建/连接/修改、图保存冲突与回归；**不实现 Action 配置表单生成器** | START/DUMMY/ABORT/SUCCESS/FILE_EXISTS 原生闭环已验收。#182 FILE_EXISTS 官方 Hop 2.20 JAR 已按 SHA256 `66d423e8832af84651e90a990c378270ed6a1e2f6bbac36a4a51cf2a52b1ea78` 验证并部署共享 Java `f2dc076`，#185 通过 T2 槽位桥接，真实浏览器取消/503 失败恢复/200 重试及官方 Hop Java `.hwf` 重开均通过。**下一项独立业务缺口：核实能否直接新建空白 `.hwf`；当前前端/API 只有打开现有文件的入口，待 T2 真实验证并按安全 CREATE_NEW 机制实施**。Action 参数表单仍由 T3 统一生成。 |
+| **T3 · 唯一表单生成器负责人** | **独占**：SWT-free Hop Metadata/注解/i18n、业务语义、FormSchema 生成与扩展、Widget/布局/Tab/组/字段顺序/密度/宽幅、自适应 React 通用渲染、Transform **和 Workflow Action** 共用机制、完整批量覆盖分析与真实持久化验收 | #183 T0 注解语义分组、#184 通用 React 分组消费、#186 Hop 原生/自动 Fields 大小写统一已合并及浏览器验收；TableInput/InsertUpdate/TableOutput 原生配置仍通过。T5 外部审计 #187 已枚举当前 JVM **26 Transform+5 Action**（25/26 Transform 具非空注解，Dummy 无配置项；Action 5/5），#188 将此前未做单独 React 适配的 **10 种 Transform** 通过真实浏览器自动表单/取消/默认配置保存重开（10/10），其中 REST URL 可实际修改后保存，密码控件遮蔽。**仍不能宣称所有表单专业可用**：REST 34 个字段仍有英语技术名、宽度/控件语义/复杂字段和 Action 统一表单尚未达验收。T3 下一阶段必须继续 T0/T1/T2 布局与 Widget 语义、i18n、复杂配置、Action 和分层覆盖报告，独占前后端实现。 |
 | **T4 · 非表单 React 全局交互** | 画布、导航、图操作与非表单的通用体验、安全的独立 UI 回归；**不修改 GenericConfigPanel/NativeListEditor/FormSchema/生成器样式** | ExecSql/TableInput Monaco 与 #180 连续撤销的现有成果均已通过，停止重复。对于表单样式/IME/布局问题交由 T3 修复；T4 只处理明确属于独立画布/全局交互的故障。 |
-| **T5 · 总集成和外部验收** | 五槽部署版本、8080 单实例、资源/回滚、跨模块 E2E、安全验收；**不接管生成器代码** | #173 secure .hpl/.hwf descriptor-relative 保存，T5 409→200 恢复，5/5 Smoke 与业务回归已通过。T5 主要检查 T3 交付是否在**未特殊处理插件**中生成用户可理解表单，不以字段数量/PR 数量/Smoke 代替体验；其他四条保持分工。 |
+| **T5 · 总集成和外部验收** | 五槽部署版本、8080 单实例、资源/回滚、跨模块 E2E、安全验收；**不接管生成器代码** | #173 secure .hpl/.hwf 保存和 T5 409→200 恢复已通过，五槽 Smoke 5/5 及实际全栈回归 PASS。#187 read-only 全量注册插件元数据扫描、#188 十种非专用 Transform 的 Java 原生生产→React 自动配置→取消/保存→磁盘重开证据已合并；下一阶段继续外部测试复杂业务参数编辑及 Workflow Action 专业生成界面，不以 T0 Schema 非空或默认配置往返冒充专业可用。 |
+
+**当前批量试用的可核查证据（T5 外部验收，不是 T3 生成器完成证明）**：参考 [31 种原生插件元数据覆盖基线](validation/hop-220-native-schema-registry-20261115.md)、[10 种未特化 Transform 真实浏览器测试](validation/hop-220-native-10-transform-batch-20261115.md)；原样配置的 HTTP 200/文件重开只说明安全基础往返，REST URL 成功编辑属于一项真实修改测试。其余复杂参数和 Workflow Action 表单仍需 T3 统一生成器验证。
 
 **T3 交付门槛**：同一套生成器支持 Transform + Workflow Action；一批真实插件可批量试用，报告统计覆盖率/降级原因；至少 TableInput、InsertUpdate、TableOutput 和未特化抽样插件在真实浏览器中完成“找到连接/主要参数 → 可读的专业布局 → 取消不写盘/保存成功 → 官方 Hop Java 原生磁盘重开”。专门的布局声明是通用 Schema 的可选增强，不是为每个 Transform 写一个 React 页面。安全凭据不能出现在客户端 Schema 中。
 
