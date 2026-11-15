@@ -89,6 +89,28 @@ try {
   await rejected;
   await dialog.getByText("工作流节点 · 4").waitFor();
   assert.ok(calls.some(c=>c.endpoint.endsWith("/action-add")&&c.status===409),"duplicate action must return HTTP 409");
+
+  // One failed disk save must keep the previous .hwf and permit an explicit retry.
+  const savedXml = await readFile(fixture, "utf8");
+  const newDescription = "SUCCESS failure recovery proof";
+  await dialog.locator("#workflow-description").fill(newDescription);
+  await page.route("**/t2/api/workflows/save", async route => {
+    await route.fulfill({status:503, contentType:"application/json", body:JSON.stringify({error:"Injected save failure"})});
+  }, {times:1});
+  const failedSave = page.waitForResponse(r => r.url().includes("/workflows/save") && r.status()===503);
+  await dialog.getByRole("button",{name:"保存 .hwf"}).click();
+  await failedSave;
+  await dialog.getByRole("alert").getByText("Injected save failure").waitFor();
+  assert.equal(await readFile(fixture,"utf8"), savedXml, "failed save must not touch native XML");
+  assert.equal(await dialog.locator("#workflow-description").inputValue(), newDescription, "failed save must retain draft");
+  await dialog.getByText("已应用，尚未保存到磁盘").waitFor();
+  await dialog.getByRole("button",{name:"保存 .hwf"}).click();
+  await dialog.getByText("已保存",{exact:true}).waitFor();
+  assert.ok((await readFile(fixture,"utf8")).includes(newDescription), "retry must persist draft");
+  await dialog.getByRole("button",{name:"打开",exact:true}).click();
+  await dialog.getByText("工作流节点 · 4").waitFor();
+  assert.equal(await dialog.locator("#workflow-description").inputValue(),newDescription,"retry must survive reopen");
+
   assert.equal(errors.length,0,"browser errors");
   for (const name of ["open","action-add","hop-create","save"])
     assert.ok(calls.some(c=>c.endpoint.endsWith("/"+name)&&c.status===200), "API missing "+name);
