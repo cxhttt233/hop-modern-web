@@ -82,3 +82,24 @@ ABORT marks a workflow failed and stops execution when reached. The UI warns use
 After a changed preview is built, `auto-refresh.py` runs Chromium. Because shared Java 8080 activation may briefly interrupt a browser request, it retries once after 3 seconds. If both attempts fail, it records `previews/tN/.smoke-failed`, keeps the last preview files, exits non-zero, and re-tests that slot on the next invocation **even if its commit SHA did not change**. A passing check clears the marker. Both attempts are written to `logs/auto-smoke-tN.log`.
 
 2026-11-14 verification: after switching Java backends, one T3 browser check transiently failed although the overall refresh previously exited 0. After this change, we placed an artificial failure marker on an unchanged T3 preview and ran the actual auto-refresh; it rechecked Chromium, returned success, and cleared the marker. This avoids silently treating previously failed browser checks as healthy.
+
+## One authoritative Java 8080 owner (2026-11-15)
+
+**Regression observed:** the old runtime `/home/ubuntu/hop-modern-preview/runtime/launch.sh` is invoked by Ubuntu's `@reboot` and `* * * * *` cron entries. It starts a legacy Java `ModernWebServer` from `runtime/server/classes` when its own `java.pid` is missing. During versioned deployment this orphan JVM won port 8080; the managed `hmw-java-runtime.service` crashed with `java.net.BindException: Address already in use`, triggering failed activation and rollback.
+
+**Resolution:** keep the cron entries because the launcher still monitors Nginx and Cloudflared. Back up `launch.sh`, and gate **only** the legacy Java launch block:
+
+```bash
+if systemctl is-enabled --quiet hmw-java-runtime.service 2>/dev/null; then
+  echo "JAVA_MANAGED_BY_SYSTEMD"
+elif [ -z "$jpid" ] || ! kill -0 "$jpid" 2>/dev/null; then
+  # Existing legacy Java starter is only used without the managed service
+  ...
+fi
+```
+
+On the Tencent Cloud test server the previous script is preserved as `/home/ubuntu/hmw-agent-lab/backup-legacy-launch-20261115-1058.sh`. Only the identified obsolete HMW cron JVM was terminated, then the versioned Java service was restarted and `hmw-backend-activate.service` succeeded. No other cron jobs, web proxy or tunnels were disabled.
+
+**Read-only periodic verification:** `bash ops/tencent-preview/check-single-java-8080-owner.sh`. It asserts the systemd-managed Java process is active, owns the only listener on 8080, and that a cron-managed legacy launcher cannot spawn a competing Java when systemd is enabled. It fails closed with a diagnostic and does not terminate any process.
+
+Do not fix this by globally stopping cron or by disabling Nginx/Cloudflared. Do not force-reset the shared Git `source` worktree or its uncommitted changes.
