@@ -8,6 +8,8 @@ package org.apache.hop.modern.web.document;
 
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.apache.hop.metadata.serializer.json.ConfigJsonSerializer;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
@@ -66,6 +68,28 @@ public final class WorkflowResource {
       return error(422, "workflow could not be read");
     } catch (Exception e) {
       return error(422, "workflow could not be parsed");
+    }
+  }
+
+  /** Read authoritative native Action configuration; never expose a guessed browser-side XML mapping. */
+  @POST
+  @Path("/action-config/read")
+  public Response readActionConfig(ActionConfigReadRequest request) {
+    if (request == null || request.id() == null || request.name() == null
+        || request.name().isBlank()) return error(400, "id and action name are required");
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      var action = document.workflow.findAction(request.name());
+      if (action == null || action.getAction() == null) return error(404, "workflow action not found");
+      try {
+        Object nativeAction = action.getAction();
+        JsonNode config = ConfigJsonSerializer.toJson(nativeAction, store.metadataProvider());
+        return Response.ok(new ActionConfigResponse(action.getName(), action.getAction().getPluginId(),
+            config, AutomaticConfigDescriptor.describe(nativeAction.getClass()))).build();
+      } catch (Exception e) {
+        return error(422, "workflow action configuration could not be serialized");
+      }
     }
   }
 
@@ -398,6 +422,8 @@ public final class WorkflowResource {
     return Response.status(status).entity(Map.of("error", message)).build();
   }
 
+  public record ActionConfigReadRequest(String id, String name) {}
+  public record ActionConfigResponse(String nodeId, String pluginId, JsonNode config, AutomaticConfigDescriptor.Descriptor descriptor) {}
   public record OpenRequest(String path) {}
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}
