@@ -376,6 +376,8 @@ public final class WorkflowResource {
   private static Snapshot snapshot(String id, Opened document) {
     List<ActionSummary> actions = document.workflow.getActions().stream()
         .map(action -> new ActionSummary(action.getName(), action.getTypeDesc(),
+            org.apache.hop.core.plugins.PluginRegistry.getInstance().getPluginId(
+                org.apache.hop.core.plugins.ActionPluginType.class, action.getAction()),
             action.getAction() instanceof ActionAbort abort ? abort.getMessageAbort() : null,
             action.getAction() instanceof ActionAbort abort
                 ? (abort.getMessageLogLevel() == null ? "ERROR" : abort.getMessageLogLevel().name())
@@ -408,7 +410,7 @@ public final class WorkflowResource {
   public record HopDeleteRequest(String id, int index, String from, String to) {}
   public record HopEnabledRequest(String id, int index, String from, String to, boolean enabled) {}
   public record ActionAbortEditRequest(String id, String name, String message, String logLevel) {}
-  public record ActionSummary(String name, String type, String message, String logLevel, String filename, int x, int y) {}
+  public record ActionSummary(String name, String type, String pluginId, String message, String logLevel, String filename, int x, int y) {}
   public record HopSummary(String from, String to, boolean enabled) {}
   public record Snapshot(String id, String path, String name, String description, boolean dirty,
       List<ActionSummary> actions, List<HopSummary> hops) {}
