@@ -23,8 +23,9 @@ page.on("response",r=>{if(r.url().includes("/api/workflows/"))calls.push({
  op:new URL(r.url()).pathname.split("/").at(-1),status:r.status()});});
 async function request(op,data,expected=200){
   const r=await page.request.post(endpoint+op,{data});
-  assert.equal(r.status(),expected,op+" HTTP "+r.status()+" "+(await r.text()).slice(0,400));
-  return r.json();
+  const body=await r.text();
+  assert.equal(r.status(),expected,op+" HTTP "+r.status()+" "+body.slice(0,400));
+  return JSON.parse(body);
 }
 async function open(dialog){
   await dialog.locator("#workflow-path").fill(basename);
