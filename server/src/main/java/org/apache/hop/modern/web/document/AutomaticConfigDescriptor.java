@@ -52,7 +52,10 @@ public final class AutomaticConfigDescriptor {
   private static List<WireListContract> canonicalWireLists(Class<?> type) {
     return switch (type.getName()) {
       case "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta",
-           "org.apache.hop.pipeline.transforms.sort.SortRowsMeta" ->
+           "org.apache.hop.pipeline.transforms.sort.SortRowsMeta",
+           // TableOutputMeta's @HopMetadataProperty is "field" although the
+           // native serialized collection is under "fields/field".
+           "org.apache.hop.pipeline.transforms.tableoutput.TableOutputMeta" ->
           List.of(new WireListContract("field", "/fields/field", "/fields/field/{index}"));
       case "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta" -> List.of(
           new WireListContract("fields.field", "/fields/field", "/fields/field/{index}"),
