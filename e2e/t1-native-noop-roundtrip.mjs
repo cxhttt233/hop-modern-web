@@ -10,6 +10,7 @@ const base = process.env.T1_PREVIEW_URL ?? "http://127.0.0.1:4196/t1/";
 const workspace = process.env.T1_TEST_WORKSPACE ?? "/home/ubuntu/hmw-agent-lab/workspaces/t1";
 const fixtureDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const cases = [
+  ["TableInput", path.join(fixtureDir, "v4-table-input-proof.hpl"), "org.apache.hop.pipeline.transforms.tableinput.TableInputMeta"],
   ["ExecSql", process.env.T1_EXECSQL_FIXTURE ?? path.join(fixtureDir, "execsql-native-waterlevel.hpl"), "org.apache.hop.pipeline.transforms.sql.ExecSqlMeta"],
   ["SelectValues", process.env.T1_SELECTVALUES_FIXTURE ?? path.join(fixtureDir, "v9-select-values-proof.hpl"), "org.apache.hop.pipeline.transforms.selectvalues.SelectValuesMeta"],
 ];
