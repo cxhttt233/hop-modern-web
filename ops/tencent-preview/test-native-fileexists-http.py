@@ -2,6 +2,8 @@
 import json
 import os
 import shutil
+import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 from urllib import request, error
@@ -41,6 +43,17 @@ try:
     assert any(a["name"] == "Check input" and a["filename"] == "inputs/flow.csv"
                for a in reopened["actions"]), reopened
     assert any(h["from"] == "Start" and h["to"] == "Check input" for h in reopened["hops"])
+    # Independent official Hop WorkflowMeta parse of the API-produced on-disk HWF.
+    root = Path(__file__).resolve().parents[2]
+    jar = Path("/home/ubuntu/hmw-agent-lab/vendor/action-plugin-proof/hop-action-fileexists-2.20.0.jar")
+    runtime = Path("/home/ubuntu/hop-modern-preview/runtime/server")
+    with tempfile.TemporaryDirectory(prefix="hmw-fileexists-java-") as classes:
+        cp = f"{jar}:{runtime}/lib/*"
+        source = root / "ops/tencent-preview/NativeFileExistsApiParse.java"
+        subprocess.run(["javac", "--release", "21", "-proc:none", "-cp", cp,
+                        "-d", classes, str(source)], check=True)
+        subprocess.run(["java", "-Xmx128m", "-cp", f"{classes}:{cp}",
+                        "NativeFileExistsApiParse", str(path)], check=True)
     print("T2_FILE_EXISTS_HTTP_CREATE_VALIDATE_CONNECT_SAVE_REOPEN_PASS")
 finally:
     path.unlink(missing_ok=True)
