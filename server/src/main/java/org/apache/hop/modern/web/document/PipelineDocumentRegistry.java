@@ -45,6 +45,17 @@ public final class PipelineDocumentRegistry {
     }
   }
 
+  /** Original opened file hash, for a descriptor-relative checked save. */
+  public byte[] snapshotDigest(PipelineDocument document) {
+    byte[] expected = diskSnapshots.get(document.id());
+    return expected == null ? null : expected.clone();
+  }
+
+  /** Refresh from the bytes actually written, not a path that may have moved. */
+  public void refreshSnapshot(PipelineDocument document, byte[] written) {
+    diskSnapshots.put(document.id(), digest(written));
+  }
+
   public void refreshSnapshot(PipelineDocument document) throws IOException {
     diskSnapshots.put(document.id(), digest(Files.readAllBytes(document.path())));
   }
