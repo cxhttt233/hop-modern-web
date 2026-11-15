@@ -85,7 +85,7 @@ try{
   await dialog.getByText("执行链路 · 1 条").waitFor();
   const full=await api("open",{path:basename});
   assert.equal(full.status,200);
-  assert.ok(full.data.actions.some(a=>a.name==="Check input"&&a.type==="FILE_EXISTS"&&
+  assert.ok(full.data.actions.some(a=>a.name==="Check input"&&a.pluginId==="FILE_EXISTS"&&
     a.filename==="inputs/flow.csv"),"reopened native FILE_EXISTS metadata missing");
   assert.ok(full.data.hops.some(h=>h.from==="Start"&&h.to==="Check input"),
     "native Hop action relationship missing");
