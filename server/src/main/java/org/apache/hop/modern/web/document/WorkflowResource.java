@@ -93,6 +93,43 @@ public final class WorkflowResource {
     }
   }
 
+  /** Apply native Action metadata to the in-memory workflow; disk writes remain guarded by /save. */
+  @POST
+  @Path("/action-config/write")
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  public Response writeActionConfig(ActionConfigWriteRequest request) {
+    if (request == null || request.id() == null || request.name() == null
+        || request.name().isBlank() || request.config() == null || !request.config().isObject()) {
+      return error(400, "id, action name and object config are required");
+    }
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      ActionMeta action = document.workflow.findAction(request.name());
+      if (action == null || action.getAction() == null) return error(404, "workflow action not found");
+      try {
+        var original = action.getAction();
+        // Never let a browser-provided type or name silently replace an Action.
+        Object decoded = ConfigJsonSerializer.fromJson(request.config(), (Class) original.getClass(),
+            store.metadataProvider());
+        if (!(decoded instanceof org.apache.hop.workflow.action.IAction candidate)
+            || !original.getPluginId().equals(candidate.getPluginId())
+            || !request.name().equals(candidate.getName())) {
+          return error(422, "action plugin type or name cannot change through config");
+        }
+        JsonNode canonical = ConfigJsonSerializer.toJson(candidate, store.metadataProvider());
+        JsonNode previous = ConfigJsonSerializer.toJson(original, store.metadataProvider());
+        if (canonical.equals(previous)) return Response.ok(snapshot(request.id(), document)).build();
+        action.setAction(candidate);
+        document.workflow.setChanged();
+        document.dirty = true;
+        return Response.ok(snapshot(request.id(), document)).build();
+      } catch (Exception e) {
+        return error(422, "workflow action configuration could not be decoded");
+      }
+    }
+  }
+
   @POST
   @Path("/edit")
   public Response edit(EditRequest request) {
@@ -423,6 +460,7 @@ public final class WorkflowResource {
   }
 
   public record ActionConfigReadRequest(String id, String name) {}
+  public record ActionConfigWriteRequest(String id, String name, JsonNode config) {}
   public record ActionConfigResponse(String nodeId, String pluginId, JsonNode config, AutomaticConfigDescriptor.Descriptor descriptor) {}
   public record OpenRequest(String path) {}
   public record EditRequest(String id, String description) {}
