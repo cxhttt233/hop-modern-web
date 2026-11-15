@@ -30,8 +30,7 @@ try {
     "native fields + semantic Fields must be one Chinese group");
   assert.ok(!normalized.includes("fields"),"raw native field group leaked into user UI");
   assert.ok(normalized.includes("SQL 查询")&&normalized.includes("数据库连接"));
-  const fields=form.locator(".config-field-group").filter({has:form.locator("legend button")});
-  const group=fields.filter({has:form.getByRole("button",{name:/字段配置配置分组/})});
+  const group=form.locator(".config-field-group").filter({hasText:"字段配置"});
   assert.equal(await group.count(),1,"one field group expected");
   assert.ok((await group.innerText()).includes("3 项"),"group must include inferred and native fields");
   assert.deepEqual(errors,[]);
