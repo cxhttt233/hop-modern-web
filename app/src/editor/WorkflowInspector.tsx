@@ -124,11 +124,13 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
   const hasUnappliedChanges = Boolean(workflow && description !== (workflow.description ?? ""));
   const hasUnsavedChanges = hasUnappliedChanges || Boolean(workflow?.dirty);
   function closeSafely() {
+    if (busy || actionConfigBusy) return;
     if (actionConfig && !window.confirm("当前 Action 参数草稿尚未提交，确定放弃吗？")) return;
     if (!hasUnsavedChanges || window.confirm("Workflow 存在未保存的修改，确定放弃并关闭吗？")) onClose();
   }
 
   async function execute(action: () => Promise<WorkflowSnapshot>, preserveDescriptionDraft = false, draftConfirmed = false) {
+    if (busy || actionConfigBusy) return;
     if (!draftConfirmed && actionConfig && !window.confirm("执行此操作会放弃当前 Action 参数草稿，确定继续吗？")) return;
     setBusy(true);
     setError("");
@@ -151,7 +153,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ margin: 0 }}>Workflow · .hwf</h2>
-        <button type="button" onClick={closeSafely} disabled={busy}>关闭</button>
+        <button type="button" onClick={closeSafely} disabled={busy || actionConfigBusy}>关闭</button>
       </div>
       <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持新增空操作、重命名和移动节点；可创建、启停或删除连接。</p>
       <form onSubmit={event => {
@@ -165,7 +167,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <input id="workflow-path" style={{ flex: 1 }} value={path}
             onChange={event => setPath(event.target.value)} placeholder="/workspace/example.hwf" />
-          <button type="submit" disabled={busy || !path.trim()}>打开</button>
+          <button type="submit" disabled={busy || actionConfigBusy || !path.trim()}>打开</button>
         </div>
       </form>
       {workflow && <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
