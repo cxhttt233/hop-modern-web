@@ -128,8 +128,8 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
     if (!hasUnsavedChanges || window.confirm("Workflow 存在未保存的修改，确定放弃并关闭吗？")) onClose();
   }
 
-  async function execute(action: () => Promise<WorkflowSnapshot>, preserveDescriptionDraft = false) {
-    if (actionConfig && !window.confirm("执行此操作会放弃当前 Action 参数草稿，确定继续吗？")) return;
+  async function execute(action: () => Promise<WorkflowSnapshot>, preserveDescriptionDraft = false, draftConfirmed = false) {
+    if (!draftConfirmed && actionConfig && !window.confirm("执行此操作会放弃当前 Action 参数草稿，确定继续吗？")) return;
     setBusy(true);
     setError("");
     try {
@@ -159,7 +159,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
         if (!path.trim()) return;
         if (actionConfig && !window.confirm("打开其他 Workflow 会放弃当前 Action 参数草稿，确定继续吗？")) return;
         if (hasUnsavedChanges && !window.confirm("打开其他 Workflow 会放弃当前未保存的修改，确定继续吗？")) return;
-        void execute(() => command("open", { path: path.trim() }));
+        void execute(() => command("open", { path: path.trim() }), false, true);
       }}>
         <label htmlFor="workflow-path">服务器上的 .hwf 路径</label>
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -187,7 +187,7 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
           <p style={{ fontSize: 13 }}>选择节点，使用统一 Schema 表单编辑 Hop 原生参数；应用仅更新内存，仍需保存 .hwf。</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {(workflow.actions ?? []).map(action => <button type="button" key={action.name}
-              disabled={busy || actionConfigBusy || Boolean(actionConfig)}
+              disabled={busy || actionConfigBusy}
               onClick={() => void editActionConfig(action.name)}>配置 {action.name}</button>)}
           </div>
           {actionConfigError && <p role="alert">{actionConfigError}</p>}
