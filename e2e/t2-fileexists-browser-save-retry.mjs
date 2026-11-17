@@ -1,6 +1,7 @@
 /** Browser + isolated Hop JVM witness for FILE_EXISTS without making a parallel T3 form. */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { startEvidence, finishEvidence } from "./verification-evidence.mjs";
 import { copyFile, readFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -38,6 +39,8 @@ async function open(dialog) {
   assert.equal(response.status(),200,"native workflow open");
   return (await response.json()).id;
 }
+const proof = await startEvidence(page, "t2-workflow-fileexists");
+let proofFailure = null;
 try{
   await copyFile("/home/ubuntu/hmw-agent-lab/workspaces/t2/two-actions.hwf",file);
   const original=await readFile(file);
@@ -94,7 +97,11 @@ try{
   assert.deepEqual(errors,[],"browser errors");
   console.log("T2_FILE_EXISTS_HWF="+file);
   console.log("T2_FILE_EXISTS_BROWSER_DISCARD_503_RETRY_REOPEN_PASS");
-}finally{
+ } catch (error) {
+  proofFailure = error;
+  throw error;
+} finally {
+  await finishEvidence(page, proof, proofFailure);
   await browser.close();
   if(process.env.T2_KEEP_FIXTURE!=="1")await unlink(file).catch(()=>{});
 }
