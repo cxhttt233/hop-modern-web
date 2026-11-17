@@ -75,7 +75,15 @@ try {
   await form.locator("details.config-sql-workbench summary").click();
   assert(await form.locator("#config-sql").inputValue() === firstDraft, "collapse lost SQL draft");
   editor = await openMonaco(form);
-  assert((await editor.locator(".view-lines").innerText()).replaceAll(String.fromCharCode(160), " ").includes("WHERE level_m >= 2.0"), "Monaco reopen did not reflect draft");
+  // Monaco DOM lines are rendered asynchronously after a details collapse/expand.
+  // Wait for complete semantic agreement instead of asserting during an intermediate frame.
+  assert(await form.locator("#config-sql").inputValue() === firstDraft,
+    "SQL textarea lost first draft during Monaco collapse/reopen");
+  await page.waitForFunction((expected) => {
+    const view = document.querySelector(".monaco-editor .view-lines");
+    const normalize = (value) => String(value ?? "").replace(/[\s\u00a0\u200b-\u200d\ufeff]/g, "");
+    return Boolean(view && normalize(view.innerText) === normalize(expected));
+  }, firstDraft, { timeout: 8000 });
 
   const secondDraft = "SELECT station_code, flow_rate\nFROM river_observation\nWHERE flow_rate > 0\nORDER BY station_code;";
   await form.locator("#config-sql").fill(secondDraft);
