@@ -1,6 +1,7 @@
 // A real Hop FilterRows native condition, GUI editing and .hpl disk roundtrip.
 // Uses a UUID test copy so existing pipeline fixtures are never modified.
 import { chromium } from "playwright";
+import { startEvidence, finishEvidence } from "./verification-evidence.mjs";
 import { randomUUID } from "node:crypto";
 import { copyFile, unlink } from "node:fs/promises";
 import path from "node:path";
@@ -42,6 +43,8 @@ async function form() {
   return f;
 }
 
+const proof = await startEvidence(page, "t3-filterrows-composite");
+let proofFailure = null;
 try {
   await copyFile(path.join(workspace, "example.hpl"), file);
   await page.goto(base, { waitUntil: "networkidle" });
@@ -108,7 +111,11 @@ try {
   console.log(JSON.stringify({ pass: true, plugin: "FilterRows",
     comparison: "water_level >= warning_level", trueTarget: "sink", falseTarget: "source",
     nativeDiskRoundtrip: true, writes, errors }));
+ } catch (error) {
+  proofFailure = error;
+  throw error;
 } finally {
+  await finishEvidence(page, proof, proofFailure);
   await browser.close();
   if (process.env.T3_KEEP_FIXTURE !== "1") await unlink(file).catch(() => {});
 }

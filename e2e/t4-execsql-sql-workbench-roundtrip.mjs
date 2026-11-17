@@ -1,5 +1,6 @@
 // Real ExecSql SQL synchronization, cancel, native .hpl save/reopen.
 import { chromium } from "playwright";
+import { startEvidence, finishEvidence } from "./verification-evidence.mjs";
 import { copyFile, unlink, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -60,6 +61,8 @@ async function monacoReplace(editor, sql) {
   await page.waitForFunction(expected => document.querySelector("#config-sql")?.value === expected, sql);
   assert(await field.inputValue() === sql, "Monaco and authoritative SQL textarea diverged");
 }
+const proof = await startEvidence(page, "t4-execsql-sql");
+let proofFailure = null;
 try {
   await copyFile(new URL("./fixtures/execsql-native-waterlevel.hpl", import.meta.url), fixture);
   let id = await open();
@@ -106,7 +109,11 @@ try {
   console.log("T4_FIXTURE_PATH=" + fixture);
   console.log(JSON.stringify({ pass: true, transform: "ExecSql", monacoToRaw: true, rawToMonaco: true,
     collapseReopen: true, cancelNoWrite: true, nativeSaveReopen: true, writes, errors }));
+ } catch (error) {
+  proofFailure = error;
+  throw error;
 } finally {
+  await finishEvidence(page, proof, proofFailure);
   await browser.close();
   if (process.env.T4_KEEP_FIXTURE !== "1") await unlink(fixture).catch(() => {});
 }
