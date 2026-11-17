@@ -1,10 +1,12 @@
 import { useRef, useState } from "react";
+import { GenericConfigPanel, type ConfigDescriptor } from "./GenericConfigPanel";
 
 type WorkflowAction = { name: string; type: string; x: number; y: number; message?: string | null; logLevel?: string | null };
+type ActionConfig = { name: string; pluginId: string; config: Record<string, unknown>; descriptor: ConfigDescriptor };
 type WorkflowHop = { from: string; to: string; enabled: boolean };
 type WorkflowSnapshot = { id: string; path: string; name: string; description: string; dirty: boolean; actions?: WorkflowAction[]; hops?: WorkflowHop[] };
 
-async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "action-add" | "action-abort-edit" | "save", body: object): Promise<T> {
+async function command<T>(operation: "open" | "edit" | "move" | "hop-enabled" | "hop-delete" | "hop-create" | "action-rename" | "action-delete" | "action-add" | "action-abort-edit" | "action-config/read" | "action-config/write" | "save", body: object): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}api/workflows/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -91,18 +93,51 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [newActionType, setNewActionType] = useState("DUMMY");
+  const [actionConfig, setActionConfig] = useState<ActionConfig>();
+  const [actionConfigBusy, setActionConfigBusy] = useState(false);
+  const [actionConfigError, setActionConfigError] = useState("");
+  async function editActionConfig(name: string) {
+    if (!workflow || actionConfigBusy) return;
+    if (actionConfig && !window.confirm("切换 Action 会放弃当前参数草稿，确定继续吗？")) return;
+    setActionConfigBusy(true);
+    setActionConfigError("");
+    try {
+      const result = await command<ActionConfig>("action-config/read", { id: workflow.id, name });
+      setActionConfig(result);
+    } catch (cause) {
+      setActionConfigError(cause instanceof Error ? cause.message : "无法读取原生参数");
+    } finally { setActionConfigBusy(false); }
+  }
+  async function applyActionConfig(config: Record<string, unknown>) {
+    if (!workflow || !actionConfig) return;
+    setActionConfigBusy(true);
+    setActionConfigError("");
+    try {
+      const next = await command<WorkflowSnapshot>("action-config/write", { id: workflow.id, name: actionConfig.name, config });
+      setWorkflow(next);
+      setActionConfig(undefined);
+    } catch (cause) {
+      // Keep the editor mounted and its draft intact on any 409/503/422 failure.
+      setActionConfigError(cause instanceof Error ? cause.message : "无法更新原生参数");
+    } finally { setActionConfigBusy(false); }
+  }
   const hasUnappliedChanges = Boolean(workflow && description !== (workflow.description ?? ""));
   const hasUnsavedChanges = hasUnappliedChanges || Boolean(workflow?.dirty);
   function closeSafely() {
+    if (busy || actionConfigBusy) return;
+    if (actionConfig && !window.confirm("当前 Action 参数草稿尚未提交，确定放弃吗？")) return;
     if (!hasUnsavedChanges || window.confirm("Workflow 存在未保存的修改，确定放弃并关闭吗？")) onClose();
   }
 
-  async function execute(action: () => Promise<WorkflowSnapshot>, preserveDescriptionDraft = false) {
+  async function execute(action: () => Promise<WorkflowSnapshot>, preserveDescriptionDraft = false, draftConfirmed = false) {
+    if (busy || actionConfigBusy) return;
+    if (!draftConfirmed && actionConfig && !window.confirm("执行此操作会放弃当前 Action 参数草稿，确定继续吗？")) return;
     setBusy(true);
     setError("");
     try {
       const next = await action();
       setWorkflow(next);
+      setActionConfig(undefined);
       if (!preserveDescriptionDraft) setDescription(next.description ?? "");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "操作失败");
@@ -118,20 +153,21 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ margin: 0 }}>Workflow · .hwf</h2>
-        <button type="button" onClick={closeSafely} disabled={busy}>关闭</button>
+        <button type="button" onClick={closeSafely} disabled={busy || actionConfigBusy}>关闭</button>
       </div>
       <p>使用 Apache Hop 原生格式打开、编辑描述并保存工作流。支持新增空操作、重命名和移动节点；可创建、启停或删除连接。</p>
       <form onSubmit={event => {
         event.preventDefault();
         if (!path.trim()) return;
+        if (actionConfig && !window.confirm("打开其他 Workflow 会放弃当前 Action 参数草稿，确定继续吗？")) return;
         if (hasUnsavedChanges && !window.confirm("打开其他 Workflow 会放弃当前未保存的修改，确定继续吗？")) return;
-        void execute(() => command("open", { path: path.trim() }));
+        void execute(() => command("open", { path: path.trim() }), false, true);
       }}>
         <label htmlFor="workflow-path">服务器上的 .hwf 路径</label>
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <input id="workflow-path" style={{ flex: 1 }} value={path}
             onChange={event => setPath(event.target.value)} placeholder="/workspace/example.hwf" />
-          <button type="submit" disabled={busy || !path.trim()}>打开</button>
+          <button type="submit" disabled={busy || actionConfigBusy || !path.trim()}>打开</button>
         </div>
       </form>
       {workflow && <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
@@ -147,6 +183,23 @@ export function WorkflowInspector({ onClose }: { onClose: () => void }) {
                     <small style={{ marginLeft: 8, opacity: .65 }}>({action.x}, {action.y})</small>
                   </li>)}
               </ol>}
+        </section>
+        <section aria-label="原生 Action 参数配置" style={{ border: "1px solid #cbd5e1", padding: 12, borderRadius: 8 }}>
+          <strong>Action 专业配置</strong>
+          <p style={{ fontSize: 13 }}>选择节点，使用统一 Schema 表单编辑 Hop 原生参数；应用仅更新内存，仍需保存 .hwf。</p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(workflow.actions ?? []).map(action => <button type="button" key={action.name}
+              disabled={busy || actionConfigBusy}
+              onClick={() => void editActionConfig(action.name)}>配置 {action.name}</button>)}
+          </div>
+          {actionConfigError && <p role="alert">{actionConfigError}</p>}
+          {actionConfig && <div aria-label={`${actionConfig.name} 原生参数`} style={{ marginTop: 12 }}>
+            <GenericConfigPanel key={`${workflow.id}:${actionConfig.name}`} descriptor={actionConfig.descriptor}
+              config={actionConfig.config} transformName={actionConfig.name}
+              disabled={busy || actionConfigBusy}
+              onCancel={() => { setActionConfig(undefined); setActionConfigError(""); }}
+              onSave={applyActionConfig} />
+          </div>}
         </section>
         <section aria-label="新增原生工作流节点">
           <strong>新增节点 · Hop 原生 Action</strong>

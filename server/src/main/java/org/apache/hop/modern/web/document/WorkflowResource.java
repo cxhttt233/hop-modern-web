@@ -8,6 +8,8 @@ package org.apache.hop.modern.web.document;
 
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.apache.hop.metadata.serializer.json.ConfigJsonSerializer;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
@@ -66,6 +68,65 @@ public final class WorkflowResource {
       return error(422, "workflow could not be read");
     } catch (Exception e) {
       return error(422, "workflow could not be parsed");
+    }
+  }
+
+  /** Read authoritative native Action configuration; never expose a guessed browser-side XML mapping. */
+  @POST
+  @Path("/action-config/read")
+  public Response readActionConfig(ActionConfigReadRequest request) {
+    if (request == null || request.id() == null || request.name() == null
+        || request.name().isBlank()) return error(400, "id and action name are required");
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      var action = document.workflow.findAction(request.name());
+      if (action == null || action.getAction() == null) return error(404, "workflow action not found");
+      try {
+        Object nativeAction = action.getAction();
+        JsonNode config = ConfigJsonSerializer.toJson(nativeAction, store.metadataProvider());
+        return Response.ok(new ActionConfigResponse(action.getName(), action.getAction().getPluginId(),
+            config, AutomaticConfigDescriptor.describe(nativeAction.getClass()))).build();
+      } catch (Exception e) {
+        return error(422, "workflow action configuration could not be serialized");
+      }
+    }
+  }
+
+  /** Apply native Action metadata to the in-memory workflow; disk writes remain guarded by /save. */
+  @POST
+  @Path("/action-config/write")
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  public Response writeActionConfig(ActionConfigWriteRequest request) {
+    if (request == null || request.id() == null || request.name() == null
+        || request.name().isBlank() || request.config() == null || !request.config().isObject()) {
+      return error(400, "id, action name and object config are required");
+    }
+    Opened document = opened.get(request.id());
+    if (document == null) return error(404, "workflow document not found");
+    synchronized (document) {
+      ActionMeta action = document.workflow.findAction(request.name());
+      if (action == null || action.getAction() == null) return error(404, "workflow action not found");
+      try {
+        var original = action.getAction();
+        // Never let a browser-provided type or name silently replace an Action.
+        Object decoded = ConfigJsonSerializer.fromJson(request.config(), (Class) original.getClass(),
+            store.metadataProvider());
+        if (!(decoded instanceof org.apache.hop.workflow.action.IAction candidate)
+            || !original.getPluginId().equals(candidate.getPluginId())
+            || !request.name().equals(candidate.getName())) {
+          return error(422, "action plugin type or name cannot change through config");
+        }
+        JsonNode canonical = ConfigJsonSerializer.toJson(candidate, store.metadataProvider());
+        JsonNode previous = ConfigJsonSerializer.toJson(original, store.metadataProvider());
+        if (canonical.equals(previous)) return Response.ok(snapshot(request.id(), document)).build();
+        action.setAction(candidate);
+        document.workflow.setChanged();
+        document.dirty = true;
+        return Response.ok(snapshot(request.id(), document)).build();
+      } catch (Exception e) {
+        return error(422, "workflow action configuration could not be decoded");
+      }
     }
   }
 
@@ -398,6 +459,9 @@ public final class WorkflowResource {
     return Response.status(status).entity(Map.of("error", message)).build();
   }
 
+  public record ActionConfigReadRequest(String id, String name) {}
+  public record ActionConfigWriteRequest(String id, String name, JsonNode config) {}
+  public record ActionConfigResponse(String name, String pluginId, JsonNode config, AutomaticConfigDescriptor.Descriptor descriptor) {}
   public record OpenRequest(String path) {}
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}
