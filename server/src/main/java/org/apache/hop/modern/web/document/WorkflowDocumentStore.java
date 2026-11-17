@@ -31,6 +31,8 @@ public final class WorkflowDocumentStore {
     this.variables = Objects.requireNonNull(variables, "variables");
   }
 
+  IHopMetadataProvider metadataProvider() { return metadataProvider; }
+
   public WorkflowMeta open(Path path) throws IOException, HopXmlException {
     Objects.requireNonNull(path, "path");
     requireWorkflowPath(path);
