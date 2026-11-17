@@ -1,4 +1,6 @@
-# Hop Modern Web · 产品真实能力与交付验收
+# Hop Modern Web · 产品真实能力与交付验收（历史快照）
+
+> **历史交付快照（2026-11-14），不再是当前开发计划。** 最新目标、分工和限制以 [ACTIVE.md](ACTIVE.md) 为准；旧结论和取代关系见 [CONTEXT_LEDGER.md](CONTEXT_LEDGER.md)。本页保留用于溯源，以下“当前”均指快照当日，不要直接用来决定下一轮任务。
 
 > 2026-11-14 夜间按主线复核；下列“已验证”只表示此日期在腾讯云测试环境有明确证据，不能等同于多租户/生产验收。项目架构以 `cxhttt233/hop` 的 `docs/web-modern-architecture-plan.md` 为唯一依据。
 
