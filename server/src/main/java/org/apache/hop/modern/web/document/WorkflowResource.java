@@ -14,6 +14,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.LinkOption;
+import org.apache.hop.workflow.actions.start.ActionStart;
 import java.nio.file.InvalidPathException;
 import org.apache.hop.modern.server.files.WorkspacePaths;
 import java.util.List;
@@ -39,6 +42,41 @@ public final class WorkflowResource {
   private final Map<String, Opened> opened = new ConcurrentHashMap<>();
   public WorkflowResource(WorkflowDocumentStore store) {
     this.store = store;
+  }
+
+  /** Create a genuine Hop workflow with a native START node; never overwrite. */
+  @POST
+  @Path("/create")
+  public Response create(CreateRequest request) {
+    if (request == null || request.path() == null || request.path().isBlank()
+        || request.name() == null || request.name().isBlank()
+        || request.name().length() > 200 || !request.path().toLowerCase(java.util.Locale.ROOT).endsWith(".hwf")) {
+      return error(400, "valid .hwf path and workflow name are required");
+    }
+    String configured = System.getProperty("hop.modern.workspace");
+    if (configured == null || configured.isBlank()) return error(503, "workspace is not configured");
+    try {
+      java.nio.file.Path root = java.nio.file.Path.of(configured);
+      java.nio.file.Path file = new WorkspacePaths(root).destinationFile(request.path());
+      if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return error(409, "workflow already exists");
+      WorkflowMeta workflow = new WorkflowMeta();
+      workflow.setNameSynchronizedWithFilename(false);
+      workflow.setName(request.name().trim());
+      ActionMeta start = new ActionMeta(new ActionStart("Start"));
+      start.setLocation(160, 120);
+      workflow.addAction(start);
+      byte[] bytes = store.create(file, workflow, root);
+      String id = UUID.randomUUID().toString();
+      Opened document = new Opened(file, workflow, bytes);
+      opened.put(id, document);
+      return Response.status(201).entity(snapshot(id, document)).build();
+    } catch (FileAlreadyExistsException e) {
+      return error(409, "workflow already exists");
+    } catch (SecureWorkspaceSave.ExternalModificationException | IllegalArgumentException e) {
+      return error(409, "workflow path is unsafe or changed");
+    } catch (IOException | HopException e) {
+      return error(503, "workflow could not be created; retry safely");
+    }
   }
 
   @POST
@@ -398,6 +436,7 @@ public final class WorkflowResource {
     return Response.status(status).entity(Map.of("error", message)).build();
   }
 
+  public record CreateRequest(String path, String name) {}
   public record OpenRequest(String path) {}
   public record EditRequest(String id, String description) {}
   public record SaveRequest(String id) {}

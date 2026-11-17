@@ -102,6 +102,46 @@ final class SecureWorkspaceSave {
     return next;
   }
 
+  /** Creates a new native document without following any workspace symlink or overwriting a file. */
+  static void create(Path source, byte[] bytes, Path workspaceRoot) throws IOException {
+    if (source == null || bytes == null || workspaceRoot == null) {
+      throw new IllegalArgumentException("workspace and new document are required");
+    }
+    Path target = source.toAbsolutePath().normalize();
+    Path root = workspaceRoot.toRealPath(LinkOption.NOFOLLOW_LINKS);
+    if (Files.isSymbolicLink(root) || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)
+        || !target.startsWith(root) || target.equals(root)) {
+      throw new ExternalModificationException("workspace path changed");
+    }
+    Path relative = root.relativize(target);
+    List<SecureDirectoryStream<Path>> nested = new ArrayList<>();
+    try (DirectoryStream<Path> rootDir = Files.newDirectoryStream(root)) {
+      if (!(rootDir instanceof SecureDirectoryStream<?>)) {
+        throw new IOException("SecureDirectoryStream required for safe document creation");
+      }
+      @SuppressWarnings("unchecked")
+      SecureDirectoryStream<Path> current = (SecureDirectoryStream<Path>) rootDir;
+      try {
+        for (int i = 0; i < relative.getNameCount() - 1; ++i) {
+          try {
+            current = current.newDirectoryStream(relative.getName(i), LinkOption.NOFOLLOW_LINKS);
+          } catch (IOException e) {
+            throw new ExternalModificationException("workflow parent changed", e);
+          }
+          nested.add(current);
+        }
+        try (SeekableByteChannel output = current.newByteChannel(relative.getFileName(),
+            Set.<OpenOption>of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
+                LinkOption.NOFOLLOW_LINKS))) {
+          ByteBuffer buffer = ByteBuffer.wrap(bytes);
+          while (buffer.hasRemaining()) output.write(buffer);
+        }
+      } finally {
+        for (int i = nested.size() - 1; i >= 0; --i) nested.get(i).close();
+      }
+    }
+  }
+
   private static void checkOriginal(SecureDirectoryStream<Path> dir, Path name,
       byte[] expectedSha256) throws IOException {
     try (SeekableByteChannel input = dir.newByteChannel(name,
