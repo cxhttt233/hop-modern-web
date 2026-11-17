@@ -2,6 +2,7 @@
  * Runs against active T5 UI + slot bridge + Java backend; never touches shared fixtures.
  */
 import { chromium } from "playwright";
+import { startEvidence, finishEvidence } from "./verification-evidence.mjs";
 import { copyFile, readFile, writeFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -18,6 +19,8 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
 
+const proof = await startEvidence(page, "t5-save-conflict");
+let proofFailure = null;
 try {
   // Use the same original fixture when the Java backend is isolated.
   await copyFile(isolated
@@ -73,7 +76,11 @@ try {
   check(afterCount === beforeCount + 1, "Hop .hpl save/reopen lost new Transform");
   check(errors.length === 0, "Browser JS errors: " + errors.join("; "));
   console.log(JSON.stringify({ pass: true, conflict: 409, retry: 200, beforeCount, afterCount, diskReopened: true, errors }));
+ } catch (error) {
+  proofFailure = error;
+  throw error;
 } finally {
+  await finishEvidence(page, proof, proofFailure);
   await browser.close();
   await unlink(file).catch(() => {});
 }
